@@ -1,0 +1,113 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-heading: 'Space Grotesk', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-label: 'JetBrains Mono', monospace;
+
+  /* Background: dark charcoal scale */
+  --background-50: 0.12 0.01 250;
+  --background-100: 0.15 0.01 250;
+  --background-200: 0.19 0.01 250;
+  --background-300: 0.23 0.01 250;
+  --background-400: 0.28 0.01 250;
+  --background-500: 0.33 0.01 250;
+  --background-600: 0.40 0.01 250;
+  --background-700: 0.48 0.01 250;
+  --background-800: 0.57 0.01 250;
+  --background-900: 0.67 0.01 250;
+  --background-950: 0.78 0.01 250;
+
+  /* Foreground: light to dark text scale */
+  --foreground-50: 0.99 0 0;
+  --foreground-100: 0.94 0 0;
+  --foreground-200: 0.87 0 0;
+  --foreground-300: 0.78 0 0;
+  --foreground-400: 0.68 0 0;
+  --foreground-500: 0.55 0 0;
+  --foreground-600: 0.45 0 0;
+  --foreground-700: 0.35 0 0;
+  --foreground-800: 0.25 0 0;
+  --foreground-900: 0.18 0 0;
+  --foreground-950: 0.10 0 0;
+
+  /* Primary: warm amber/gold */
+  --primary-50: 0.95 0.02 80;
+  --primary-100: 0.89 0.04 80;
+  --primary-200: 0.82 0.07 78;
+  --primary-300: 0.76 0.10 76;
+  --primary-400: 0.70 0.14 75;
+  --primary-500: 0.65 0.17 75;
+  --primary-600: 0.58 0.16 72;
+  --primary-700: 0.50 0.14 70;
+  --primary-800: 0.42 0.12 68;
+  --primary-900: 0.33 0.09 65;
+  --primary-950: 0.22 0.06 60;
+
+  /* Accent: teal/cyan-green */
+  --accent-50: 0.95 0.02 180;
+  --accent-100: 0.89 0.04 178;
+  --accent-200: 0.82 0.07 176;
+  --accent-300: 0.75 0.10 175;
+  --accent-400: 0.68 0.13 175;
+  --accent-500: 0.60 0.15 175;
+  --accent-600: 0.53 0.14 173;
+  --accent-700: 0.46 0.12 170;
+  --accent-800: 0.38 0.10 168;
+  --accent-900: 0.29 0.07 165;
+  --accent-950: 0.18 0.05 162;
+
+  /* Secondary: muted warm gray */
+  --secondary-50: 0.95 0.02 40;
+  --secondary-100: 0.87 0.03 40;
+  --secondary-200: 0.78 0.04 40;
+  --secondary-300: 0.68 0.04 40;
+  --secondary-400: 0.57 0.05 40;
+  --secondary-500: 0.45 0.05 40;
+  --secondary-600: 0.40 0.05 38;
+  --secondary-700: 0.35 0.04 36;
+  --secondary-800: 0.28 0.04 34;
+  --secondary-900: 0.20 0.03 32;
+  --secondary-950: 0.12 0.02 30;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: oklch(var(--background-50));
+  color: oklch(var(--foreground-100));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+}
+
+/* Anti-spam honeypot - visually hidden but not via inline styles */
+input[name="website_alt"],
+input[name="company_alt"],
+input[name="phone_alt"],
+input[name="mobile_alt"],
+input[name="contact_alt"] {
+  position: absolute;
+  left: -9999px;
+  opacity: 0;
+  height: 0;
+  width: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
