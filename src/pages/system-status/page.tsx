@@ -46,7 +46,7 @@ export default function SystemStatus() {
         supabase.from('internal_agent_monitors').select('*').order('status'),
         supabase.from('internal_webhook_monitors').select('*').order('status'),
         supabase.from('internal_monitoring_incidents').select('*').order('created_at', { ascending: false }),
-        supabase.from('internal_monitoring_alerts').select('*').order('detected_at', { ascending: false }),
+        supabase.from('internal_monitoring_alerts').select('*').order('time_detected', { ascending: false }),
         supabase.from('internal_projects').select('id,project_name').order('project_name'),
       ]);
       if (wRes.error || sRes.error || eRes.error || aRes.error || whRes.error || iRes.error || alRes.error || pRes.error) throw new Error('Failed to load data');

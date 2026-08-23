@@ -87,7 +87,7 @@ export interface BudgetEvent {
 export interface Project {
   id: number;
   project_name: string;
-  slug: string;
+  project_slug: string;
 }
 
 export interface SummaryStats {

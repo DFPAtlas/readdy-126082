@@ -16,7 +16,7 @@ interface ActivityEntry {
 interface Project {
   id: number;
   project_name: string;
-  slug: string;
+  project_slug: string;
 }
 
 const actionColors: Record<string, string> = {
@@ -86,7 +86,7 @@ export default function ActivityLog() {
     loadActivities();
     supabase
       .from('internal_projects')
-      .select('id,project_name,slug')
+      .select('id,project_name,project_slug')
       .order('project_name')
       .then(({ data }) => setProjects(data ?? []));
   }, [loadActivities]);
@@ -329,7 +329,7 @@ export default function ActivityLog() {
                                   {/* Project link */}
                                   {project && (
                                     <Link
-                                      to={`/projects/${project.slug}`}
+                                      to={`/projects/${project.project_slug}`}
                                       className="text-[10px] text-accent-400 hover:text-accent-300 transition-colors whitespace-nowrap"
                                     >
                                       {project.project_name}

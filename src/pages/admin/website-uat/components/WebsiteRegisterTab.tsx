@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { UatProject, UatEnvironment, PROJECT_STATUS_COLORS } from '../types';
 import UatProjectFormModal from './UatProjectFormModal';
@@ -91,6 +92,46 @@ export default function WebsiteRegisterTab() {
   const [savingEnv, setSavingEnv] = useState(false);
   const [envEditError, setEnvEditError] = useState('');
 
+  // ── Deep link support ────────────────────────────────────────────────
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepProjectId = searchParams.get('project');
+  const deepEnvId = searchParams.get('env');
+  const [deepLinkApplied, setDeepLinkApplied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const updateDeepLink = useCallback(
+    (updates: { project?: string | null; env?: string | null }) => {
+      const next = new URLSearchParams(searchParams);
+      next.set('tab', 'register');
+      if (updates.project !== undefined) {
+        if (updates.project) next.set('project', updates.project);
+        else next.delete('project');
+      }
+      if (updates.env !== undefined) {
+        if (updates.env) next.set('env', updates.env);
+        else next.delete('env');
+      }
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
+
+  const copyDeepLink = async (opts: { project?: string; env?: string }) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', 'register');
+    if (opts.project) url.searchParams.set('project', opts.project);
+    else url.searchParams.delete('project');
+    if (opts.env) url.searchParams.set('env', opts.env);
+    else url.searchParams.delete('env');
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setCopiedKey(opts.env || opts.project || 'project');
+      window.setTimeout(() => setCopiedKey(null), 1500);
+    } catch {
+      // clipboard unavailable — ignore
+    }
+  };
+
   const loadData = useCallback(async () => {
     try {
       setError('');
@@ -128,6 +169,7 @@ export default function WebsiteRegisterTab() {
     setProjectForm(projectToEditForm(p));
     setProjectEditError('');
     setExpandedId(p.id);
+    updateDeepLink({ project: p.id });
   };
 
   const cancelEditProject = () => {
@@ -183,12 +225,14 @@ export default function WebsiteRegisterTab() {
     setEditingProjectId(null);
     setEnvForm(envToEditForm(e));
     setEnvEditError('');
+    updateDeepLink({ project: e.project_id, env: e.id });
   };
 
   const cancelEditEnv = () => {
     setEditingEnvId(null);
     setEnvForm(null);
     setEnvEditError('');
+    updateDeepLink({ env: null });
   };
 
   const updateEnvField = <K extends keyof EnvEditForm>(key: K, value: EnvEditForm[K]) => {
@@ -239,6 +283,29 @@ export default function WebsiteRegisterTab() {
     loadData();
   };
 
+  // Apply deep links once projects are loaded
+  useEffect(() => {
+    if (loading || deepLinkApplied) return;
+    if (!deepProjectId && !deepEnvId) {
+      setDeepLinkApplied(true);
+      return;
+    }
+    let targetProjectId = deepProjectId;
+    if (deepEnvId) {
+      const host = projects.find((p) => (p.environments || []).some((e) => e.id === deepEnvId));
+      if (!targetProjectId && host) targetProjectId = host.id;
+    }
+    if (targetProjectId) {
+      if (filter !== 'all') setFilter('all');
+      setExpandedId(targetProjectId);
+    }
+    if (deepEnvId) {
+      const env = projects.flatMap((p) => p.environments || []).find((e) => e.id === deepEnvId);
+      if (env) startEditEnv(env);
+    }
+    setDeepLinkApplied(true);
+  }, [loading, deepLinkApplied, deepProjectId, deepEnvId, projects, filter]);
+
   if (loading) return <div className="text-sm text-foreground-400 py-8">Loading projects...</div>;
   if (error) return <div className="text-sm text-red-400 py-8">{error}</div>;
 
@@ -280,7 +347,17 @@ export default function WebsiteRegisterTab() {
                 {/* ── Header row ── */}
                 <div
                   onClick={() => {
-                    if (!isEditing) setExpandedId(isExpanded ? null : p.id);
+                    if (!isEditing) {
+                      const next = isExpanded ? null : p.id;
+                      setExpandedId(next);
+                      if (!next) {
+                        setEditingEnvId(null);
+                        setEnvForm(null);
+                        updateDeepLink({ project: null, env: null });
+                      } else {
+                        updateDeepLink({ project: p.id });
+                      }
+                    }
                   }}
                   className={`p-4 flex items-center justify-between transition-colors ${
                     isEditing ? '' : 'cursor-pointer hover:bg-background-50/50'
@@ -300,13 +377,22 @@ export default function WebsiteRegisterTab() {
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-xs text-foreground-500">{p.environments?.length || 0} env(s)</span>
                     {!isEditing && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); startEditProject(p); }}
-                        className="p-1 rounded-md hover:bg-background-200/60 text-foreground-500 hover:text-foreground-200 transition-colors cursor-pointer"
-                        title="Edit project"
-                      >
-                        <i className="ri-pencil-line w-3.5 h-3.5 flex items-center justify-center"></i>
-                      </button>
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyDeepLink({ project: p.id }); }}
+                          className="p-1 rounded-md hover:bg-background-200/60 text-foreground-500 hover:text-foreground-200 transition-colors cursor-pointer"
+                          title="Copy link to this project"
+                        >
+                          <i className={`${copiedKey === p.id ? 'ri-check-line text-emerald-400' : 'ri-link'} w-3.5 h-3.5 flex items-center justify-center`}></i>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startEditProject(p); }}
+                          className="p-1 rounded-md hover:bg-background-200/60 text-foreground-500 hover:text-foreground-200 transition-colors cursor-pointer"
+                          title="Edit project"
+                        >
+                          <i className="ri-pencil-line w-3.5 h-3.5 flex items-center justify-center"></i>
+                        </button>
+                      </>
                     )}
                     <i className={`${isExpanded ? 'ri-arrow-up-s-fill' : 'ri-arrow-down-s-fill'} text-foreground-400 w-4 h-4 flex items-center justify-center`}></i>
                   </div>
@@ -649,6 +735,13 @@ export default function WebsiteRegisterTab() {
                                       <span className="text-[10px] text-foreground-500 hidden sm:inline mr-2">
                                         {env.version ? `v${env.version}` : ''}{env.version && env.current_build ? ' · ' : ''}{env.current_build || ''}
                                       </span>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); copyDeepLink({ project: p.id, env: env.id }); }}
+                                        className="p-1 rounded-md hover:bg-background-200/60 text-foreground-600 hover:text-foreground-300 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+                                        title="Copy link to this environment"
+                                      >
+                                        <i className={`${copiedKey === env.id ? 'ri-check-line text-emerald-400' : 'ri-link'} w-3 h-3 flex items-center justify-center`}></i>
+                                      </button>
                                       <button
                                         onClick={(e) => { e.stopPropagation(); startEditEnv(env); }}
                                         className="p-1 rounded-md hover:bg-background-200/60 text-foreground-600 hover:text-foreground-300 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"

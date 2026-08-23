@@ -21,7 +21,7 @@ interface RoadmapItem {
 interface Project {
   id: number;
   project_name: string;
-  slug: string;
+  project_slug: string;
 }
 
 const phaseLabels: Record<string, string> = {
@@ -96,7 +96,7 @@ export default function Roadmap() {
 
   useEffect(() => {
     loadItems();
-    supabase.from('internal_projects').select('id,project_name,slug').order('project_name').then(({ data }) => setProjectsList(data ?? []));
+    supabase.from('internal_projects').select('id,project_name,project_slug').order('project_name').then(({ data }) => setProjectsList(data ?? []));
   }, [loadItems]);
 
   const handleStatusChange = async (item: RoadmapItem, newStatus: string) => {
@@ -286,7 +286,7 @@ export default function Roadmap() {
                         <div className="flex items-center gap-1.5 flex-wrap mb-2">
                           {project && (
                             <Link
-                              to={`/projects/${project.slug}`}
+                              to={`/projects/${project.project_slug}`}
                               onClick={(e) => e.stopPropagation()}
                               className={`text-[10px] font-label px-1.5 py-0.5 rounded whitespace-nowrap transition-colors hover:opacity-80 ${getProjectColor(item.project_id)}`}
                             >

@@ -45,7 +45,7 @@ export default function BuildProcess() {
       const [runsRes, templatesRes, projectsRes] = await Promise.all([
         supabase.from('internal_build_process_runs').select('*').order('created_at', { ascending: false }),
         supabase.from('internal_build_process_templates').select('*').order('created_at'),
-        supabase.from('internal_projects').select('id,project_name,slug').order('project_name'),
+        supabase.from('internal_projects').select('id,project_name,project_slug').order('project_name'),
       ]);
       if (runsRes.error) throw runsRes.error;
       if (templatesRes.error) throw templatesRes.error;

@@ -79,8 +79,7 @@ export default function AlertsPanel({ alerts, projects, onRefresh }: Props) {
                 <div className="flex items-center gap-3 text-[10px] text-foreground-500 flex-wrap">
                   <span>Project: {getProjectName(a.project_id)}</span>
                   {a.source && <span>Source: {a.source}</span>}
-                  <span>Detected: {fmtDate(a.detected_at)}</span>
-                  {a.resolved_at && <span className="text-emerald-400">Resolved: {fmtDate(a.resolved_at)}</span>}
+                  <span>Detected: {fmtDate(a.time_detected)}</span>
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">

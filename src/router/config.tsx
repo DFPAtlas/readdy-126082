@@ -2,6 +2,8 @@ import type { RouteObject } from "react-router-dom";
 import NotFound from "@/pages/NotFound";
 import Login from "@/pages/login/page";
 import Signup from "@/pages/signup/page";
+import MfaSetup from "@/pages/mfa/setup/page";
+import MfaVerify from "@/pages/mfa/verify/page";
 import AppLayout from "@/components/feature/AppLayout";
 import Dashboard from "@/pages/dashboard/page";
 import Projects from "@/pages/projects/page";
@@ -17,7 +19,18 @@ import SystemStatus from "@/pages/system-status/page";
 import BuildProcess from "@/pages/build-process/page";
 import ProjectBudget from "@/pages/project-budget/page";
 import ActivityLog from "@/pages/activity-log/page";
+import TeamPage from "@/pages/team/page";
+import Security from "@/pages/security/page";
+import GitHubPage from "@/pages/github/page";
+import Support from "@/pages/support/page";
+import SupportTickets from "@/pages/support-tickets/page";
+import SupportTicketDetail from "@/pages/support-tickets/detail/page";
+import NotificationPreferences from "@/pages/support-tickets/preferences/page";
+import SupportReports from "@/pages/support-tickets/reports/page";
 import WebsiteUatDashboard from "@/pages/admin/website-uat/page";
+import SupportIntegrations from "@/pages/admin/support-integrations/page";
+import SupportIntegrationTestForm from "@/pages/admin/support-integrations/test-form/page";
+import UatAdminGuard from "@/components/feature/UatAdminGuard";
 
 const routes: RouteObject[] = [
   {
@@ -27,6 +40,18 @@ const routes: RouteObject[] = [
   {
     path: "/signup",
     element: <Signup />,
+  },
+  {
+    path: "/mfa/setup",
+    element: <MfaSetup />,
+  },
+  {
+    path: "/mfa/verify",
+    element: <MfaVerify />,
+  },
+  {
+    path: "/support",
+    element: <Support />,
   },
   {
     path: "/",
@@ -47,7 +72,17 @@ const routes: RouteObject[] = [
       { path: "project-budget", element: <ProjectBudget /> },
       { path: "system-status", element: <SystemStatus /> },
       { path: "activity-log", element: <ActivityLog /> },
-      { path: "admin/website-uat", element: <WebsiteUatDashboard /> },
+      { path: "team", element: <TeamPage /> },
+      { path: "security", element: <Security /> },
+      { path: "github", element: <GitHubPage /> },
+      { path: "support-tickets", element: <SupportTickets /> },
+      { path: "support-tickets/preferences", element: <NotificationPreferences /> },
+      { path: "support-tickets/reports", element: <SupportReports /> },
+      { path: "support-tickets/:ticketId", element: <SupportTicketDetail /> },
+      { path: "command-centre/tickets", element: <SupportTickets /> },
+      { path: "admin/website-uat", element: <UatAdminGuard><WebsiteUatDashboard /></UatAdminGuard> },
+      { path: "admin/support-integrations", element: <SupportIntegrations /> },
+      { path: "admin/support-integrations/test-form", element: <SupportIntegrationTestForm /> },
     ],
   },
   {

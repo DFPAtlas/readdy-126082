@@ -18,7 +18,7 @@ interface Note {
 interface Project {
   id: number;
   project_name: string;
-  slug: string;
+  project_slug: string;
 }
 
 const typeLabels: Record<string, string> = {
@@ -91,7 +91,7 @@ export default function Notes() {
 
   useEffect(() => {
     loadNotes();
-    supabase.from('internal_projects').select('id,project_name,slug').order('project_name').then(({ data }) => setProjects(data ?? []));
+    supabase.from('internal_projects').select('id,project_name,project_slug').order('project_name').then(({ data }) => setProjects(data ?? []));
   }, [loadNotes]);
 
   const handlePinToggle = async (note: Note) => {
@@ -237,7 +237,7 @@ export default function Notes() {
                         {typeLabels[note.category] ?? note.category}
                       </span>
                       {project && (
-                        <Link to={`/projects/${project.slug}`} className="text-[10px] text-accent-400 hover:text-accent-300 transition-colors whitespace-nowrap">
+                        <Link to={`/projects/${project.project_slug}`} className="text-[10px] text-accent-400 hover:text-accent-300 transition-colors whitespace-nowrap">
                           {project.project_name}
                         </Link>
                       )}

@@ -130,12 +130,10 @@ export interface MonitoringAlert {
   alert_type: string;
   severity: string;
   source: string | null;
-  source_monitor_type: string | null;
-  source_monitor_id: number | null;
-  detected_at: string;
+  time_detected: string;
   status: string;
-  resolved_at: string | null;
-  action_taken: string | null;
+  action_button: string | null;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 }

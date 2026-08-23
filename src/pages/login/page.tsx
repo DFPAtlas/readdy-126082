@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 
 export default function Login() {
@@ -122,10 +122,7 @@ export default function Login() {
           </form>
 
           <p className="mt-8 text-sm text-foreground-500 text-center">
-            Need access?{' '}
-            <Link to="/signup" className="text-accent-400 hover:text-accent-300 font-medium transition-colors whitespace-nowrap">
-              Create an account
-            </Link>
+            Access is invite only. Contact your administrator if you need an account.
           </p>
         </div>
       </div>

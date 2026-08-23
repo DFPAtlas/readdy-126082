@@ -62,7 +62,7 @@ export default function ProjectBudget() {
         supabase.from('internal_project_cost_items').select('*').order('created_at', { ascending: false }),
         supabase.from('internal_project_recurring_costs').select('*').order('created_at', { ascending: false }),
         supabase.from('internal_project_budget_events').select('*').order('created_at', { ascending: false }),
-        supabase.from('internal_projects').select('id,project_name,slug').order('project_name'),
+        supabase.from('internal_projects').select('id,project_name,project_slug').order('project_name'),
       ]);
       if (budgetsRes.error) throw budgetsRes.error;
       if (costsRes.error) throw costsRes.error;

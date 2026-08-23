@@ -24,19 +24,29 @@ export default function WebsiteMonitoringTab({ websites, projects, onRefresh }: 
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   };
 
+  const extractErrorMessage = async (fnErr: any): Promise<string> => {
+    try {
+      const ctx = fnErr?.context;
+      if (ctx?.json) {
+        const parsed = await ctx.json();
+        return parsed?.message ?? parsed?.data?.message ?? 'Check failed';
+      }
+    } catch { /* fall through */ }
+    return fnErr?.message ?? 'Check failed';
+  };
+
   const runWebsiteCheck = async (website: MonitoredWebsite) => {
     setCheckingIds(prev => new Set(prev).add(website.id));
     try {
       const { data, error: fnErr } = await supabase.functions.invoke('internal-monitoring-run-check', {
         body: {
           check_type: 'website',
-          target_url: website.url,
           monitor_id: website.id,
-          project_id: website.project_id,
         },
       });
-      if (fnErr || data?.code !== 'OK') throw new Error(fnErr?.message ?? 'Check failed');
-      showToast(`${website.website_name}: ${data.data.message}`, data.data.status === 'failed' ? 'error' : 'success');
+      if (fnErr) throw new Error(await extractErrorMessage(fnErr));
+      if (data?.code !== 'OK') throw new Error(data?.data?.message ?? 'Check failed');
+      showToast(`${website.website_name}: ${data.data.message}`, data.data.success ? 'success' : 'error');
     } catch (e: any) {
       showToast(`${website.website_name}: ${e.message}`, 'error');
     } finally {
@@ -49,15 +59,15 @@ export default function WebsiteMonitoringTab({ websites, projects, onRefresh }: 
     const results: string[] = [];
     for (const website of websites) {
       try {
-        const { data } = await supabase.functions.invoke('internal-monitoring-run-check', {
+        const { data, error: fnErr } = await supabase.functions.invoke('internal-monitoring-run-check', {
           body: {
             check_type: 'website',
-            target_url: website.url,
             monitor_id: website.id,
-            project_id: website.project_id,
           },
         });
-        if (data?.code === 'OK') {
+        if (fnErr) {
+          results.push(`${website.website_name}: ${await extractErrorMessage(fnErr)}`);
+        } else if (data?.code === 'OK') {
           results.push(`${website.website_name}: ${data.data.status}`);
         }
       } catch { results.push(`${website.website_name}: failed`); }

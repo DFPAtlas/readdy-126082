@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, useNavigate, useSearchParams, Outlet } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/feature/AuthGuard';
+import { useUnreadTicketCount } from '@/pages/support-tickets/hooks';
 
 const navItems = [
   { to: '/dashboard', icon: 'ri-dashboard-3-line', label: 'Dashboard' },
@@ -17,6 +18,7 @@ const navItems = [
   { to: '/project-budget', icon: 'ri-money-pound-circle-line', label: 'Project Budget' },
   { to: '/system-status', icon: 'ri-pulse-line', label: 'System Status' },
   { to: '/activity-log', icon: 'ri-history-line', label: 'Activity' },
+  { to: '/github', icon: 'ri-github-fill', label: 'GitHub' },
 ];
 
 const uatNavItems = [
@@ -35,6 +37,7 @@ export default function AppLayout() {
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') ?? 'register';
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const unreadTickets = useUnreadTicketCount();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -87,25 +90,105 @@ export default function AppLayout() {
             </NavLink>
           ))}
 
-          {/* Website UAT Section */}
-          <div className="pt-3 mt-3 border-t border-background-200/60">
-            <p className="px-3 py-1 text-[10px] font-label text-foreground-600 uppercase tracking-widest whitespace-nowrap">Website UAT &amp; Changes</p>
-          </div>
-          {uatNavItems.map((item) => (
+          {/* Security — every role */}
+          <NavLink
+            to="/security"
+            onClick={() => setSidebarOpen(false)}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                isActive
+                  ? 'bg-accent-500/10 text-accent-400 font-medium'
+                  : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+              }`
+            }
+          >
+            <i className="ri-shield-keyhole-line text-base w-4 h-4 flex items-center justify-center"></i>
+            Security
+          </NavLink>
+
+          {/* Support Tickets — all roles (owner/admin manage, viewer read-only) */}
+          <NavLink
+            to="/support-tickets"
+            onClick={() => setSidebarOpen(false)}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                isActive
+                  ? 'bg-accent-500/10 text-accent-400 font-medium'
+                  : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+              }`
+            }
+          >
+            <i className="ri-ticket-2-line text-base w-4 h-4 flex items-center justify-center"></i>
+            <span className="flex-1">Support Tickets</span>
+            {unreadTickets > 0 && (
+              <span
+                className="text-[10px] font-label font-semibold bg-accent-500 text-background-950 rounded-full px-1.5 py-0.5 leading-none"
+                aria-label={`${unreadTickets} unread tickets`}
+              >
+                {unreadTickets > 99 ? '99+' : unreadTickets}
+              </span>
+            )}
+          </NavLink>
+
+          {/* Owner-only settings */}
+          {auth.role === 'owner' && (
             <NavLink
-              key={item.tab}
-              to={`/admin/website-uat?tab=${item.tab}`}
+              to="/team"
               onClick={() => setSidebarOpen(false)}
-              className={
-                activeTab === item.tab
-                  ? 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap bg-accent-500/10 text-accent-400 font-medium'
-                  : 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                  isActive
+                    ? 'bg-accent-500/10 text-accent-400 font-medium'
+                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+                }`
               }
             >
-              <i className={`${item.icon} text-base w-4 h-4 flex items-center justify-center`}></i>
-              {item.label}
+              <i className="ri-team-line text-base w-4 h-4 flex items-center justify-center"></i>
+              Team &amp; Access
             </NavLink>
-          ))}
+          )}
+
+          {/* Support Integrations — owner/admin only */}
+          {(auth.role === 'owner' || auth.role === 'admin') && (
+            <NavLink
+              to="/admin/support-integrations"
+              onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                  isActive
+                    ? 'bg-accent-500/10 text-accent-400 font-medium'
+                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+                }`
+              }
+            >
+              <i className="ri-plug-2-line text-base w-4 h-4 flex items-center justify-center"></i>
+              Support Integrations
+            </NavLink>
+          )}
+
+          {/* Website UAT Section — owner/admin only */}
+          {(auth.role === 'owner' || auth.role === 'admin') && (
+            <>
+              <div className="pt-3 mt-3 border-t border-background-200/60">
+                <p className="px-3 py-1 text-[10px] font-label text-foreground-600 uppercase tracking-widest whitespace-nowrap">Website UAT &amp; Changes</p>
+              </div>
+              {uatNavItems.map((item) => (
+                <NavLink
+                  key={item.tab}
+                  to={`/admin/website-uat?tab=${item.tab}`}
+                  onClick={() => setSidebarOpen(false)}
+                  className={
+                    activeTab === item.tab
+                      ? 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap bg-accent-500/10 text-accent-400 font-medium'
+                      : 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+                  }
+                >
+                  <i className={`${item.icon} text-base w-4 h-4 flex items-center justify-center`}></i>
+                  {item.label}
+                </NavLink>
+              ))}
+            </>
+          )}
         </nav>
 
         <div className="border-t border-background-200/60 p-4">
