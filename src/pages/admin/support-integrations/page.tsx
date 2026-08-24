@@ -2,20 +2,25 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/components/feature/AuthGuard';
 import type { SupportSite, SupportSiteStats } from '@/types/support-tickets';
-import { useIntegrationLookups, useSiteDetail, useSupportSites } from './hooks';
+import { useIntegrationLookups, useSiteDetail, useSupportSites, useSupportTeams, teamsForSite } from './hooks';
 import { INTEGRATION_MODES, formatRelative } from './constants';
+import { SITE_STATUS_META } from './onboarding-constants';
 import SiteFormModal from './components/SiteFormModal';
+import DefaultTeamModal from './components/DefaultTeamModal';
 import CredentialPanel from './components/CredentialPanel';
 import SettingsPanel from './components/SettingsPanel';
 import SlaPanel from './components/SlaPanel';
 import RateLimitPanel from './components/RateLimitPanel';
 import HealthPanel from './components/HealthPanel';
+import OnboardingPanel from './components/OnboardingPanel';
+import DiagnosticsConfigPanel from './components/DiagnosticsConfigPanel';
 import SetupInstructionsModal from './components/SetupInstructionsModal';
 
-type Tab = 'overview' | 'credentials' | 'settings' | 'sla' | 'rate-limits' | 'health';
+type Tab = 'overview' | 'onboarding' | 'credentials' | 'settings' | 'sla' | 'rate-limits' | 'health';
 
 const TABS: Array<{ id: Tab; label: string; icon: string }> = [
   { id: 'overview', label: 'Overview', icon: 'ri-information-line' },
+  { id: 'onboarding', label: 'Onboarding', icon: 'ri-rocket-line' },
   { id: 'credentials', label: 'Credentials', icon: 'ri-key-2-line' },
   { id: 'settings', label: 'Settings', icon: 'ri-settings-3-line' },
   { id: 'sla', label: 'SLA', icon: 'ri-timer-line' },
@@ -33,12 +38,19 @@ export default function SupportIntegrations() {
 
   const { sites, stats, loading, error, reload } = useSupportSites();
   const { staff, websites, projects } = useIntegrationLookups();
+  const { teams } = useSupportTeams();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<SupportSite | null>(null);
   const [setupSite, setSetupSite] = useState<SupportSite | null>(null);
+  const [teamTarget, setTeamTarget] = useState<SupportSite | null>(null);
+
+  const teamNameById = useMemo(
+    () => Object.fromEntries(teams.map((t) => [t.id, t.name])),
+    [teams],
+  );
 
   const selected = useMemo(
     () => sites.find((s) => s.id === selectedId) ?? null,
@@ -119,7 +131,7 @@ export default function SupportIntegrations() {
             className="inline-flex items-center gap-1.5 bg-accent-500 hover:bg-accent-400 text-background-950 px-4 py-2.5 rounded-full text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
           >
             <i className="ri-add-line text-base w-4 h-4 flex items-center justify-center"></i>
-            Register site
+            Add support site
           </button>
         </div>
       </div>
@@ -130,6 +142,8 @@ export default function SupportIntegrations() {
           <button onClick={reload} className="text-sm text-red-300 underline cursor-pointer whitespace-nowrap">Retry</button>
         </div>
       )}
+
+      <DiagnosticsConfigPanel />
 
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-5 items-start">
         {/* Site list */}
@@ -143,14 +157,22 @@ export default function SupportIntegrations() {
               <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-background-200/60 flex items-center justify-center">
                 <i className="ri-global-line text-foreground-500 text-xl w-6 h-6 flex items-center justify-center"></i>
               </div>
-              <p className="text-sm text-foreground-400">No support sites registered yet.</p>
-              <p className="text-xs text-foreground-600 mt-1">Register your first site to start receiving tickets.</p>
+              <p className="text-sm text-foreground-400">No support sites registered.</p>
+              <p className="text-xs text-foreground-600 mt-1">Register your first site to start onboarding its support capabilities.</p>
+              <button
+                onClick={() => { setEditing(null); setFormOpen(true); }}
+                className="mt-4 inline-flex items-center gap-1.5 bg-accent-500 hover:bg-accent-400 text-background-950 px-4 py-2 rounded-full text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <i className="ri-add-line text-base w-4 h-4 flex items-center justify-center"></i>
+                Add support site
+              </button>
             </div>
           ) : (
             sites.map((s) => {
               const st = stats[s.id];
               const active = s.is_active && !s.archived_at;
               const healthTone = !active ? 'text-red-400' : (st?.active_credential_count ?? 0) === 0 ? 'text-amber-400' : 'text-emerald-400';
+              const statusMeta = SITE_STATUS_META[s.status] ?? SITE_STATUS_META.setup;
               return (
                 <button
                   key={s.id}
@@ -168,8 +190,8 @@ export default function SupportIntegrations() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium text-foreground-100 truncate">{s.site_name}</span>
-                        <span className={`text-[10px] font-label px-1.5 py-0.5 rounded uppercase whitespace-nowrap ${active ? 'bg-emerald-500/15 text-emerald-400' : 'bg-foreground-600/15 text-foreground-500'}`}>
-                          {active ? 'Active' : s.archived_at ? 'Archived' : 'Inactive'}
+                        <span className={`text-[10px] font-label px-1.5 py-0.5 rounded uppercase whitespace-nowrap ${statusMeta.tone}`}>
+                          {statusMeta.label}
                         </span>
                       </div>
                       <p className="text-xs text-foreground-500 mt-0.5 font-mono">{s.site_slug}</p>
@@ -180,6 +202,10 @@ export default function SupportIntegrations() {
                     </span>
                   </div>
                   <div className="flex items-center justify-between mt-3 text-xs text-foreground-500 flex-wrap gap-x-3 gap-y-1">
+                    <span className="inline-flex items-center gap-1">
+                      <i className="ri-team-line text-xs w-3 h-3 flex items-center justify-center"></i>
+                      {s.default_support_team_id ? (teamNameById[s.default_support_team_id] ?? 'Unknown team') : 'No default team'}
+                    </span>
                     <span>{st?.active_credential_count ?? 0} credentials</span>
                     <span>{s.allowed_origins.length} origins</span>
                     <span className={healthTone}>
@@ -269,7 +295,16 @@ export default function SupportIntegrations() {
                       <OverviewTab
                         site={selected}
                         stats={stats[selected.id]}
+                        defaultTeamName={selected.default_support_team_id ? (teamNameById[selected.default_support_team_id] ?? null) : null}
                         onOpenSetup={() => setSetupSite(selected)}
+                        onChangeTeam={() => setTeamTarget(selected)}
+                      />
+                    )}
+                    {tab === 'onboarding' && (
+                      <OnboardingPanel
+                        site={selected}
+                        defaultTeamName={selected.default_support_team_id ? (teamNameById[selected.default_support_team_id] ?? null) : null}
+                        onSiteChanged={reload}
                       />
                     )}
                     {tab === 'credentials' && (
@@ -316,12 +351,28 @@ export default function SupportIntegrations() {
         onSaved={reload}
       />
 
+      {teamTarget && (
+        <DefaultTeamModal
+          open
+          onClose={() => setTeamTarget(null)}
+          site={teamTarget}
+          teams={teamsForSite(teams, teamTarget.id)}
+          onSaved={reload}
+        />
+      )}
+
       <SetupInstructionsModal open={!!setupSite} onClose={() => setSetupSite(null)} site={setupSite} />
     </div>
   );
 }
 
-function OverviewTab({ site, stats, onOpenSetup }: { site: SupportSite; stats: SupportSiteStats | undefined; onOpenSetup: () => void }) {
+function OverviewTab({ site, stats, defaultTeamName, onOpenSetup, onChangeTeam }: {
+  site: SupportSite;
+  stats: SupportSiteStats | undefined;
+  defaultTeamName: string | null;
+  onOpenSetup: () => void;
+  onChangeTeam: () => void;
+}) {
   const rows: Array<{ label: string; value: string }> = [
     { label: 'Site slug', value: site.site_slug },
     { label: 'Domain', value: site.domain ?? '—' },
@@ -341,6 +392,25 @@ function OverviewTab({ site, stats, onOpenSetup }: { site: SupportSite; stats: S
             <span className="text-sm text-foreground-100 break-all text-right max-w-[60%]">{r.value}</span>
           </div>
         ))}
+      </div>
+
+      <div className="bg-background-50 border border-background-200/60 rounded-lg p-4 flex items-center justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <h4 className="text-xs font-medium text-foreground-300 uppercase tracking-wider">Default support team</h4>
+          <p className="text-sm text-foreground-100 mt-1">
+            {defaultTeamName ?? <span className="text-foreground-500">Not configured</span>}
+          </p>
+          <p className="text-xs text-foreground-500 mt-1 leading-relaxed">
+            Fallback when no routing rule matches — otherwise tickets go to Needs Review.
+          </p>
+        </div>
+        <button
+          onClick={onChangeTeam}
+          className="inline-flex items-center gap-1.5 border border-background-300/60 hover:border-accent-500/50 text-foreground-200 hover:text-accent-400 px-3.5 py-2 rounded-full text-sm transition-colors cursor-pointer whitespace-nowrap"
+        >
+          <i className="ri-team-line text-base w-4 h-4 flex items-center justify-center"></i>
+          Change default team
+        </button>
       </div>
 
       {site.allowed_origins.length > 0 && (

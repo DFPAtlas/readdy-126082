@@ -1,18 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { TicketStatus, TicketPriority } from '@/types/support-tickets';
 import { STATUS_OPTIONS, PRIORITY_OPTIONS, statusLabels, priorityLabels, isTerminalStatus } from '@/pages/support-tickets/constants';
-import type { StaffOption } from '@/pages/support-tickets/hooks';
-import { assigneeName } from '@/pages/support-tickets/hooks';
 import type { TicketDetailRecord } from '../hooks';
 
-type OpenMenu = 'assign' | 'status' | 'priority' | null;
+type OpenMenu = 'status' | 'priority' | null;
 
 interface HeaderControlsProps {
   ticket: TicketDetailRecord;
-  staff: StaffOption[];
   canModify: boolean;
-  currentUserId?: string;
-  onAssign: (userId: string | null, name: string | null) => void;
   onChangeStatus: (s: TicketStatus) => void;
   onChangePriority: (p: TicketPriority) => void;
   onToggleRead: () => void;
@@ -21,10 +16,7 @@ interface HeaderControlsProps {
 
 export default function HeaderControls({
   ticket,
-  staff,
   canModify,
-  currentUserId,
-  onAssign,
   onChangeStatus,
   onChangePriority,
   onToggleRead,
@@ -48,8 +40,6 @@ export default function HeaderControls({
     };
   }, []);
 
-  const assignee = assigneeName(ticket, staff);
-
   const triggerCls =
     'inline-flex items-center gap-1.5 text-sm text-foreground-200 px-3 py-2 rounded-lg border border-background-300/60 hover:bg-background-100 transition-colors cursor-pointer whitespace-nowrap';
   const menuCls =
@@ -59,47 +49,6 @@ export default function HeaderControls({
 
   return (
     <div className="flex items-center gap-2 flex-wrap" ref={ref}>
-      {canModify && (
-        <div className="relative">
-          <button type="button" className={triggerCls} onClick={() => setOpen(open === 'assign' ? null : 'assign')}>
-            <i className="ri-user-line w-4 h-4 flex items-center justify-center"></i>
-            {assignee || 'Assign'}
-            <i className="ri-arrow-down-s-line text-sm w-4 h-4 flex items-center justify-center"></i>
-          </button>
-          {open === 'assign' && (
-            <div role="menu" className={menuCls}>
-              <button type="button" role="menuitem" className={itemCls} onClick={() => { onAssign(null, null); setOpen(null); }}>
-                <span className="w-4 h-4 flex items-center justify-center">
-                  {ticket.assigned_to == null && <i className="ri-check-line text-xs w-3 h-3 flex items-center justify-center"></i>}
-                </span>
-                Unassigned
-              </button>
-              {currentUserId && ticket.assigned_to !== currentUserId && (
-                <button type="button" role="menuitem" className={itemCls} onClick={() => { onAssign(currentUserId, 'Me'); setOpen(null); }}>
-                  <i className="ri-user-add-line text-sm w-4 h-4 flex items-center justify-center text-foreground-500"></i>
-                  Assign to me
-                </button>
-              )}
-              <div className="border-t border-background-300/40 my-1"></div>
-              {staff.map((s) => (
-                <button
-                  key={s.user_id}
-                  type="button"
-                  role="menuitem"
-                  className={`${itemCls} ${ticket.assigned_to === s.user_id ? 'font-semibold text-accent-400' : ''}`}
-                  onClick={() => { onAssign(s.user_id, s.full_name || s.email || s.user_id); setOpen(null); }}
-                >
-                  <span className="w-4 h-4 flex items-center justify-center">
-                    {ticket.assigned_to === s.user_id && <i className="ri-check-line text-xs w-3 h-3 flex items-center justify-center"></i>}
-                  </span>
-                  {s.full_name || s.email}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {canModify && (
         <div className="relative">
           <button type="button" className={triggerCls} onClick={() => setOpen(open === 'status' ? null : 'status')}>

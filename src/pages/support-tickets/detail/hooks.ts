@@ -25,7 +25,7 @@ interface TicketRaw extends SupportTicket {
 }
 
 const TICKET_SELECT =
-  'id,ticket_number,site_id,project_id,external_reference,customer_user_id,customer_name,customer_email,customer_phone,subject,description,category,priority,status,source,assigned_to,assigned_agent,is_unread,first_response_at,resolved_at,closed_at,last_customer_reply_at,last_staff_reply_at,last_activity_at,due_at,metadata,created_at,updated_at,internal_support_sites(site_name,site_slug,domain),internal_projects(project_name)';
+  'id,ticket_number,site_id,project_id,external_reference,customer_user_id,customer_name,customer_email,customer_phone,subject,description,category,priority,status,source,assigned_to,assigned_agent,is_unread,first_response_at,resolved_at,closed_at,last_customer_reply_at,last_staff_reply_at,last_activity_at,due_at,metadata,created_at,updated_at,team_id,routing_status,routing_reason,routing_confidence,routed_at,matched_rule_id,escalation_level,internal_support_sites(site_name,site_slug,domain),internal_projects(project_name)';
 
 const configured = Boolean(
   import.meta.env.VITE_PUBLIC_SUPABASE_URL && import.meta.env.VITE_PUBLIC_SUPABASE_ANON_KEY,
@@ -74,7 +74,7 @@ export function useTicketDetail(ticketId: string | undefined, role: string | nul
       setTicket(detail);
 
       // Mark read on open (owner/admin only — RLS also enforces this).
-      if (detail && detail.is_unread && (role === 'owner' || role === 'admin')) {
+      if (detail && detail.is_unread && (role === 'owner' || role === 'admin' || role === 'support_manager' || role === 'support_agent' || role === 'developer')) {
         supabase
           .from('internal_support_tickets')
           .update({ is_unread: false })

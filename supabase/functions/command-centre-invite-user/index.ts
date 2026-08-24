@@ -12,6 +12,8 @@ const json = (body: unknown, status: number) =>
     status,
   });
 
+const ALLOWED_ROLES = ["admin", "support_manager", "support_agent", "developer", "viewer"];
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -61,9 +63,9 @@ serve(async (req: Request) => {
       return json({ code: "BadRequest", message: "Invalid email address" }, 400);
     }
 
-    // 4. Strict allow-list: admin / viewer only. Owner can never be granted here.
-    if (role !== "admin" && role !== "viewer") {
-      return json({ code: "BadRequest", message: "Role must be 'admin' or 'viewer'" }, 400);
+    // 4. Strict allow-list. Owner can never be granted here.
+    if (!ALLOWED_ROLES.includes(role)) {
+      return json({ code: "BadRequest", message: "Invalid role" }, 400);
     }
 
     // 5. Upsert the pending invitation (handles duplicate / re-invite of the same email).

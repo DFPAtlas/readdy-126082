@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/components/feature/AuthGuard';
 import { supabase } from '@/lib/supabase';
-import SupportTicketForm, { type SupportTicketSubmitResult } from '@/components/feature/SupportTicketForm';
+import SupportTicketForm, {
+  type SupportTicketSubmitResult,
+  type SupportTicketFormSubmitPayload,
+} from '@/components/feature/SupportTicketForm';
 import ConfirmDialog from '@/components/base/ConfirmDialog';
 import { useSupportSites } from '../hooks';
 import { INTEGRATION_MODES } from '../constants';
@@ -86,19 +89,48 @@ export default function SupportIntegrationTestForm() {
     confirmResolver.current = null;
   };
 
-  const handleSuccess = async (res: SupportTicketSubmitResult) => {
+  const handleSuccess = (res: SupportTicketSubmitResult) => {
     if (!selected || !res.ticketNumber) return;
-    // Look up the internal ticket id so we can link into FootprintCC.
-    const { data } = await supabase
-      .from('internal_support_tickets')
-      .select('id')
-      .eq('ticket_number', res.ticketNumber)
-      .maybeSingle();
     setResult({
       ticketNumber: res.ticketNumber,
-      ticketId: (data?.id as string) ?? null,
+      ticketId: res.ticketId ?? null,
       externalReference: externalReference.current,
     });
+  };
+
+  // Owner/admin-only server-side test-ticket creation via manage-support-integrations.
+  // This deliberately does NOT use the public receive-support-ticket endpoint,
+  // because the Command Centre origin is not (and must not be) an allowed origin
+  // for any production site.
+  const submitTestTicket = async (payload: SupportTicketFormSubmitPayload): Promise<SupportTicketSubmitResult> => {
+    if (!selected) throw new Error('Select a site before submitting.');
+
+    const { data, error } = await supabase.functions.invoke('manage-support-integrations', {
+      body: {
+        action: 'create_test_ticket',
+        siteId: selected.id,
+        customerName: payload.name,
+        customerEmail: payload.email,
+        subject: payload.subject,
+        description: payload.description,
+        category: payload.category,
+        priority: payload.priority,
+      },
+    });
+
+    const bodyData = data as
+      | { success?: boolean; ticketId?: string; ticketNumber?: string; error?: string }
+      | null;
+
+    if (error || !bodyData?.success) {
+      // Surface only the safe server-side message; never leak raw SDK/network errors.
+      throw new Error(bodyData?.error || 'Could not create the test ticket. Please try again.');
+    }
+
+    return {
+      ticketNumber: bodyData.ticketNumber ?? null,
+      ticketId: bodyData.ticketId ?? null,
+    };
   };
 
   const runDryRun = async () => {
@@ -270,16 +302,16 @@ export default function SupportIntegrationTestForm() {
                     <h3 className="text-sm font-semibold text-emerald-300">Test ticket created</h3>
                   </div>
                   <div className="mt-2 space-y-1 text-sm text-foreground-300">
-                    <p>Ticket number: <span className="font-mono text-emerald-300">{result.ticketNumber}</span></p>
+                    <p>Reference: <span className="font-mono text-emerald-300">{result.ticketNumber}</span></p>
                     <p>External reference: <span className="font-mono text-foreground-400">{result.externalReference}</span></p>
                   </div>
                   {result.ticketId && (
                     <Link
                       to={`/support-tickets/${result.ticketId}`}
-                      className="inline-flex items-center gap-1.5 mt-3 text-sm text-accent-400 hover:text-accent-300 cursor-pointer whitespace-nowrap"
+                      className="inline-flex items-center gap-1.5 mt-3 bg-accent-500 hover:bg-accent-400 text-background-950 px-4 py-2 rounded-full text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
                     >
                       <i className="ri-external-link-line text-base w-4 h-4 flex items-center justify-center"></i>
-                      Open ticket in FootprintCC
+                      Open test ticket
                     </Link>
                   )}
                 </div>
@@ -297,6 +329,7 @@ export default function SupportIntegrationTestForm() {
                   externalReference={externalReference.current}
                   context={{ isTest: true }}
                   confirmBeforeSubmit={confirmBeforeSubmit}
+                  submitOverride={submitTestTicket}
                   onSuccess={handleSuccess}
                 />
               </div>

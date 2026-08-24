@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import Modal from '@/components/base/Modal';
 import { supabase } from '@/lib/supabase';
-import type { SupportSite } from '@/types/support-tickets';
+import type { SiteEnvironment, SiteStatus, SupportSite } from '@/types/support-tickets';
 import { isValidDomain, isValidEmail, isValidSlug } from '../constants';
+import { ENVIRONMENTS, ENVIRONMENT_LABELS, SITE_STATUSES, SITE_STATUS_META } from '../onboarding-constants';
 import { logAdminEvent } from '../audit';
 import OriginEditor from './OriginEditor';
 
@@ -37,6 +38,10 @@ interface FormState {
   integration_mode: 'public_form' | 'server_to_server';
   is_active: boolean;
   allowed_origins: string[];
+  status: SiteStatus;
+  environment: SiteEnvironment;
+  support_contact: string;
+  notes: string;
 }
 
 const EMPTY: FormState = {
@@ -49,7 +54,33 @@ const EMPTY: FormState = {
   integration_mode: 'public_form',
   is_active: true,
   allowed_origins: [],
+  status: 'setup',
+  environment: 'production',
+  support_contact: '',
+  notes: '',
 };
+
+// Map Supabase/PostgREST error codes to safe, user-facing messages without
+// leaking SQL details, secrets, tokens or stack traces.
+function friendlySaveError(err: unknown): string {
+  const code = (err as { code?: string } | null)?.code;
+  switch (code) {
+    case '23505':
+      return 'A support site with that name or slug already exists.';
+    case '42501':
+      return 'You do not have permission to register support sites. Contact an owner or admin.';
+    case '23503':
+      return 'That site links to data that no longer exists. Refresh and try again.';
+    case '23502':
+      return 'A required field is missing. Please check the form and try again.';
+    case '23514':
+      return 'A value you entered is outside the allowed range. Please review the form.';
+    case '22P02':
+      return 'A value you entered is not in the correct format. Please review the form.';
+    default:
+      return 'Failed to save site. Please try again.';
+  }
+}
 
 export default function SiteFormModal({ open, onClose, initial, websites, projects, onSaved }: SiteFormModalProps) {
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -70,6 +101,10 @@ export default function SiteFormModal({ open, onClose, initial, websites, projec
         integration_mode: initial.integration_mode,
         is_active: initial.is_active,
         allowed_origins: initial.allowed_origins ?? [],
+        status: initial.status ?? 'setup',
+        environment: initial.environment ?? 'production',
+        support_contact: initial.support_contact ?? '',
+        notes: initial.notes ?? '',
       });
     } else {
       setForm(EMPTY);
@@ -113,6 +148,10 @@ export default function SiteFormModal({ open, onClose, initial, websites, projec
         integration_mode: form.integration_mode,
         is_active: form.is_active,
         allowed_origins: form.allowed_origins,
+        status: form.status,
+        environment: form.environment,
+        support_contact: form.support_contact.trim() || null,
+        notes: form.notes.trim() || null,
       };
 
       let siteId = initial?.id;
@@ -125,8 +164,8 @@ export default function SiteFormModal({ open, onClose, initial, websites, projec
       } else {
         const { data, error } = await supabase.from('internal_support_sites').insert(payload).select('id').single();
         if (error) {
-          if (error.message?.includes('site_slug')) {
-            setSubmitError('A site with that slug already exists.');
+          if (error.code === '23505') {
+            setSubmitError('A support site with that name or slug already exists.');
             setSaving(false);
             return;
           }
@@ -145,7 +184,7 @@ export default function SiteFormModal({ open, onClose, initial, websites, projec
       onSaved();
       onClose();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to save site.');
+      setSubmitError(friendlySaveError(err));
     } finally {
       setSaving(false);
     }
@@ -212,6 +251,31 @@ export default function SiteFormModal({ open, onClose, initial, websites, projec
             <option value="public_form">Public form</option>
             <option value="server_to_server">Server-to-server</option>
           </select>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-foreground-400 mb-1" htmlFor="sf-status">Lifecycle status</label>
+            <select id="sf-status" value={form.status} onChange={(e) => set('status', e.target.value as SiteStatus)} className={inputCls('status')}>
+              {SITE_STATUSES.map((s) => <option key={s} value={s}>{SITE_STATUS_META[s].label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-foreground-400 mb-1" htmlFor="sf-env">Environment</label>
+            <select id="sf-env" value={form.environment} onChange={(e) => set('environment', e.target.value as SiteEnvironment)} className={inputCls('environment')}>
+              {ENVIRONMENTS.map((e) => <option key={e} value={e}>{ENVIRONMENT_LABELS[e]}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-foreground-400 mb-1" htmlFor="sf-contact">Support contact</label>
+          <input id="sf-contact" value={form.support_contact} onChange={(e) => set('support_contact', e.target.value)} className={inputCls('support_contact')} placeholder="e.g. Internal team or owner name" />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-foreground-400 mb-1" htmlFor="sf-notes">Notes</label>
+          <textarea id="sf-notes" value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} maxLength={2000} className={inputCls('notes')} placeholder="Internal notes about this site's integration." />
         </div>
 
         <div>

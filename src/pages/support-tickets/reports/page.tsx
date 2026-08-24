@@ -16,11 +16,19 @@ import TicketVolumeChart from './components/TicketVolumeChart';
 import SitePerformanceTable from './components/SitePerformanceTable';
 import SlaPerformanceSection from './components/SlaPerformanceSection';
 import StaffWorkloadSection from './components/StaffWorkloadSection';
+import { useAnalyticsSites } from './analytics-hooks';
+import AnalyticsOverview from './components/AnalyticsOverview';
+import CategoryAnalytics from './components/CategoryAnalytics';
+import DiagnosticRepairAnalytics from './components/DiagnosticRepairAnalytics';
+import SessionKnowledgeAnalytics from './components/SessionKnowledgeAnalytics';
+import AiQualityAnalytics from './components/AiQualityAnalytics';
+import RoutingEscalationAnalytics from './components/RoutingEscalationAnalytics';
 
 const RANGE_OPTIONS: { value: ReportRangeKey; label: string }[] = [
   { value: 'today', label: 'Today' },
   { value: '7d', label: 'Last 7 days' },
   { value: '30d', label: 'Last 30 days' },
+  { value: '90d', label: 'Last 90 days' },
   { value: 'custom', label: 'Custom' },
 ];
 
@@ -63,6 +71,11 @@ function computeRange(params: URLSearchParams): RangeResult {
   if (key === '30d') {
     const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     return { start: start.toISOString(), end: now.toISOString(), label: 'Last 30 days', valid: true };
+  }
+
+  if (key === '90d') {
+    const start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    return { start: start.toISOString(), end: now.toISOString(), label: 'Last 90 days', valid: true };
   }
 
   // Custom range
@@ -152,7 +165,8 @@ export default function SupportReports() {
   );
 
   const auth = useAuth();
-  const canViewStaff = auth.role === 'owner' || auth.role === 'admin';
+  const { sites: analyticsSites } = useAnalyticsSites();
+  const canViewStaff = auth.role === 'owner' || auth.role === 'admin' || auth.role === 'support_manager';
 
   const {
     summary: unassignedSummary,
@@ -218,9 +232,9 @@ export default function SupportReports() {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-heading font-bold text-foreground-50">Support Reports</h1>
+          <h1 className="text-2xl font-heading font-bold text-foreground-50">Support Analytics</h1>
           <p className="text-sm text-foreground-500 mt-1">
-            Summary of support activity across all websites.
+            Operational analytics across tickets, SLA, teams, sites, diagnostics, repairs and AI quality.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -271,6 +285,25 @@ export default function SupportReports() {
                 {o.label}
               </button>
             ))}
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 text-xs text-foreground-500">
+              <span className="whitespace-nowrap">Product / site</span>
+              <select
+                value={selectedSiteId}
+                onChange={(e) => setSelectedSite(e.target.value)}
+                aria-label="Filter by site"
+                className="bg-background-50 border border-background-300/60 rounded-lg px-2.5 py-1.5 text-sm text-foreground-100 outline-none cursor-pointer hover:border-foreground-400/40"
+              >
+                <option value="all">All sites</option>
+                {(analyticsSites ?? []).map((s) => (
+                  <option key={s.site_id} value={s.site_id}>
+                    {s.site_name}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           {safeRangeKey === 'custom' && (
@@ -371,6 +404,51 @@ export default function SupportReports() {
           onRetry={refreshStaff}
           siteId={siteFilter}
           canView={canViewStaff}
+        />
+      </div>
+
+      {/* Extended analytics (Prompt 18) */}
+      <div aria-live="polite">
+        <AnalyticsOverview siteId={siteFilter} />
+      </div>
+
+      <div aria-live="polite">
+        <CategoryAnalytics
+          start={range.valid ? range.start : ''}
+          end={range.valid ? range.end : ''}
+          siteId={siteFilter}
+        />
+      </div>
+
+      <div aria-live="polite">
+        <DiagnosticRepairAnalytics
+          start={range.valid ? range.start : ''}
+          end={range.valid ? range.end : ''}
+          siteId={siteFilter}
+        />
+      </div>
+
+      <div aria-live="polite">
+        <SessionKnowledgeAnalytics
+          start={range.valid ? range.start : ''}
+          end={range.valid ? range.end : ''}
+          siteId={siteFilter}
+        />
+      </div>
+
+      <div aria-live="polite">
+        <AiQualityAnalytics
+          start={range.valid ? range.start : ''}
+          end={range.valid ? range.end : ''}
+          siteId={siteFilter}
+        />
+      </div>
+
+      <div aria-live="polite">
+        <RoutingEscalationAnalytics
+          start={range.valid ? range.start : ''}
+          end={range.valid ? range.end : ''}
+          siteId={siteFilter}
         />
       </div>
     </div>

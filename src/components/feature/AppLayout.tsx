@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { NavLink, useNavigate, useSearchParams, Outlet } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { NavLink, useNavigate, useSearchParams, useLocation, Outlet } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/feature/AuthGuard';
 import { useUnreadTicketCount } from '@/pages/support-tickets/hooks';
+import { hasPermission, ROLE_BADGE_COLORS, ROLE_LABELS, type Role } from '@/lib/permissions';
 
 const navItems = [
   { to: '/dashboard', icon: 'ri-dashboard-3-line', label: 'Dashboard' },
@@ -34,10 +35,17 @@ const uatNavItems = [
 export default function AppLayout() {
   const auth = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') ?? 'register';
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const unreadTickets = useUnreadTicketCount();
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0 });
+  }, [location.pathname, location.search]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -45,10 +53,10 @@ export default function AppLayout() {
   };
 
   const roleBadge = () => {
-    const colors: Record<string, string> = { owner: 'bg-primary-500/15 text-primary-400', admin: 'bg-accent-500/15 text-accent-400', viewer: 'bg-secondary-500/15 text-secondary-300' };
+    const role = (auth.role ?? 'viewer') as Role;
     return (
-      <span className={`text-[10px] font-label px-1.5 py-0.5 rounded ${colors[auth.role ?? 'viewer']} whitespace-nowrap uppercase`}>
-        {auth.role}
+      <span className={`text-[10px] font-label px-1.5 py-0.5 rounded ${ROLE_BADGE_COLORS[role]} whitespace-nowrap uppercase`}>
+        {ROLE_LABELS[role]}
       </span>
     );
   };
@@ -130,8 +138,58 @@ export default function AppLayout() {
             )}
           </NavLink>
 
-          {/* Owner-only settings */}
-          {auth.role === 'owner' && (
+          {/* Customers — all roles (resolution + Customer 360) */}
+          <NavLink
+            to="/customers"
+            onClick={() => setSidebarOpen(false)}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                isActive
+                  ? 'bg-accent-500/10 text-accent-400 font-medium'
+                  : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+              }`
+            }
+          >
+            <i className="ri-user-search-line text-base w-4 h-4 flex items-center justify-center"></i>
+            Customers
+          </NavLink>
+
+          {/* Support Repairs — all roles view; owner/admin approve */}
+          <NavLink
+            to="/support-repairs"
+            onClick={() => setSidebarOpen(false)}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                isActive
+                  ? 'bg-accent-500/10 text-accent-400 font-medium'
+                  : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+              }`
+            }
+          >
+            <i className="ri-tools-line text-base w-4 h-4 flex items-center justify-center"></i>
+            Support Repairs
+          </NavLink>
+
+          {/* Support Analytics — all roles with metrics.view (Prompt 18) */}
+          {hasPermission(auth.role, 'support.metrics.view') && (
+            <NavLink
+              to="/support-tickets/reports"
+              onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                  isActive
+                    ? 'bg-accent-500/10 text-accent-400 font-medium'
+                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+                }`
+              }
+            >
+              <i className="ri-bar-chart-2-line text-base w-4 h-4 flex items-center justify-center"></i>
+              Support Analytics
+            </NavLink>
+          )}
+
+          {/* Owner/Admin settings */}
+          {hasPermission(auth.role, 'staff.manage') && (
             <NavLink
               to="/team"
               onClick={() => setSidebarOpen(false)}
@@ -148,8 +206,62 @@ export default function AppLayout() {
             </NavLink>
           )}
 
+          {/* Support Teams — owner/admin (Prompt 15) */}
+          {hasPermission(auth.role, 'staff.manage') && (
+            <NavLink
+              to="/support-teams"
+              onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                  isActive
+                    ? 'bg-accent-500/10 text-accent-400 font-medium'
+                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+                }`
+              }
+            >
+              <i className="ri-group-2-line text-base w-4 h-4 flex items-center justify-center"></i>
+              Support Teams
+            </NavLink>
+          )}
+
+          {/* Routing Rules — owner/admin (Prompt 15) */}
+          {hasPermission(auth.role, 'staff.manage') && (
+            <NavLink
+              to="/support-routing"
+              onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                  isActive
+                    ? 'bg-accent-500/10 text-accent-400 font-medium'
+                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+                }`
+              }
+            >
+              <i className="ri-git-branch-line text-base w-4 h-4 flex items-center justify-center"></i>
+              Routing Rules
+            </NavLink>
+          )}
+
+          {/* Knowledge Base — all internal roles (Prompt 17) */}
+          {hasPermission(auth.role, 'support.knowledge.view') && (
+            <NavLink
+              to="/support-knowledge"
+              onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                  isActive
+                    ? 'bg-accent-500/10 text-accent-400 font-medium'
+                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+                }`
+              }
+            >
+              <i className="ri-book-open-line text-base w-4 h-4 flex items-center justify-center"></i>
+              Knowledge Base
+            </NavLink>
+          )}
+
           {/* Support Integrations — owner/admin only */}
-          {(auth.role === 'owner' || auth.role === 'admin') && (
+          {hasPermission(auth.role, 'support.integrations.manage') && (
             <NavLink
               to="/admin/support-integrations"
               onClick={() => setSidebarOpen(false)}
@@ -244,7 +356,7 @@ export default function AppLayout() {
           </div>
         </header>
 
-        <main className="flex-1 p-4 md:p-6 overflow-auto">
+        <main ref={mainRef} className="flex-1 p-4 md:p-6 overflow-auto">
           <Outlet />
         </main>
       </div>

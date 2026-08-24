@@ -1,15 +1,21 @@
 import { useState } from 'react';
 import Modal from '@/components/base/Modal';
+import {
+  INVITABLE_ROLES,
+  ROLE_DESCRIPTIONS,
+  ROLE_LABELS,
+  type Role,
+} from '@/lib/permissions';
 
 interface InviteUserModalProps {
   open: boolean;
   onClose: () => void;
-  onInvite: (email: string, role: 'admin' | 'viewer') => Promise<void>;
+  onInvite: (email: string, role: Role) => Promise<void>;
 }
 
 export default function InviteUserModal({ open, onClose, onInvite }: InviteUserModalProps) {
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<'admin' | 'viewer'>('viewer');
+  const [role, setRole] = useState<Role>('viewer');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -59,15 +65,18 @@ export default function InviteUserModal({ open, onClose, onInvite }: InviteUserM
           <label className="block text-sm font-medium text-foreground-200 mb-2">Role</label>
           <select
             value={role}
-            onChange={(e) => setRole(e.target.value as 'admin' | 'viewer')}
+            onChange={(e) => setRole(e.target.value as Role)}
             className="w-full bg-background-50 border border-background-300/60 focus:border-accent-500/40 rounded-lg px-4 py-2.5 text-sm text-foreground-100 outline-none transition-colors duration-200 cursor-pointer"
           >
-            <option value="viewer">Viewer</option>
-            <option value="admin">Admin</option>
+            {INVITABLE_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {ROLE_LABELS[r]}
+              </option>
+            ))}
           </select>
-          <p className="text-xs text-foreground-500 mt-2">
-            Viewers have read-only access. Admins can create and edit data. The owner role
-            cannot be granted through invitations.
+          <p className="text-xs text-foreground-500 mt-2">{ROLE_DESCRIPTIONS[role]}</p>
+          <p className="text-xs text-foreground-600 mt-1">
+            The owner role cannot be granted through invitations.
           </p>
         </div>
 

@@ -7,6 +7,7 @@ import type {
   TicketPriority,
   TicketCategory,
   TicketSource,
+  RoutingStatus,
 } from '@/types/support-tickets';
 import { type SortValue } from './constants';
 
@@ -19,6 +20,8 @@ export interface InboxFilters {
   site: string; // 'all' | site id
   project: string; // 'all' | project id (string)
   assigned: string; // 'all' | 'unassigned' | user id
+  team: string; // 'all' | team id
+  routing: 'all' | RoutingStatus;
   unread: boolean;
   overdue: boolean;
   resolvedToday: boolean;
@@ -37,6 +40,8 @@ export const DEFAULT_FILTERS: InboxFilters = {
   site: 'all',
   project: 'all',
   assigned: 'all',
+  team: 'all',
+  routing: 'all',
   unread: false,
   overdue: false,
   resolvedToday: false,
@@ -58,6 +63,8 @@ export interface TicketWithMeta extends SupportTicket {
   site_slug: string;
   domain: string | null;
   message_count: number;
+  triage_status: string | null;
+  triage_confidence: string | null;
 }
 
 export interface SummaryCounts {
@@ -78,7 +85,7 @@ interface TicketRow extends SupportTicket {
 }
 
 const TICKET_SELECT =
-  'id,ticket_number,site_id,project_id,external_reference,customer_name,customer_email,subject,category,priority,status,source,assigned_to,assigned_agent,is_unread,due_at,last_activity_at,created_at,resolved_at,closed_at,internal_support_sites(site_name,site_slug,domain)';
+  'id,ticket_number,site_id,project_id,external_reference,customer_name,customer_email,subject,category,priority,status,source,assigned_to,assigned_agent,is_unread,due_at,last_activity_at,created_at,resolved_at,closed_at,team_id,routing_status,routing_confidence,internal_support_sites(site_name,site_slug,domain)';
 
 function isValidDate(iso: string): boolean {
   return iso !== '' && !Number.isNaN(new Date(iso).getTime());
@@ -115,6 +122,8 @@ function buildTicketQuery(
   if (filters.project !== 'all') query = query.eq('project_id', Number(filters.project));
   if (filters.assigned === 'unassigned') query = query.is('assigned_to', null);
   else if (filters.assigned !== 'all') query = query.eq('assigned_to', filters.assigned);
+  if (filters.team !== 'all') query = query.eq('team_id', filters.team);
+  if (filters.routing !== 'all') query = query.eq('routing_status', filters.routing);
   if (filters.unread) query = query.eq('is_unread', true);
   if (filters.overdue) {
     query = query
@@ -247,9 +256,25 @@ export function useSupportInbox(
         }
       }
 
+      let triageMap: Record<string, { status: string; confidence: string | null }> = {};
+      if (rows.length > 0) {
+        const { data: triageRows, error: triageError } = await supabase.rpc(
+          'support_tickets_triage_summary',
+        );
+        if (!triageError && Array.isArray(triageRows)) {
+          for (const tr of triageRows as { ticket_id: string; status: string; confidence: string | null }[]) {
+            if (tr?.ticket_id) {
+              triageMap[tr.ticket_id] = { status: tr.status, confidence: tr.confidence };
+            }
+          }
+        }
+      }
+
       const mapped = mapTicketRows(rows).map((t) => ({
         ...t,
         message_count: messageCounts[t.id] ?? 0,
+        triage_status: triageMap[t.id]?.status ?? null,
+        triage_confidence: triageMap[t.id]?.confidence ?? null,
       }));
 
       setTickets(mapped);

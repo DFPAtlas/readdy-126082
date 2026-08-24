@@ -155,7 +155,7 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  v_key := encode(digest(
+  v_key := encode(extensions.digest(
     p_notification_type || ':' || p_ticket_id::text || ':' ||
     COALESCE(p_message_id::text, '') || ':' || lower(v_email),
     'sha256'

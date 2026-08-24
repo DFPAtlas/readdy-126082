@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type ReplyMode = 'reply' | 'note';
 
@@ -11,6 +11,9 @@ interface ReplyComposerProps {
   canModify: boolean;
   submitting: boolean;
   onSubmit: (mode: ReplyMode, text: string, files: File[]) => Promise<ReplyResult>;
+  injectedText?: string | null;
+  onInjectedConsumed?: () => void;
+  onDraftChange?: (text: string) => void;
 }
 
 const MAX_LENGTH = 20000;
@@ -23,12 +26,20 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function ReplyComposer({ canModify, submitting, onSubmit }: ReplyComposerProps) {
+export default function ReplyComposer({ canModify, submitting, onSubmit, injectedText, onInjectedConsumed, onDraftChange }: ReplyComposerProps) {
   const [mode, setMode] = useState<ReplyMode>('reply');
   const [text, setText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [feedback, setFeedback] = useState<{ type: 'error' | 'info' | 'success'; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Inject an AI-suggested response into the editor (staff still reviews).
+  useEffect(() => {
+    if (injectedText) {
+      setText(injectedText);
+      onInjectedConsumed?.();
+    }
+  }, [injectedText, onInjectedConsumed]);
 
   if (!canModify) {
     return (
@@ -135,7 +146,10 @@ export default function ReplyComposer({ canModify, submitting, onSubmit }: Reply
 
       <textarea
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          onDraftChange?.(e.target.value);
+        }}
         rows={4}
         maxLength={MAX_LENGTH}
         placeholder={mode === 'reply' ? 'Write a reply to the customer…' : 'Add a private internal note…'}

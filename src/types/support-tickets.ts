@@ -32,6 +32,210 @@ export type TicketSource = 'website' | 'email' | 'admin' | 'api' | 'ai_agent' | 
 
 export type TicketSenderType = 'customer' | 'staff' | 'system' | 'ai_agent';
 
+// ---------------------------------------------------------------------------
+// Support routing (Prompt 15) — teams, routing rules, assignment.
+// ---------------------------------------------------------------------------
+export type RoutingStatus = 'unrouted' | 'queued' | 'assigned' | 'needs_review' | 'escalated';
+
+export type RoutingConfidence = 'high' | 'medium' | 'low';
+
+export type RoutingStrategy = 'manual' | 'round_robin' | 'least_open_tickets';
+
+export type TeamStatus = 'active' | 'archived';
+
+// ---------------------------------------------------------------------------
+// AI ticket triage (Prompt 16) — AI recommendation, never authoritative.
+// ---------------------------------------------------------------------------
+export type TriageStatus = 'queued' | 'running' | 'completed' | 'failed' | 'unavailable';
+
+export type TriageConfidence = 'high' | 'medium' | 'low';
+
+export interface SupportTicketTriage {
+  id: string;
+  ticket_id: string;
+  status: TriageStatus;
+  category: string | null;
+  subcategory: string | null;
+  suggested_priority: TicketPriority | null;
+  suggested_team_id: string | null;
+  suggested_team_name: string | null;
+  confidence: TriageConfidence | null;
+  confidence_score: number | null;
+  summary: string | null;
+  likely_issue: string | null;
+  suggested_action: string | null;
+  suggested_diagnostic: string | null;
+  suggested_response: string | null;
+  security_related: boolean;
+  model_provider: string | null;
+  requested_by: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  feedback_helpful: boolean | null;
+  feedback_correct_category: boolean | null;
+  feedback_correct_team: boolean | null;
+  feedback_correct_priority: boolean | null;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// AI reply assistant (Prompt 17) — draft-only replies, never auto-sent.
+// ---------------------------------------------------------------------------
+export type AiReplyStatus = 'queued' | 'running' | 'completed' | 'failed' | 'unavailable';
+
+export type AiReplyAction =
+  | 'generate'
+  | 'improve'
+  | 'shorten'
+  | 'friendlier'
+  | 'technical'
+  | 'simple';
+
+export type AiReplyTone = 'professional' | 'friendly' | 'concise' | 'technical' | 'simple';
+
+export interface AiReplyFact {
+  kind: 'confirmed' | 'likely' | 'unknown';
+  statement: string;
+}
+
+export interface AiReplySource {
+  type: string;
+  label: string;
+}
+
+export interface AiReplySuggestion {
+  id: string;
+  ticket_id: string;
+  action: AiReplyAction;
+  tone: AiReplyTone;
+  status: AiReplyStatus;
+  reply_text: string | null;
+  facts_summary: AiReplyFact[] | null;
+  sources: AiReplySource[] | null;
+  feedback_helpful: boolean | null;
+  feedback_reason: string | null;
+  requested_by: string | null;
+  created_at: string;
+  completed_at: string | null;
+  error_message: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge base (Prompt 17) — reusable, approved support content.
+// ---------------------------------------------------------------------------
+export type KnowledgeStatus = 'draft' | 'review' | 'approved' | 'archived';
+
+export type KnowledgeVisibility = 'customer_safe' | 'internal_only';
+
+export interface KnowledgeArticle {
+  id: string;
+  title: string;
+  site_id: string | null;
+  site_name: string | null;
+  category: string | null;
+  subcategory: string | null;
+  content: string;
+  internal_notes: string | null;
+  summary: string | null;
+  visibility: KnowledgeVisibility;
+  status: KnowledgeStatus;
+  version: number;
+  created_by: string | null;
+  created_by_name: string | null;
+  approved_by: string | null;
+  approved_by_name: string | null;
+  last_reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  review_due: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Resolution memory (Prompt 17) — sanitised records from resolved tickets.
+// ---------------------------------------------------------------------------
+export type ResolutionOutcome =
+  | 'resolved'
+  | 'partially_resolved'
+  | 'workaround'
+  | 'escalated'
+  | 'known_issue';
+
+export type ResolutionStatus = 'draft' | 'approved';
+
+export interface ResolutionRecord {
+  id: string;
+  site_id: string | null;
+  site_name: string | null;
+  category: string | null;
+  symptom: string | null;
+  root_cause: string | null;
+  diagnostic_evidence: string | null;
+  resolution_action: string | null;
+  outcome: ResolutionOutcome;
+  customer_safe_summary: string | null;
+  status: ResolutionStatus;
+  created_from_ticket_id: string | null;
+  created_by: string | null;
+  created_by_name: string | null;
+  approved_by: string | null;
+  approved_by_name: string | null;
+  created_at: string;
+  approved_at: string | null;
+}
+
+export interface SupportTeam {
+  id: string;
+  name: string;
+  description: string | null;
+  status: TeamStatus;
+  manager_id: string | null;
+  manager_name: string | null;
+  routing_strategy: RoutingStrategy;
+  member_count: number;
+  site_ids: string[];
+  site_names: string[];
+  open_tickets: number;
+  created_at: string;
+}
+
+export interface TeamWorkload {
+  team_id: string;
+  name: string;
+  open_tickets: number;
+  urgent_tickets: number;
+  sla_risk: number;
+  waiting_on_staff: number;
+  escalated_tickets: number;
+}
+
+export interface SupportRoutingRule {
+  id: string;
+  name: string;
+  rule_order: number;
+  is_active: boolean;
+  site_id: string | null;
+  site_name: string | null;
+  category: string | null;
+  priority: string | null;
+  keywords: string | null;
+  match_security: boolean;
+  match_billing: boolean;
+  team_id: string;
+  team_name: string | null;
+  suggested_priority: string | null;
+  requires_escalation: boolean;
+  created_at: string;
+}
+
+export interface AssignableStaff {
+  user_id: string;
+  email: string | null;
+  full_name: string | null;
+  role: string;
+  open_tickets: number;
+}
+
 export interface SupportSite {
   id: string;
   website_id: string | null;
@@ -44,6 +248,11 @@ export interface SupportSite {
   integration_mode: TicketIntegrationMode;
   allowed_origins: string[];
   archived_at: string | null;
+  default_support_team_id: string | null;
+  status: SiteStatus;
+  environment: SiteEnvironment;
+  support_contact: string | null;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -77,6 +286,13 @@ export interface SupportTicket {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  team_id: string | null;
+  routing_status: RoutingStatus;
+  routing_reason: string | null;
+  routing_confidence: RoutingConfidence | null;
+  routed_at: string | null;
+  matched_rule_id: string | null;
+  escalation_level: number;
 }
 
 export interface TicketMessage {
@@ -133,6 +349,99 @@ export interface TicketSlaRule {
 }
 
 export type TicketIntegrationMode = 'public_form' | 'server_to_server';
+
+// ---------------------------------------------------------------------------
+// Site onboarding + connector management (Prompt 19).
+// ---------------------------------------------------------------------------
+export type SiteStatus = 'setup' | 'testing' | 'active' | 'degraded' | 'disabled';
+
+export type SiteEnvironment = 'production' | 'staging' | 'test';
+
+export type ConnectorType =
+  | 'supabase'
+  | 'rest_api'
+  | 'n8n'
+  | 'stripe'
+  | 'email_provider'
+  | 'custom_dfp';
+
+export type ConnectorHealth = 'unknown' | 'operational' | 'degraded' | 'error' | 'disabled';
+
+export type CapabilityKey =
+  | 'ticket_intake'
+  | 'customer_resolution'
+  | 'diagnostics'
+  | 'repairs'
+  | 'view_as_customer'
+  | 'ai_triage'
+  | 'ai_reply'
+  | 'knowledge'
+  | 'billing'
+  | 'email_delivery'
+  | 'site_health';
+
+export type CapabilityStatus =
+  | 'configured'
+  | 'not_configured'
+  | 'testing'
+  | 'operational'
+  | 'error'
+  | 'disabled';
+
+export interface SupportSiteConnector {
+  id: string;
+  site_id: string;
+  connector_type: ConnectorType;
+  api_base_reference: string | null;
+  credential_configured: boolean;
+  n8n_workflow_reference: string | null;
+  health_status: ConnectorHealth;
+  needs_rotation: boolean;
+  disabled: boolean;
+  disabled_reason: string | null;
+  last_tested_at: string | null;
+  last_success_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SupportSiteCapability {
+  id: string;
+  site_id: string;
+  capability: CapabilityKey;
+  status: CapabilityStatus;
+  enabled: boolean;
+  required: boolean;
+  last_tested_at: string | null;
+  last_success_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ConnectorTestStatus = 'pass' | 'fail' | 'not_configured' | 'error';
+
+export interface ConnectorTest {
+  id: string;
+  site_id: string;
+  capability: CapabilityKey;
+  test_type: string;
+  status: ConnectorTestStatus;
+  started_at: string;
+  completed_at: string | null;
+  requested_by: string | null;
+  safe_error: string | null;
+  test_reference: string | null;
+  created_at: string;
+}
+
+export interface N8nWorkflowStatus {
+  diagnostics: 'configured' | 'not_configured';
+  repairs: 'configured' | 'not_configured';
+  ai_triage: 'configured' | 'not_configured';
+  ai_reply: 'configured' | 'not_configured';
+}
 
 // Integration credential. Never contains the raw secret — only its hash and an
 // encrypted ciphertext (both non-selectable through browser queries).
@@ -294,7 +603,7 @@ export interface SupportSummary {
   sla_breaches: number;
 }
 
-export type ReportRangeKey = 'today' | '7d' | '30d' | 'custom';
+export type ReportRangeKey = 'today' | '7d' | '30d' | '90d' | 'custom';
 
 // ---------------------------------------------------------------------------
 // Support Reports — ticket-volume series returned by internal_support_volume().
@@ -406,4 +715,153 @@ export interface SupportUnassignedSummary {
   oldest_ticket_id: string | null;
   oldest_ticket_number: string | null;
   oldest_created_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Support Analytics (Prompt 18) — server-side aggregated operational metrics.
+// ---------------------------------------------------------------------------
+
+export interface SupportAnalyticsSite {
+  site_id: string;
+  site_name: string;
+  site_slug: string;
+  domain: string | null;
+}
+
+export interface SupportAnalyticsOverview {
+  open_tickets: number;
+  new_today: number;
+  resolved_today: number;
+  urgent_tickets: number;
+  sla_at_risk: number;
+  sla_breached: number;
+  unassigned: number;
+  needs_review: number;
+  pending_repairs: number;
+  active_sessions: number;
+}
+
+export type CategoryTrend = 'increasing' | 'decreasing' | 'stable';
+
+export interface SupportCategoryStat {
+  category: string;
+  count: number;
+  percent: number;
+  avg_resolution_seconds: number | null;
+  repeat_count: number;
+  trend: CategoryTrend;
+}
+
+export interface SupportRecurringIssue {
+  site_name: string;
+  category: string;
+  occurrences: number;
+  trend: CategoryTrend;
+  typical_resolution: string | null;
+}
+
+export interface DiagnosticScopeStat {
+  scope: string;
+  count: number;
+  failures: number;
+}
+
+export interface SupportDiagnosticAnalytics {
+  runs: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  avg_duration_seconds: number | null;
+  scopes: DiagnosticScopeStat[];
+  leading_to_repair: number;
+  leading_to_resolution: number;
+}
+
+export interface RepairBreakdown {
+  action_type?: string;
+  risk_level?: string;
+  site_name?: string;
+  count: number;
+}
+
+export interface SupportRepairAnalytics {
+  requested: number;
+  approved: number;
+  rejected: number;
+  completed: number;
+  failed: number;
+  verification_failed: number;
+  pending_approval: number;
+  success_rate: number | null;
+  by_action_type: RepairBreakdown[];
+  by_risk: RepairBreakdown[];
+  by_site: RepairBreakdown[];
+}
+
+export interface SupportSessionAnalytics {
+  started: number;
+  completed: number;
+  expired: number;
+  revoked: number;
+  avg_duration_seconds: number | null;
+  sites_using_view_as_customer: number;
+}
+
+export interface SupportTriageAnalytics {
+  runs: number;
+  completed: number;
+  failed: number;
+  confidence: { high: number; medium: number; low: number };
+  category_accepted: number;
+  team_accepted: number;
+  priority_accepted: number;
+  manual_overrides: number;
+  helpful: number;
+  not_helpful: number;
+  feedback_recorded: number;
+}
+
+export interface SupportReplyAnalytics {
+  generated: number;
+  used: number;
+  discarded: number;
+  helpful: number;
+  not_helpful: number;
+  reasons: { reason: string; count: number }[];
+}
+
+export interface SupportKnowledgeAnalytics {
+  total_articles: number;
+  approved_articles: number;
+  stale_articles: number;
+  articles_due_review: number;
+  resolution_memories: number;
+  approved_resolution_memories: number;
+}
+
+export interface RoutingTeamStat {
+  team_name: string;
+  routed: number;
+  needs_review: number;
+  default_fallback: number;
+}
+
+export interface SupportRoutingAnalytics {
+  routed: number;
+  needs_review: number;
+  queued: number;
+  unrouted: number;
+  escalated: number;
+  default_team_fallbacks: number;
+  manual_overrides: number;
+  by_team: RoutingTeamStat[];
+}
+
+export interface SupportEscalationAnalytics {
+  escalated_tickets: number;
+  security_escalations: number;
+  technical_escalations: number;
+  sla_escalations: number;
+  repair_failures: number;
+  by_type: { escalation_type: string; count: number }[];
 }

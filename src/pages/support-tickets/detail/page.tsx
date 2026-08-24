@@ -2,14 +2,27 @@ import { useCallback, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/feature/AuthGuard';
+import usePermissions from '@/hooks/usePermissions';
 import Modal from '@/components/base/Modal';
 import ConfirmDialog from '@/components/base/ConfirmDialog';
 import { useTicketDetail } from './hooks';
 import CustomerPanel from './components/CustomerPanel';
+import AccountPanel from './components/AccountPanel';
+import DiagnosticsPanel from './components/DiagnosticsPanel';
+import RepairPanel from './components/RepairPanel';
+import SupportSessionPanel from './components/SupportSessionPanel';
+import RunDiagnosticModal from '@/pages/support-customers/components/RunDiagnosticModal';
+import RepairRequestModal from '@/pages/support-customers/components/RepairRequestModal';
+import SessionRequestModal from '@/pages/support-customers/components/SessionRequestModal';
+import { useTicketAccount } from '@/pages/support-customers/hooks';
 import MessageItem from './components/MessageItem';
 import ReplyComposer, { type ReplyMode, type ReplyResult } from './components/ReplyComposer';
 import HistoryPanel from './components/HistoryPanel';
 import HeaderControls from './components/HeaderControls';
+import RoutingPanel from './components/RoutingPanel';
+import TriagePanel from './components/TriagePanel';
+import ReplyAssistant from './components/ReplyAssistant';
+import SaveResolutionModal from './components/SaveResolutionModal';
 import NotificationStatus from './components/NotificationStatus';
 import {
   statusLabels,
@@ -21,6 +34,7 @@ import {
   formatFullDateTime,
 } from '@/pages/support-tickets/constants';
 import type { TicketStatus, TicketPriority } from '@/types/support-tickets';
+import type { RecommendedRepair } from '@/types/support-customers';
 
 interface Toast {
   message: string;
@@ -31,11 +45,35 @@ export default function SupportTicketDetail() {
   const { ticketId } = useParams<{ ticketId: string }>();
   const navigate = useNavigate();
   const auth = useAuth();
-  const canModify = auth.role === 'owner' || auth.role === 'admin';
+  const perms = usePermissions();
+  // Granular permission model (Prompt 14) — replaces the broad owner/admin flag.
+  const canModify = perms.can('support.tickets.assign');
+  const canReply = perms.canReply;
+  const canRunDiagnostics = perms.canRunDiagnostics;
+  const canRetryDiagnostics = perms.canRetryDiagnostics;
+  const canApproveRepair = perms.canApproveRepair;
+  const canRevokeSession = perms.canRevokeSession;
+  const canStartSession = perms.canStartSession;
+  const canGenerateAiReply = perms.canGenerateAiReply;
+  const canRunTriage = perms.canRunTriage;
+  const canSaveResolution = perms.canCreateResolutions;
 
-  const { ticket, messages, attachments, events, staff, loading, error, refresh } = useTicketDetail(
+  const { ticket, messages, attachments, events, loading, error, refresh } = useTicketDetail(
     ticketId,
     auth.role,
+  );
+
+  const {
+    account,
+    loading: accountLoading,
+    error: accountError,
+    refresh: refreshAccount,
+  } = useTicketAccount(ticketId);
+
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [sessionOpen, setSessionOpen] = useState(false);
+  const [repairRequest, setRepairRequest] = useState<{ rec: RecommendedRepair; runId: string | null } | null>(
+    null,
   );
 
   const [submitting, setSubmitting] = useState(false);
@@ -43,6 +81,9 @@ export default function SupportTicketDetail() {
   const [confirm, setConfirm] = useState<{ action: () => void; message: string } | null>(null);
   const [resolveOpen, setResolveOpen] = useState(false);
   const [resolveSummary, setResolveSummary] = useState('');
+  const [triageDraft, setTriageDraft] = useState<string | null>(null);
+  const [currentDraft, setCurrentDraft] = useState('');
+  const [resolutionOpen, setResolutionOpen] = useState(false);
 
   const showToast = useCallback((message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -63,13 +104,6 @@ export default function SupportTicketDetail() {
     }
     showToast(successMsg, 'success');
     refresh();
-  };
-
-  const handleAssign = (userId: string | null, name: string | null) => {
-    updateTicket(
-      { assigned_to: userId, assigned_agent: name },
-      userId ? `Assigned to ${name}` : 'Ticket unassigned',
-    );
   };
 
   const handleChangePriority = (p: TicketPriority) => {
@@ -241,6 +275,10 @@ export default function SupportTicketDetail() {
 
   const overdue = isOverdue(ticket.due_at, ticket.status);
 
+  const resolvedCustomerId = account?.customer?.customer_id ?? ticket.customer_user_id ?? null;
+  const diagSiteId = account?.source_site?.site_id ?? ticket.site_id ?? null;
+  const diagSiteName = account?.source_site?.product ?? ticket.site_name;
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -291,16 +329,23 @@ export default function SupportTicketDetail() {
               {ticket.due_at ? overdueDuration(ticket.due_at) : 'Overdue'}
             </span>
           )}
+          {canSaveResolution && (
+            <button
+              type="button"
+              onClick={() => setResolutionOpen(true)}
+              className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border border-background-300/60 text-foreground-400 hover:text-foreground-100 hover:border-foreground-400 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <i className="ri-archive-drawer-line w-3.5 h-3.5 flex items-center justify-center"></i>
+              Save Resolution
+            </button>
+          )}
         </div>
       </div>
 
       {/* Controls */}
       <HeaderControls
         ticket={ticket}
-        staff={staff}
         canModify={canModify}
-        currentUserId={auth.user?.id}
-        onAssign={handleAssign}
         onChangeStatus={requestStatusChange}
         onChangePriority={handleChangePriority}
         onToggleRead={handleToggleRead}
@@ -331,12 +376,71 @@ export default function SupportTicketDetail() {
             ))
           )}
 
-          <ReplyComposer canModify={canModify} submitting={submitting} onSubmit={handleSendReply} />
+          <ReplyAssistant
+            ticketId={ticket.id}
+            canGenerate={canGenerateAiReply}
+            baseText={currentDraft}
+            onUseReply={(text) => setTriageDraft(text)}
+            onToast={showToast}
+          />
+
+          <ReplyComposer
+            canModify={canReply}
+            submitting={submitting}
+            onSubmit={handleSendReply}
+            injectedText={triageDraft}
+            onInjectedConsumed={() => setTriageDraft(null)}
+            onDraftChange={setCurrentDraft}
+          />
         </div>
 
-        {/* Customer + history */}
+        {/* Account + diagnostics + customer + history */}
         <div className="space-y-5 min-w-0">
+          <RoutingPanel
+            ticket={ticket}
+            canAssign={canModify}
+            currentUserId={auth.user?.id}
+            onChanged={refresh}
+          />
+          <TriagePanel
+            ticketId={ticket.id}
+            canRun={canRunTriage}
+            canApply={canModify}
+            canReply={canReply}
+            onRunDiagnostic={() => resolvedCustomerId && setDiagOpen(true)}
+            onUseResponse={(text) => setTriageDraft(text)}
+            onToast={showToast}
+          />
+          <AccountPanel
+            ticket={ticket}
+            canModify={canModify}
+            canRunDiagnostics={canRunDiagnostics}
+            account={account}
+            loading={accountLoading}
+            error={accountError}
+            onRefresh={refreshAccount}
+            onRunDiagnostics={() => resolvedCustomerId && setDiagOpen(true)}
+            onToast={showToast}
+          />
+          <SupportSessionPanel
+            ticketId={ticket.id}
+            canStart={canStartSession}
+            canRevoke={canRevokeSession}
+            canStartSession={Boolean(resolvedCustomerId)}
+            onStartSession={() => setSessionOpen(true)}
+            onToast={showToast}
+          />
+          <RepairPanel ticketId={ticket.id} canApprove={canApproveRepair} onToast={showToast} />
           <CustomerPanel ticket={ticket} canModify={canModify} />
+          <DiagnosticsPanel
+            ticketId={ticket.id}
+            canRun={canRunDiagnostics}
+            canRetry={canRetryDiagnostics}
+            hasCustomer={Boolean(resolvedCustomerId)}
+            onRun={() => resolvedCustomerId && setDiagOpen(true)}
+            onRetry={() => resolvedCustomerId && setDiagOpen(true)}
+            onReviewRepair={(rec, runId) => setRepairRequest({ rec, runId })}
+          />
           {canModify && <NotificationStatus ticketId={ticket.id} canRetry={canModify} />}
           <HistoryPanel events={events} />
         </div>
@@ -384,6 +488,64 @@ export default function SupportTicketDetail() {
           confirm?.action();
           setConfirm(null);
         }}
+      />
+
+      <RunDiagnosticModal
+        open={diagOpen}
+        onClose={() => setDiagOpen(false)}
+        customerId={resolvedCustomerId ?? ''}
+        customerName={account?.customer?.name ?? ticket.customer_name}
+        customerEmail={account?.customer?.email ?? ticket.customer_email}
+        siteId={diagSiteId}
+        siteName={diagSiteName}
+        userId={resolvedCustomerId ?? undefined}
+        ticketId={ticket.id}
+        ticketNumber={ticket.ticket_number}
+        onStarted={showToast}
+        onDone={() => {}}
+      />
+
+      <SessionRequestModal
+        open={sessionOpen}
+        onClose={() => setSessionOpen(false)}
+        customerId={resolvedCustomerId ?? ''}
+        customerName={account?.customer?.name ?? ticket.customer_name}
+        customerEmail={account?.customer?.email ?? ticket.customer_email}
+        siteId={diagSiteId}
+        siteName={diagSiteName}
+        ticketId={ticket.id}
+        ticketNumber={ticket.ticket_number}
+        onStarted={showToast}
+        onSessionCreated={(id) => navigate(`/support-session/${id}`)}
+      />
+
+      <RepairRequestModal
+        open={repairRequest !== null}
+        onClose={() => setRepairRequest(null)}
+        customerId={resolvedCustomerId ?? ''}
+        customerName={account?.customer?.name ?? ticket.customer_name}
+        customerEmail={account?.customer?.email ?? ticket.customer_email}
+        siteId={diagSiteId}
+        siteName={diagSiteName}
+        userId={resolvedCustomerId ?? undefined}
+        ticketId={ticket.id}
+        ticketNumber={ticket.ticket_number}
+        diagnosticRunId={repairRequest?.runId ?? null}
+        recommendation={repairRequest?.rec ?? null}
+        onRequested={showToast}
+        onDone={() => setRepairRequest(null)}
+      />
+
+      <SaveResolutionModal
+        open={resolutionOpen}
+        onClose={() => setResolutionOpen(false)}
+        ticket={{
+          id: ticket.id,
+          site_id: ticket.site_id,
+          category: ticket.category,
+          subject: ticket.subject,
+        }}
+        onToast={showToast}
       />
 
       {/* Toast */}

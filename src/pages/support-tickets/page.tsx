@@ -21,12 +21,14 @@ import {
   priorityLabels,
   type SortValue,
 } from './constants';
-import type { TicketPriority, TicketStatus } from '@/types/support-tickets';
+import type { TicketPriority, TicketStatus, RoutingStatus } from '@/types/support-tickets';
 import SummaryCards, { type SummaryCardKey } from './components/SummaryCards';
 import FilterBar from './components/FilterBar';
 import TicketList from './components/TicketList';
 import CreateTicketModal from './components/CreateTicketModal';
 import Skeletons from './components/Skeletons';
+import { useSupportTeams } from '@/pages/support-teams/hooks';
+import { ROUTING_STATUS_OPTIONS } from '@/pages/support-teams/constants';
 
 const SORT_VALUES = SORT_OPTIONS.map((s) => s.value);
 
@@ -42,6 +44,11 @@ function parseEnum<T extends string>(raw: string | null, valid: readonly T[]): T
   return 'all';
 }
 
+function parseRouting(raw: string | null): 'all' | RoutingStatus {
+  if (raw && (ROUTING_STATUS_OPTIONS as string[]).includes(raw)) return raw as RoutingStatus;
+  return 'all';
+}
+
 function parseFilters(params: URLSearchParams): InboxFilters {
   return {
     q: params.get('q') ?? '',
@@ -52,6 +59,8 @@ function parseFilters(params: URLSearchParams): InboxFilters {
     site: params.get('site') ?? 'all',
     project: params.get('project') ?? 'all',
     assigned: params.get('assigned') ?? 'all',
+    team: params.get('team') ?? 'all',
+    routing: parseRouting(params.get('routing')),
     unread: params.get('unread') === '1',
     overdue: params.get('overdue') === '1',
     resolvedToday: params.get('resolvedToday') === '1',
@@ -83,7 +92,7 @@ export default function SupportTickets() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const role = auth.role;
-  const canModify = role === 'owner' || role === 'admin';
+  const canModify = role === 'owner' || role === 'admin' || role === 'support_manager';
 
   // Date-range filters are local-only (not bookmarked); the rest live in URL.
   const [dateFilters, setDateFilters] = useState({
@@ -113,6 +122,7 @@ export default function SupportTickets() {
   });
 
   const { sites, staff, projects } = useSupportLookups();
+  const { teams } = useSupportTeams();
   const { counts, refresh: refreshCounts } = useSupportCounts();
   const { tickets, total, loading, error, lastRefreshed, refresh } = useSupportInbox(
     filters,
@@ -120,6 +130,12 @@ export default function SupportTickets() {
     pageSize,
     sort,
   );
+
+  const teamNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const t of teams) map[t.id] = t.name;
+    return map;
+  }, [teams]);
 
   const showToast = useCallback((message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -147,6 +163,8 @@ export default function SupportTickets() {
       if (next.site !== 'all') params.set('site', next.site);
       if (next.project !== 'all') params.set('project', next.project);
       if (next.assigned !== 'all') params.set('assigned', next.assigned);
+      if (next.team !== 'all') params.set('team', next.team);
+      if (next.routing !== 'all') params.set('routing', next.routing);
       if (next.unread) params.set('unread', '1');
       if (next.overdue) params.set('overdue', '1');
       if (next.resolvedToday) params.set('resolvedToday', '1');
@@ -248,6 +266,56 @@ export default function SupportTickets() {
     }
   };
 
+  type QueueKey = 'all' | 'mine' | 'unassigned' | 'review' | 'escalated' | 'urgent' | 'sla';
+
+  const currentQueue = useMemo<QueueKey>(() => {
+    if (filters.routing === 'needs_review') return 'review';
+    if (filters.routing === 'escalated') return 'escalated';
+    if (filters.assigned === 'unassigned') return 'unassigned';
+    if (filters.assigned === auth.user?.id) return 'mine';
+    if (filters.priority === 'urgent') return 'urgent';
+    if (filters.overdue) return 'sla';
+    return 'all';
+  }, [filters, auth.user?.id]);
+
+  const selectQueue = (key: QueueKey) => {
+    const reset: Partial<InboxFilters> = { team: 'all', routing: 'all', priority: 'all', overdue: false };
+    switch (key) {
+      case 'mine':
+        applyPatch({ ...reset, assigned: auth.user?.id ?? 'all' });
+        break;
+      case 'unassigned':
+        applyPatch({ ...reset, assigned: 'unassigned' });
+        break;
+      case 'review':
+        applyPatch({ ...reset, routing: 'needs_review', assigned: 'all' });
+        break;
+      case 'escalated':
+        applyPatch({ ...reset, routing: 'escalated', assigned: 'all' });
+        break;
+      case 'urgent':
+        applyPatch({ ...reset, priority: 'urgent', assigned: 'all' });
+        break;
+      case 'sla':
+        applyPatch({ ...reset, overdue: true, assigned: 'all' });
+        break;
+      case 'all':
+      default:
+        applyPatch({ ...reset, assigned: 'all' });
+        break;
+    }
+  };
+
+  const queueTabs: { key: QueueKey; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'mine', label: 'My Tickets' },
+    { key: 'unassigned', label: 'Unassigned' },
+    { key: 'review', label: 'Needs Review' },
+    { key: 'escalated', label: 'Escalated' },
+    { key: 'urgent', label: 'Urgent' },
+    { key: 'sla', label: 'SLA Risk' },
+  ];
+
   const openTicket = (t: TicketWithMeta) => navigate(`/support-tickets/${t.id}`);
 
   const refreshAll = () => {
@@ -311,6 +379,8 @@ export default function SupportTickets() {
     if (filters.site !== 'all') n++;
     if (filters.project !== 'all') n++;
     if (filters.assigned !== 'all') n++;
+    if (filters.team !== 'all') n++;
+    if (filters.routing !== 'all') n++;
     if (filters.unread) n++;
     if (filters.overdue) n++;
     if (filters.resolvedToday) n++;
@@ -374,6 +444,28 @@ export default function SupportTickets() {
             onSelect={handleCardSelect}
           />
 
+          {/* Queue quick filters */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {queueTabs.map((tab) => {
+              const active = currentQueue === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => selectQueue(tab.key)}
+                  aria-pressed={active}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    active
+                      ? 'bg-accent-500 text-background-950'
+                      : 'bg-background-100 border border-background-300/60 text-foreground-400 hover:text-foreground-200'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
           <FilterBar
             filters={filters}
             searchInput={searchInput}
@@ -383,6 +475,7 @@ export default function SupportTickets() {
             sites={sites}
             staff={staff}
             projects={projects}
+            teams={teams}
             appliedCount={appliedCount}
           />
 
@@ -442,6 +535,7 @@ export default function SupportTickets() {
               <TicketList
                 tickets={tickets}
                 staff={staff}
+                teamNameById={teamNameById}
                 canModify={canModify}
                 currentUserId={auth.user?.id}
                 onOpen={openTicket}

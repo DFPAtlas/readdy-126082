@@ -4,12 +4,14 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // ============================================================================
 // manage-support-integrations — secure admin operations for the support-ticket
 // integration administration area:
-//   * issue_credential  — generate secret, store hash + AES-GCM ciphertext,
-//                         return the raw secret exactly once
-//   * rotate_credential — issue a replacement, optionally revoke the old one
-//   * revoke_credential — deactivate a credential (preserves history)
-//   * health_test       — non-ticket-creating configuration / connectivity
-//                         checks (never a live ticket submission)
+//   * issue_credential   — generate secret, store hash + AES-GCM ciphertext,
+//                          return the raw secret exactly once
+//   * rotate_credential  — issue a replacement, optionally revoke the old one
+//   * revoke_credential  — deactivate a credential (preserves history)
+//   * health_test        — non-ticket-creating configuration / connectivity
+//                          checks (never a live ticket submission)
+//   * create_test_ticket — owner/admin-only internal test ticket (clearly
+//                          marked, no customer notification, no auto repair)
 //
 // The caller is the authenticated Command Centre user (verify_jwt). The role
 // is re-checked server-side against internal_user_roles — owner/admin only.
@@ -19,9 +21,19 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 function json(body: Record<string, unknown>, status: number) {
   return new Response(JSON.stringify(body), {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      ...CORS,
+      "Content-Type": "application/json",
+    },
     status,
   });
 }
@@ -84,7 +96,22 @@ const isValidOrigin = (o: string) => {
   }
 };
 
+const isValidEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+
+const TEST_CATEGORIES = new Set([
+  "general", "technical", "account", "billing", "access",
+  "bug", "complaint", "feature_request", "security", "other",
+]);
+const TEST_PRIORITIES = new Set(["low", "normal", "high"]);
+
 serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: CORS,
+    });
+  }
+
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   const authHeader = req.headers.get("Authorization") ?? "";
@@ -337,6 +364,74 @@ serve(async (req: Request) => {
         { site_id: site.id, correlation_id: corrId, overall });
 
       return json({ correlationId: corrId, overall, checks, site: { id: site.id, slug: site.site_slug } }, 200);
+    }
+
+    if (action === "create_test_ticket") {
+      const siteId = typeof body.siteId === "string" ? body.siteId : "";
+      const { data: site } = await supabaseAdmin
+        .from("internal_support_sites")
+        .select("id, site_name, site_slug, project_id, is_active")
+        .eq("id", siteId)
+        .maybeSingle();
+      if (!site) return json({ error: "Site not found" }, 404);
+      if (!site.is_active) return json({ error: "Site is inactive" }, 403);
+
+      const customerName = String(body.customerName ?? "").trim();
+      const customerEmail = String(body.customerEmail ?? "").trim();
+      const subject = String(body.subject ?? "").trim();
+      const description = String(body.description ?? "").trim();
+      const category = String(body.category ?? "");
+      const priority = String(body.priority ?? "normal");
+
+      if (!customerName) return json({ error: "Customer name is required" }, 400);
+      if (!customerEmail) return json({ error: "Email is required" }, 400);
+      if (!isValidEmail(customerEmail)) return json({ error: "Email is invalid" }, 400);
+      if (!subject) return json({ error: "Subject is required" }, 400);
+      if (!description) return json({ error: "Description is required" }, 400);
+      if (!TEST_CATEGORIES.has(category)) return json({ error: "Invalid category" }, 400);
+      if (!TEST_PRIORITIES.has(priority)) return json({ error: "Invalid priority" }, 400);
+
+      // Clearly mark the test ticket and prefix the subject.
+      const testSubject = `[TEST] ${subject}`;
+      const metadata = {
+        is_test: true,
+        test_source: "dfp_command_admin_test",
+      };
+
+      const { data: result, error: rpcErr } = await supabaseAdmin.rpc(
+        "internal_create_support_ticket",
+        {
+          p_site_id: site.id,
+          p_project_id: site.project_id ?? null,
+          p_external_reference: null,
+          p_customer_user_id: null,
+          p_customer_name: customerName,
+          p_customer_email: customerEmail,
+          p_customer_phone: null,
+          p_subject: testSubject,
+          p_description: description,
+          p_category: category,
+          p_priority: priority,
+          p_source: "admin",
+          p_metadata: metadata,
+          p_nonce_hash: null,
+          p_idempotency_hash: null,
+        },
+      );
+
+      if (rpcErr) {
+        return json({ error: "Failed to create test ticket" }, 500);
+      }
+
+      const created = (result ?? {}) as { status?: string; ticket_id?: string; ticket_number?: string };
+      const ticketId = created.ticket_id ?? null;
+      const ticketNumber = created.ticket_number ?? null;
+
+      await logAudit("support_ticket", "test_ticket_created",
+        `Test ticket ${ticketNumber ?? ""} created for ${site.site_name}`,
+        { site_id: site.id, ticket_id: ticketId, ticket_number: ticketNumber });
+
+      return json({ success: true, ticketId, ticketNumber }, 201);
     }
 
     return json({ error: "Unknown action" }, 400);

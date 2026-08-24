@@ -4,6 +4,7 @@ import type {
   SupportSite,
   SupportSiteStats,
   SupportStaffMember,
+  SupportTeam,
   TicketApiClient,
   TicketSiteSettings,
   TicketSlaRule,
@@ -26,7 +27,7 @@ export function useSupportSites() {
       const [sitesRes, statsRes] = await Promise.all([
         supabase
           .from('internal_support_sites')
-          .select('id, website_id, project_id, site_name, site_slug, domain, support_email, is_active, integration_mode, allowed_origins, archived_at, created_at, updated_at')
+          .select('id, website_id, project_id, site_name, site_slug, domain, support_email, is_active, integration_mode, allowed_origins, archived_at, default_support_team_id, status, environment, support_contact, notes, created_at, updated_at')
           .order('site_name', { ascending: true }),
         supabase.rpc('internal_support_site_stats'),
       ]);
@@ -106,6 +107,37 @@ export function useIntegrationLookups() {
   }, []);
 
   return { staff, websites, projects, loading };
+}
+
+// ---------------------------------------------------------------------------
+// Support teams — used by the site default-team selector. Returns active teams
+// only, filtered down to those authorised for a given site (a team with no
+// explicit site mappings is treated as globally available).
+// ---------------------------------------------------------------------------
+export function useSupportTeams() {
+  const [teams, setTeams] = useState<SupportTeam[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc('internal_list_support_teams');
+      if (cancelled) return;
+      if (!error) setTeams((data ?? []) as SupportTeam[]);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { teams, loading };
+}
+
+export function teamsForSite(teams: SupportTeam[], siteId: string): SupportTeam[] {
+  return teams.filter(
+    (t) => t.status === 'active' && (t.site_ids.length === 0 || t.site_ids.includes(siteId)),
+  );
 }
 
 // ---------------------------------------------------------------------------

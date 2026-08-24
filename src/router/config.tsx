@@ -27,6 +27,13 @@ import SupportTickets from "@/pages/support-tickets/page";
 import SupportTicketDetail from "@/pages/support-tickets/detail/page";
 import NotificationPreferences from "@/pages/support-tickets/preferences/page";
 import SupportReports from "@/pages/support-tickets/reports/page";
+import SupportCustomers from "@/pages/support-customers/page";
+import Customer360Page from "@/pages/support-customers/detail/page";
+import SupportRepairs from "@/pages/support-repairs/page";
+import SupportSessionPage from "@/pages/support-session/page";
+import SupportTeams from "@/pages/support-teams/page";
+import SupportRouting from "@/pages/support-routing/page";
+import SupportKnowledge from "@/pages/support-knowledge/page";
 import WebsiteUatDashboard from "@/pages/admin/website-uat/page";
 import SupportIntegrations from "@/pages/admin/support-integrations/page";
 import SupportIntegrationTestForm from "@/pages/admin/support-integrations/test-form/page";
@@ -79,6 +86,13 @@ const routes: RouteObject[] = [
       { path: "support-tickets/preferences", element: <NotificationPreferences /> },
       { path: "support-tickets/reports", element: <SupportReports /> },
       { path: "support-tickets/:ticketId", element: <SupportTicketDetail /> },
+      { path: "customers", element: <SupportCustomers /> },
+      { path: "customers/:customerId", element: <Customer360Page /> },
+      { path: "support-repairs", element: <SupportRepairs /> },
+      { path: "support-session/:sessionId", element: <SupportSessionPage /> },
+      { path: "support-teams", element: <SupportTeams /> },
+      { path: "support-routing", element: <SupportRouting /> },
+      { path: "support-knowledge", element: <SupportKnowledge /> },
       { path: "command-centre/tickets", element: <SupportTickets /> },
       { path: "admin/website-uat", element: <UatAdminGuard><WebsiteUatDashboard /></UatAdminGuard> },
       { path: "admin/support-integrations", element: <SupportIntegrations /> },

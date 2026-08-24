@@ -1,0 +1,21 @@
+-- ============================================================================
+-- FOOTPRINTCC DFP COMMAND — PROMPT 18 (HARDENING) — SITE-ACCESS ON REPORTS
+-- ============================================================================
+-- The Prompt 09 reporting RPCs predate the Prompt 14 site-access model and
+-- gated only on `internal_role() IS NOT NULL`. This meant a site-restricted
+-- staff member (support_agent / developer / viewer) could obtain cross-site
+-- aggregates through a direct RPC call.
+--
+-- This migration re-defines those five functions to additionally filter on
+-- internal_accessible_site_ids() so ROLE + SITE ACCESS are both enforced
+-- server-side (owner/admin/support_manager remain unrestricted):
+--
+--   * internal_support_summary(p_start, p_end)
+--   * internal_support_volume(p_start, p_end)
+--   * internal_support_site_performance(p_start, p_end)
+--   * internal_support_sla_summary(p_start, p_end, p_site_id)
+--   * internal_support_sla_breaches(p_start, p_end, p_site_id, p_limit, p_offset)
+--
+-- (The staff-workload and unassigned RPCs already required owner/admin, which
+-- are unrestricted, so they needed no change.)
+-- ============================================================================

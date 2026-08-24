@@ -9,6 +9,18 @@ export type PublicTicketPriority = 'low' | 'normal' | 'high';
 
 export interface SupportTicketSubmitResult {
   ticketNumber: string | null;
+  /** Optional internal ticket id, returned by admin/override submissions. */
+  ticketId?: string | null;
+}
+
+export interface SupportTicketFormSubmitPayload {
+  name: string;
+  email: string;
+  phone: string;
+  subject: string;
+  description: string;
+  category: TicketCategory;
+  priority: PublicTicketPriority;
 }
 
 export interface SupportTicketFormProps {
@@ -40,6 +52,9 @@ export interface SupportTicketFormProps {
   compact?: boolean;
   /** Optional async gate run before a real submission (e.g. confirmation). */
   confirmBeforeSubmit?: () => Promise<boolean>;
+  /** Optional custom submission handler. When provided, replaces the default
+   *  public-form endpoint call (used by the internal admin test form). */
+  submitOverride?: (payload: SupportTicketFormSubmitPayload) => Promise<SupportTicketSubmitResult>;
   onSuccess?: (result: SupportTicketSubmitResult) => void;
   onError?: (message: string) => void;
 }
@@ -180,6 +195,7 @@ export default function SupportTicketForm({
   captchaRequired = false,
   compact = false,
   confirmBeforeSubmit,
+  submitOverride,
   onSuccess,
   onError,
 }: SupportTicketFormProps) {
@@ -280,6 +296,44 @@ export default function SupportTicketForm({
     if (confirmBeforeSubmit) {
       const ok = await confirmBeforeSubmit();
       if (!ok) return;
+    }
+
+    // Internal admin/override path — the caller provides its own submission
+    // (e.g. an authenticated owner/admin server-side action).
+    if (submitOverride) {
+      setStatus('submitting');
+      try {
+        const result = await submitOverride({
+          name: name.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+          subject: subject.trim(),
+          description: description.trim(),
+          category,
+          priority,
+        });
+        setStatus('success');
+        setTicketNumber(result.ticketNumber);
+        onSuccess?.(result);
+        setName('');
+        setEmail('');
+        setPhone('');
+        setSubject('');
+        setDescription('');
+        setConsent(false);
+        setTurnstileToken('');
+        idempotencyKeyRef.current = null;
+        return;
+      } catch (err) {
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : 'Your request could not be submitted. Please try again.';
+        setStatus('error');
+        setFormError(message);
+        onError?.(message);
+        return;
+      }
     }
 
     if (!idempotencyKeyRef.current) {

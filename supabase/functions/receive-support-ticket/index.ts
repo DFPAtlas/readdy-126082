@@ -158,7 +158,7 @@ serve(async (req: Request) => {
   const originHeader = req.headers.get("origin");
 
   if (method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeadersFor(originHeader), status: 204 });
+    return new Response(null, { headers: corsHeadersFor(originHeader), status: 204 });
   }
 
   if (method !== "POST") {

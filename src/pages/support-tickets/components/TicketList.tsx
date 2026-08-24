@@ -19,6 +19,7 @@ import { assigneeName } from '../hooks';
 interface TicketListProps {
   tickets: TicketWithMeta[];
   staff: StaffOption[];
+  teamNameById: Record<string, string>;
   canModify: boolean;
   currentUserId?: string;
   onOpen: (t: TicketWithMeta) => void;
@@ -47,9 +48,37 @@ function StatusBadge({ status }: { status: TicketStatus }) {
   );
 }
 
+const TRIAGE_CONFIDENCE_COLORS: Record<string, string> = {
+  high: 'bg-emerald-500/15 text-emerald-400',
+  medium: 'bg-amber-500/15 text-amber-400',
+  low: 'bg-red-500/15 text-red-400',
+};
+
+function TriageChip({ status, confidence }: { status: string | null; confidence: string | null }) {
+  if (!status || status === 'failed' || status === 'unavailable') return null;
+  if (status === 'queued' || status === 'running') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-label px-1.5 py-0.5 rounded-full bg-secondary-500/15 text-secondary-300 whitespace-nowrap" title="AI triage in progress">
+        <i className="ri-sparkling-line text-xs w-3 h-3 flex items-center justify-center"></i>
+        AI…
+      </span>
+    );
+  }
+  if (status === 'completed' && confidence) {
+    return (
+      <span className={`inline-flex items-center gap-1 text-[10px] font-label px-1.5 py-0.5 rounded-full whitespace-nowrap ${TRIAGE_CONFIDENCE_COLORS[confidence] ?? ''}`} title={`AI triage · ${confidence} confidence`}>
+        <i className="ri-sparkling-line text-xs w-3 h-3 flex items-center justify-center"></i>
+        AI
+      </span>
+    );
+  }
+  return null;
+}
+
 export default function TicketList({
   tickets,
   staff,
+  teamNameById,
   canModify,
   currentUserId,
   onOpen,
@@ -75,6 +104,7 @@ export default function TicketList({
                 <th className="px-4 py-3 text-xs font-label text-foreground-400 uppercase tracking-wide whitespace-nowrap">Customer</th>
                 <th className="px-4 py-3 text-xs font-label text-foreground-400 uppercase tracking-wide whitespace-nowrap">Priority</th>
                 <th className="px-4 py-3 text-xs font-label text-foreground-400 uppercase tracking-wide whitespace-nowrap">Status</th>
+                <th className="px-4 py-3 text-xs font-label text-foreground-400 uppercase tracking-wide whitespace-nowrap hidden lg:table-cell">Team</th>
                 <th className="px-4 py-3 text-xs font-label text-foreground-400 uppercase tracking-wide whitespace-nowrap hidden lg:table-cell">Assigned</th>
                 <th className="px-4 py-3 text-xs font-label text-foreground-400 uppercase tracking-wide whitespace-nowrap">Last activity</th>
                 <th className="px-4 py-3 text-xs font-label text-foreground-400 uppercase tracking-wide whitespace-nowrap w-10">
@@ -129,6 +159,20 @@ export default function TicketList({
                       <StatusBadge status={t.status} />
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs text-foreground-400 whitespace-nowrap">
+                          {teamNameById[t.team_id ?? ''] ?? '—'}
+                        </span>
+                        {t.routing_status === 'needs_review' && (
+                          <span className="text-[10px] font-label px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 whitespace-nowrap">Review</span>
+                        )}
+                        {t.routing_status === 'escalated' && (
+                          <span className="text-[10px] font-label px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-400 whitespace-nowrap">Escalated</span>
+                        )}
+                        <TriageChip status={t.triage_status} confidence={t.triage_confidence} />
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
                       {assignee ? (
                         <span className="text-xs text-foreground-300 whitespace-nowrap">{assignee}</span>
                       ) : (
@@ -180,6 +224,7 @@ export default function TicketList({
         {tickets.map((t) => {
           const overdue = isOverdue(t.due_at, t.status);
           const assignee = assigneeName(t, staff);
+          const teamName = teamNameById[t.team_id ?? ''];
           return (
             <div
               key={t.id}
@@ -221,6 +266,21 @@ export default function TicketList({
               <div className="flex items-center gap-2 mt-2 flex-wrap">
                 <PriorityBadge priority={t.priority} />
                 <StatusBadge status={t.status} />
+                {(t.routing_status === 'needs_review' || t.routing_status === 'escalated' || t.triage_status) && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {t.routing_status === 'escalated' && (
+                      <span className="text-[10px] font-label px-1.5 py-0.5 rounded-full whitespace-nowrap bg-orange-500/15 text-orange-400">
+                        Escalated
+                      </span>
+                    )}
+                    {t.routing_status === 'needs_review' && (
+                      <span className="text-[10px] font-label px-1.5 py-0.5 rounded-full whitespace-nowrap bg-amber-500/15 text-amber-400">
+                        Needs Review
+                      </span>
+                    )}
+                    <TriageChip status={t.triage_status} confidence={t.triage_confidence} />
+                  </div>
+                )}
                 {overdue && (
                   <span className="text-[11px] text-red-400 font-medium whitespace-nowrap">
                     {t.due_at ? overdueDuration(t.due_at) : 'Overdue'}
@@ -238,7 +298,9 @@ export default function TicketList({
                   <span className="whitespace-nowrap">{formatRelative(t.last_activity_at)}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="whitespace-nowrap">{categoryLabels[t.category]}</span>
+                  <span className="whitespace-nowrap">
+                    {categoryLabels[t.category]}{teamName ? ` · ${teamName}` : ''}
+                  </span>
                   <span className="whitespace-nowrap">{assignee || 'Unassigned'}</span>
                 </div>
               </div>

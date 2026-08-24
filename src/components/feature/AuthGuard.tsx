@@ -1,13 +1,14 @@
 import { useEffect, useState, createContext, useContext, type ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
+import type { Role } from '@/lib/permissions';
 
 type MfaStatus = 'setup' | 'verify' | 'satisfied';
 
 interface AuthState {
   loading: boolean;
   user: { id: string; email?: string } | null;
-  role: 'owner' | 'admin' | 'viewer' | null;
+  role: Role | null;
   mfaStatus: MfaStatus | null;
 }
 
@@ -62,11 +63,14 @@ export default function AuthGuard({ children }: { children: ReactNode }) {
       try {
         const { data: roleData } = await supabase
           .from('internal_user_roles')
-          .select('role')
+          .select('role, status')
           .eq('user_id', userId)
           .maybeSingle();
 
-        if (roleData?.role) return roleData.role as AuthState['role'];
+        // Disabled staff accounts are denied access (status !== 'active').
+        if (roleData?.role && roleData?.status !== 'disabled') {
+          return roleData.role as AuthState['role'];
+        }
 
         // No role yet — attempt to accept a pending invitation. This is resolved
         // server-side (SECURITY DEFINER), never by the browser, and can only ever

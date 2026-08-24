@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { InboxFilters, StaffOption } from '../hooks';
-import type { SupportSite, TicketStatus } from '@/types/support-tickets';
+import type { SupportSite, TicketStatus, SupportTeam } from '@/types/support-tickets';
+import { ROUTING_STATUS_OPTIONS, routingStatusLabels } from '@/pages/support-teams/constants';
 import {
   STATUS_OPTIONS,
   PRIORITY_OPTIONS,
@@ -21,6 +22,7 @@ interface FilterBarProps {
   sites: SupportSite[];
   staff: StaffOption[];
   projects: { id: number; project_name: string }[];
+  teams: SupportTeam[];
   appliedCount: number;
 }
 
@@ -132,6 +134,7 @@ function FilterControls({
   sites,
   staff,
   projects,
+  teams,
 }: FilterControlsProps) {
   return (
     <div className="space-y-3">
@@ -177,6 +180,34 @@ function FilterControls({
               <option key={s.user_id} value={s.user_id}>
                 {s.full_name || s.email || s.user_id}
               </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs font-label text-foreground-500 mb-1">Team</label>
+          <select
+            value={filters.team}
+            onChange={(e) => onChange({ team: e.target.value })}
+            className={`${selectCls} w-full`}
+          >
+            <option value="all">All teams</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs font-label text-foreground-500 mb-1">Routing</label>
+          <select
+            value={filters.routing}
+            onChange={(e) => onChange({ routing: e.target.value as InboxFilters['routing'] })}
+            className={`${selectCls} w-full`}
+          >
+            <option value="all">All routing</option>
+            {ROUTING_STATUS_OPTIONS.map((r) => (
+              <option key={r} value={r}>{routingStatusLabels[r]}</option>
             ))}
           </select>
         </div>
