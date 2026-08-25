@@ -12,6 +12,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //   * Read-only: cannot touch customer, ticket, subscription or auth data.
 //   * Accepts an optional recommended_repair (Prompt 12) — validated against a
 //     strict action-type allowlist, risk derived server-side.
+//   * If n8n does not supply a valid recommendation, derives a SAFE
+//     deterministic recommendation from the cleaned checks when there is a
+//     genuine account/profile mapping warning (refresh_account_sync / low).
 // ============================================================================
 
 const encoder = new TextEncoder();
@@ -45,9 +48,9 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CHECK_STATUSES = new Set(["pass", "warning", "fail", "unavailable", "error"]);
-const SEVERITIES = new Set(["info", "low", "medium", "high", "critical"]);
-const OVERALL = new Set(["pass", "warning", "fail", "error"]);
+const CHECK_STATUSES = new Set(["ok", "pass", "warning", "fail", "unavailable", "error"]);
+const SEVERITIES = new Set(["info", "low", "medium", "high", "critical", "warning", "error"]);
+const OVERALL = new Set(["ok", "pass", "warning", "fail", "error"]);
 
 // Allowlist of repair action types -> risk classification. Only LOW and
 // MEDIUM are ever executable; HIGH/CRITICAL require manual admin process.
@@ -87,6 +90,51 @@ function cleanRecommendedRepair(raw: unknown): Record<string, unknown> | null {
   if (typeof r.current_value === "string") out.current_value = r.current_value.slice(0, 200);
   if (typeof r.proposed_value === "string") out.proposed_value = r.proposed_value.slice(0, 200);
   return out;
+}
+
+// Deterministic safe recommendation derived from cleaned/validated checks.
+// Triggers ONLY on a genuine account/profile mapping warning — never on
+// ok/pass/unavailable/info-only results, and never from subscription,
+// email_delivery or recent_errors checks.
+function deriveSafeRecommendedRepair(
+  checks: Record<string, unknown>[],
+): Record<string, unknown> | null {
+  const hasWarning = (name: string) =>
+    checks.some(
+      (c) => c.name === name && c.status === "warning",
+    );
+
+  // Priority: account_status warning wins over authentication warning.
+  const accountStatusWarning = hasWarning("account_status");
+  const authWarning = hasWarning("authentication");
+
+  if (accountStatusWarning) {
+    return {
+      action_type: "refresh_account_sync",
+      risk_level: "low",
+      security_related: false,
+      problem_detected: "The diagnostic detected an inconsistency in the organisation account mapping.",
+      reason: "Verify that the support ticket, organisation and account records still resolve consistently.",
+      requested_change: "Verify account and support mapping consistency.",
+      current_value: "Mapping requires verification",
+      proposed_value: "Mapping verified",
+    };
+  }
+
+  if (authWarning) {
+    return {
+      action_type: "refresh_account_sync",
+      risk_level: "low",
+      security_related: false,
+      problem_detected: "The diagnostic detected an inconsistency in the linked portal account.",
+      reason: "Verify that the support ticket and linked account records still resolve consistently.",
+      requested_change: "Verify account and support mapping consistency.",
+      current_value: "Mapping requires verification",
+      proposed_value: "Mapping verified",
+    };
+  }
+
+  return null;
 }
 
 function cleanCheck(raw: unknown): Record<string, unknown> | null {
@@ -186,9 +234,13 @@ serve(async (req: Request) => {
 
   const summary = typeof body.summary === "string" ? body.summary.slice(0, 4000) : null;
 
-  const recommendedRepair = cleanRecommendedRepair(body.recommended_repair);
+  // Prefer a valid n8n-supplied recommendation; otherwise fall back to the
+  // deterministic safe recommendation derived from the cleaned checks.
+  const n8nRecommendation = cleanRecommendedRepair(body.recommended_repair);
+  const safeDerivedRecommendation = deriveSafeRecommendedRepair(checks);
+  const recommendedRepair = n8nRecommendation ?? safeDerivedRecommendation;
 
-  const finalStatus = overallStatus === "pass" || overallStatus === "warning"
+  const finalStatus = overallStatus === "ok" || overallStatus === "pass" || overallStatus === "warning"
     ? "completed"
     : "failed";
 

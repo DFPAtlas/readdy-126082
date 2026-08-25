@@ -10,13 +10,18 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //   * n8n config        → N8N_SUPPORT_DIAGNOSTIC_URL + N8N_SUPPORT_SHARED_SECRET
 //                         (Supabase Dashboard secrets). Never exposed to client.
 //   * Read-only         → never performs destructive account actions.
+//
+// Subject support:
+//   * user-backed customer   → customer_id present (backward compatible).
+//   * organisation-only      → organisation_id present, customer_id may be null.
+//     `authentication` scope is removed because no portal/login account exists.
 // ============================================================================
 
 const encoder = new TextEncoder();
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -49,6 +54,10 @@ function cleanScope(value: unknown): string[] {
     if (typeof v === "string" && SCOPE_KEYS.includes(v) && !out.includes(v)) out.push(v);
   }
   return out.length ? out : [...SCOPE_KEYS];
+}
+
+function asUuid(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 serve(async (req: Request) => {
@@ -98,15 +107,15 @@ serve(async (req: Request) => {
   const n8nUrl = Deno.env.get("N8N_SUPPORT_DIAGNOSTIC_URL") ?? "";
   const n8nSecret = Deno.env.get("N8N_SUPPORT_SHARED_SECRET") ?? "";
 
-  const customerId = typeof body.customer_id === "string" ? body.customer_id : "";
-  const siteId = typeof body.site_id === "string" ? body.site_id : null;
-  const userId = typeof body.user_id === "string" ? body.user_id : null;
-  const ticketId = typeof body.ticket_id === "string" ? body.ticket_id : null;
-  const scope = cleanScope(body.scope);
+  let customerId = asUuid(body.customer_id);
+  let organisationId = asUuid(body.organisation_id);
+  let siteId = asUuid(body.site_id);
+  const userId = asUuid(body.user_id);
+  const ticketId = asUuid(body.ticket_id);
 
-  if (!UUID_RE.test(customerId)) {
-    return json({ error: "customer_id is required and must be a valid UUID." }, 400);
-  }
+  // Validate every supplied UUID before trusting it.
+  if (customerId && !UUID_RE.test(customerId)) return json({ error: "customer_id is invalid." }, 400);
+  if (organisationId && !UUID_RE.test(organisationId)) return json({ error: "organisation_id is invalid." }, 400);
   if (siteId && !UUID_RE.test(siteId)) return json({ error: "site_id is invalid." }, 400);
   if (userId && !UUID_RE.test(userId)) return json({ error: "user_id is invalid." }, 400);
   if (ticketId && !UUID_RE.test(ticketId)) return json({ error: "ticket_id is invalid." }, 400);
@@ -122,10 +131,49 @@ serve(async (req: Request) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
+  // ---- Derive authoritative identifiers from the resolved link (if any) ----
+  // Never trust arbitrary customer/organisation identifiers supplied by the
+  // browser: when a ticket_id is provided, the stored resolved link is the
+  // single source of truth.
+  if (ticketId) {
+    const { data: link, error: linkErr } = await admin
+      .from("support_ticket_customer_links")
+      .select("customer_user_id, organisation_id, site_id, resolution_status")
+      .eq("ticket_id", ticketId)
+      .maybeSingle();
+    if (linkErr) {
+      return json({ error: "Failed to load ticket link." }, 500);
+    }
+    if (!link) {
+      return json({ error: "Ticket has no resolved customer link." }, 400);
+    }
+    if (link.resolution_status !== "resolved") {
+      return json({ error: "Ticket customer link is not resolved." }, 400);
+    }
+    customerId = (link.customer_user_id as string | null) ?? null;
+    organisationId = (link.organisation_id as string | null) ?? null;
+    if (link.site_id) siteId = link.site_id as string;
+  }
+
+  if (!customerId && !organisationId) {
+    return json({ error: "At least one of customer_id or organisation_id is required." }, 400);
+  }
+
+  const subjectType = customerId ? "user" : "organisation";
+
+  // Organisation-only runs: authentication checks are not applicable because
+  // no portal/login account is linked. Remove the scope before dispatch so the
+  // entire run is never blocked by the unavailable check.
+  let scope = cleanScope(body.scope);
+  if (!customerId && organisationId) {
+    scope = scope.filter((s) => s !== "authentication");
+  }
+
   const { data: run, error: insertErr } = await admin
     .from("support_diagnostic_runs")
     .insert({
       customer_id: customerId,
+      organisation_id: organisationId,
       site_id: siteId,
       user_id: userId,
       ticket_id: ticketId,
@@ -144,21 +192,24 @@ serve(async (req: Request) => {
   await admin.from("support_customer_activity").insert({
     staff_user_id: user.id,
     customer_user_id: customerId,
+    organisation_id: organisationId,
     ticket_id: ticketId,
     site_id: siteId,
     action: "diagnostic_requested",
-    metadata: { run_id: runId, scope },
+    metadata: { run_id: runId, scope, subject_type: subjectType },
   });
 
   // ---- signed server-side dispatch to n8n (identifiers only) ----
   const payload = {
     diagnostic_run_id: runId,
     customer_id: customerId,
+    organisation_id: organisationId,
     site_id: siteId,
     user_id: userId,
     ticket_id: ticketId,
     requested_by: user.id,
     scope,
+    subject_type: subjectType,
   };
   const bodyStr = JSON.stringify(payload);
   const timestamp = Date.now().toString();
@@ -183,6 +234,7 @@ serve(async (req: Request) => {
     await admin.from("support_customer_activity").insert({
       staff_user_id: user.id,
       customer_user_id: customerId,
+      organisation_id: organisationId,
       ticket_id: ticketId,
       site_id: siteId,
       action: "diagnostic_started",
@@ -190,7 +242,28 @@ serve(async (req: Request) => {
     });
 
     return json({ status: "running", run_id: runId, message: "Diagnostics started." }, 200);
-  } catch {
+  } catch (err) {
+    // Safe diagnostic logging — never log secrets, signatures, headers,
+    // tokens, request bodies, customer data, or the full webhook path.
+    let n8nHostname = "";
+    let n8nPort = "";
+    try {
+      const parsed = new URL(n8nUrl);
+      n8nHostname = parsed.hostname;
+      n8nPort = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+    } catch {
+      n8nHostname = "unknown";
+      n8nPort = "unknown";
+    }
+    const errName = err instanceof Error ? err.name : typeof err;
+    const errMessage = err instanceof Error ? err.message : String(err);
+    console.error("n8n diagnostics dispatch failed", {
+      errorName: errName,
+      errorMessage: errMessage,
+      n8nHostname,
+      n8nPort,
+    });
+
     const safe = "Diagnostics could not be started because the n8n service is unavailable.";
     await admin
       .from("support_diagnostic_runs")
@@ -199,6 +272,7 @@ serve(async (req: Request) => {
     await admin.from("support_customer_activity").insert({
       staff_user_id: user.id,
       customer_user_id: customerId,
+      organisation_id: organisationId,
       ticket_id: ticketId,
       site_id: siteId,
       action: "diagnostic_failed",

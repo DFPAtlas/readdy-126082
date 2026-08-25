@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { NavLink, useNavigate, useSearchParams, useLocation, Outlet } from 'react-router-dom';
+import { NavLink, useNavigate, useSearchParams, useLocation, useNavigationType, Outlet } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/feature/AuthGuard';
 import { useUnreadTicketCount } from '@/pages/support-tickets/hooks';
@@ -36,16 +36,36 @@ export default function AppLayout() {
   const auth = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') ?? 'register';
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const unreadTickets = useUnreadTicketCount();
   const mainRef = useRef<HTMLElement>(null);
+  const scrollPositions = useRef<Map<string, number>>(new Map());
 
+  // Save the current scroll position before leaving a page, keyed by its location.
   useEffect(() => {
-    mainRef.current?.scrollTo({ top: 0 });
-    window.scrollTo({ top: 0 });
-  }, [location.pathname, location.search]);
+    const key = location.key;
+    return () => {
+      scrollPositions.current.set(key, mainRef.current?.scrollTop ?? 0);
+    };
+  }, [location.key]);
+
+  // On fresh navigation (link click) snap to top; on back/forward restore the saved spot.
+  useEffect(() => {
+    if (navigationType === 'POP') {
+      const saved = scrollPositions.current.get(location.key);
+      requestAnimationFrame(() => {
+        mainRef.current?.scrollTo({ top: saved ?? 0 });
+        window.scrollTo({ top: 0 });
+      });
+    } else {
+      mainRef.current?.scrollTo({ top: 0 });
+      window.scrollTo({ top: 0 });
+    }
+  }, [location.key, navigationType]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -63,18 +83,18 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-screen bg-background-50 flex">
-      {/* Sidebar backdrop */}
+      {/* Sidebar backdrop (mobile only) */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)}></div>
       )}
 
       {/* Sidebar */}
-      <aside className={`fixed lg:static inset-y-0 left-0 z-50 w-[250px] bg-background-100 border-r border-background-200/60 flex flex-col transition-transform duration-200 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-        <div className="h-16 flex items-center gap-2.5 px-5 border-b border-background-200/60">
+      <aside className={`fixed lg:static inset-y-0 left-0 z-50 flex flex-col transition-all duration-200 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} ${sidebarCollapsed ? 'lg:w-[60px]' : 'lg:w-[250px]'} w-[250px] bg-background-100 border-r border-background-200/60`}>
+        <div className={`h-16 flex items-center gap-2.5 px-5 border-b border-background-200/60 ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : ''}`}>
           <div className="w-8 h-8 bg-accent-500 rounded-lg flex items-center justify-center shrink-0">
             <i className="ri-radar-line text-background-950 text-lg w-5 h-5 flex items-center justify-center"></i>
           </div>
-          <span className="font-heading font-semibold text-sm text-foreground-50 whitespace-nowrap">
+          <span className={`font-heading font-semibold text-sm text-foreground-50 whitespace-nowrap ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
             Footprint<span className="text-accent-400">CC</span>
           </span>
         </div>
@@ -86,51 +106,54 @@ export default function AppLayout() {
               to={item.to}
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                   isActive
                     ? 'bg-accent-500/10 text-accent-400 font-medium'
                     : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
                 }`
               }
+              title={sidebarCollapsed ? item.label : undefined}
             >
-              <i className={`${item.icon} text-base w-4 h-4 flex items-center justify-center`}></i>
-              {item.label}
+              <i className={`${item.icon} text-base w-4 h-4 flex items-center justify-center shrink-0`}></i>
+              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
             </NavLink>
           ))}
 
-          {/* Security — every role */}
+          {/* Security */}
           <NavLink
             to="/security"
             onClick={() => setSidebarOpen(false)}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+              `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                 isActive
                   ? 'bg-accent-500/10 text-accent-400 font-medium'
                   : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
               }`
             }
+            title={sidebarCollapsed ? 'Security' : undefined}
           >
-            <i className="ri-shield-keyhole-line text-base w-4 h-4 flex items-center justify-center"></i>
-            Security
+            <i className="ri-shield-keyhole-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
+            <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Security</span>
           </NavLink>
 
-          {/* Support Tickets — all roles (owner/admin manage, viewer read-only) */}
+          {/* Support Tickets */}
           <NavLink
             to="/support-tickets"
             onClick={() => setSidebarOpen(false)}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+              `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                 isActive
                   ? 'bg-accent-500/10 text-accent-400 font-medium'
                   : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
               }`
             }
+            title={sidebarCollapsed ? 'Support Tickets' : undefined}
           >
-            <i className="ri-ticket-2-line text-base w-4 h-4 flex items-center justify-center"></i>
-            <span className="flex-1">Support Tickets</span>
+            <i className="ri-ticket-2-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
+            <span className={`flex-1 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>Support Tickets</span>
             {unreadTickets > 0 && (
               <span
-                className="text-[10px] font-label font-semibold bg-accent-500 text-background-950 rounded-full px-1.5 py-0.5 leading-none"
+                className={`text-[10px] font-label font-semibold bg-accent-500 text-background-950 rounded-full px-1.5 py-0.5 leading-none ${sidebarCollapsed ? 'lg:hidden' : ''}`}
                 aria-label={`${unreadTickets} unread tickets`}
               >
                 {unreadTickets > 99 ? '99+' : unreadTickets}
@@ -138,53 +161,56 @@ export default function AppLayout() {
             )}
           </NavLink>
 
-          {/* Customers — all roles (resolution + Customer 360) */}
+          {/* Customers */}
           <NavLink
             to="/customers"
             onClick={() => setSidebarOpen(false)}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+              `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                 isActive
                   ? 'bg-accent-500/10 text-accent-400 font-medium'
                   : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
               }`
             }
+            title={sidebarCollapsed ? 'Customers' : undefined}
           >
-            <i className="ri-user-search-line text-base w-4 h-4 flex items-center justify-center"></i>
-            Customers
+            <i className="ri-user-search-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
+            <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Customers</span>
           </NavLink>
 
-          {/* Support Repairs — all roles view; owner/admin approve */}
+          {/* Support Repairs */}
           <NavLink
             to="/support-repairs"
             onClick={() => setSidebarOpen(false)}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+              `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                 isActive
                   ? 'bg-accent-500/10 text-accent-400 font-medium'
                   : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
               }`
             }
+            title={sidebarCollapsed ? 'Support Repairs' : undefined}
           >
-            <i className="ri-tools-line text-base w-4 h-4 flex items-center justify-center"></i>
-            Support Repairs
+            <i className="ri-tools-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
+            <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Support Repairs</span>
           </NavLink>
 
-          {/* Support Analytics — all roles with metrics.view (Prompt 18) */}
+          {/* Support Analytics */}
           {hasPermission(auth.role, 'support.metrics.view') && (
             <NavLink
               to="/support-tickets/reports"
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                   isActive
                     ? 'bg-accent-500/10 text-accent-400 font-medium'
                     : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
                 }`
               }
+              title={sidebarCollapsed ? 'Support Analytics' : undefined}
             >
-              <i className="ri-bar-chart-2-line text-base w-4 h-4 flex items-center justify-center"></i>
-              Support Analytics
+              <i className="ri-bar-chart-2-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
+              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Support Analytics</span>
             </NavLink>
           )}
 
@@ -194,94 +220,99 @@ export default function AppLayout() {
               to="/team"
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                   isActive
                     ? 'bg-accent-500/10 text-accent-400 font-medium'
                     : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
                 }`
               }
+              title={sidebarCollapsed ? 'Team & Access' : undefined}
             >
-              <i className="ri-team-line text-base w-4 h-4 flex items-center justify-center"></i>
-              Team &amp; Access
+              <i className="ri-team-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
+              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Team &amp; Access</span>
             </NavLink>
           )}
 
-          {/* Support Teams — owner/admin (Prompt 15) */}
+          {/* Support Teams */}
           {hasPermission(auth.role, 'staff.manage') && (
             <NavLink
               to="/support-teams"
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                   isActive
                     ? 'bg-accent-500/10 text-accent-400 font-medium'
                     : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
                 }`
               }
+              title={sidebarCollapsed ? 'Support Teams' : undefined}
             >
-              <i className="ri-group-2-line text-base w-4 h-4 flex items-center justify-center"></i>
-              Support Teams
+              <i className="ri-group-2-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
+              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Support Teams</span>
             </NavLink>
           )}
 
-          {/* Routing Rules — owner/admin (Prompt 15) */}
+          {/* Routing Rules */}
           {hasPermission(auth.role, 'staff.manage') && (
             <NavLink
               to="/support-routing"
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                   isActive
                     ? 'bg-accent-500/10 text-accent-400 font-medium'
                     : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
                 }`
               }
+              title={sidebarCollapsed ? 'Routing Rules' : undefined}
             >
-              <i className="ri-git-branch-line text-base w-4 h-4 flex items-center justify-center"></i>
-              Routing Rules
+              <i className="ri-git-branch-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
+              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Routing Rules</span>
             </NavLink>
           )}
 
-          {/* Knowledge Base — all internal roles (Prompt 17) */}
+          {/* Knowledge Base */}
           {hasPermission(auth.role, 'support.knowledge.view') && (
             <NavLink
               to="/support-knowledge"
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                   isActive
                     ? 'bg-accent-500/10 text-accent-400 font-medium'
                     : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
                 }`
               }
+              title={sidebarCollapsed ? 'Knowledge Base' : undefined}
             >
-              <i className="ri-book-open-line text-base w-4 h-4 flex items-center justify-center"></i>
-              Knowledge Base
+              <i className="ri-book-open-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
+              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Knowledge Base</span>
             </NavLink>
           )}
 
-          {/* Support Integrations — owner/admin only */}
+          {/* Support Integrations */}
           {hasPermission(auth.role, 'support.integrations.manage') && (
             <NavLink
               to="/admin/support-integrations"
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${
+                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
                   isActive
                     ? 'bg-accent-500/10 text-accent-400 font-medium'
                     : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
                 }`
               }
+              title={sidebarCollapsed ? 'Support Integrations' : undefined}
             >
-              <i className="ri-plug-2-line text-base w-4 h-4 flex items-center justify-center"></i>
-              Support Integrations
+              <i className="ri-plug-2-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
+              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Support Integrations</span>
             </NavLink>
           )}
 
-          {/* Website UAT Section — owner/admin only */}
+          {/* Website UAT Section */}
           {(auth.role === 'owner' || auth.role === 'admin') && (
             <>
-              <div className="pt-3 mt-3 border-t border-background-200/60">
+              <div className={`pt-3 mt-3 border-t border-background-200/60 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
                 <p className="px-3 py-1 text-[10px] font-label text-foreground-600 uppercase tracking-widest whitespace-nowrap">Website UAT &amp; Changes</p>
               </div>
               {uatNavItems.map((item) => (
@@ -291,26 +322,27 @@ export default function AppLayout() {
                   onClick={() => setSidebarOpen(false)}
                   className={
                     activeTab === item.tab
-                      ? 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap bg-accent-500/10 text-accent-400 font-medium'
-                      : 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
+                      ? `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} bg-accent-500/10 text-accent-400 font-medium`
+                      : `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50`
                   }
+                  title={sidebarCollapsed ? item.label : undefined}
                 >
-                  <i className={`${item.icon} text-base w-4 h-4 flex items-center justify-center`}></i>
-                  {item.label}
+                  <i className={`${item.icon} text-base w-4 h-4 flex items-center justify-center shrink-0`}></i>
+                  <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
                 </NavLink>
               ))}
             </>
           )}
         </nav>
 
-        <div className="border-t border-background-200/60 p-4">
-          <div className="flex items-center gap-3 mb-3">
+        <div className={`border-t border-background-200/60 p-4 ${sidebarCollapsed ? 'lg:flex lg:flex-col lg:items-center lg:px-2' : ''}`}>
+          <div className={`flex items-center gap-3 mb-3 ${sidebarCollapsed ? 'lg:flex-col lg:gap-1' : ''}`}>
             <div className="w-8 h-8 rounded-full bg-secondary-400 flex items-center justify-center shrink-0">
               <span className="text-xs font-semibold text-foreground-50">
                 {auth.user?.email?.charAt(0).toUpperCase() ?? 'U'}
               </span>
             </div>
-            <div className="min-w-0">
+            <div className={`min-w-0 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
               <p className="text-sm text-foreground-200 font-medium truncate">{auth.user?.email}</p>
               <div className="flex items-center gap-1.5 mt-0.5">
                 {roleBadge()}
@@ -319,10 +351,11 @@ export default function AppLayout() {
           </div>
           <button
             onClick={handleLogout}
-            className="flex items-center gap-2 text-sm text-foreground-500 hover:text-foreground-200 transition-colors duration-150 w-full cursor-pointer"
+            className={`flex items-center gap-2 text-sm text-foreground-500 hover:text-foreground-200 transition-colors duration-150 w-full cursor-pointer ${sidebarCollapsed ? 'lg:justify-center' : ''}`}
+            title={sidebarCollapsed ? 'Sign out' : undefined}
           >
             <i className="ri-logout-box-line text-base w-4 h-4 flex items-center justify-center"></i>
-            Sign out
+            <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Sign out</span>
           </button>
         </div>
       </aside>
@@ -330,12 +363,23 @@ export default function AppLayout() {
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-16 border-b border-background-200/60 bg-background-50 flex items-center justify-between px-4 md:px-6 sticky top-0 z-30">
-          <button
-            className="lg:hidden w-9 h-9 flex items-center justify-center text-foreground-300 hover:text-foreground-100 transition-colors cursor-pointer"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <i className="ri-menu-line text-xl"></i>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="lg:hidden w-9 h-9 flex items-center justify-center text-foreground-300 hover:text-foreground-100 transition-colors cursor-pointer"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <i className="ri-menu-line text-xl"></i>
+            </button>
+
+            {/* Desktop sidebar toggle */}
+            <button
+              className="hidden lg:flex w-9 h-9 items-center justify-center text-foreground-400 hover:text-foreground-200 transition-colors cursor-pointer rounded-lg hover:bg-background-100"
+              onClick={() => setSidebarCollapsed((c) => !c)}
+              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              <i className={`ri-${sidebarCollapsed ? 'side-bar-line' : 'side-bar-fill'} text-lg w-5 h-5 flex items-center justify-center`}></i>
+            </button>
+          </div>
 
           <div className="hidden sm:flex items-center gap-2 text-sm text-foreground-500">
             <i className="ri-calendar-line w-4 h-4 flex items-center justify-center"></i>

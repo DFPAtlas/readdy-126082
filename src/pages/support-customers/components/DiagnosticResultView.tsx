@@ -28,6 +28,15 @@ function Meta({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
+function resolveDurationMs(detail: DiagnosticDetail): number | null {
+  if (detail.duration_ms != null) return detail.duration_ms;
+  if (detail.started_at && detail.completed_at) {
+    const ms = new Date(detail.completed_at).getTime() - new Date(detail.started_at).getTime();
+    if (!Number.isNaN(ms) && ms >= 0) return ms;
+  }
+  return null;
+}
+
 export default function DiagnosticResultView({ detail, onReviewRepair }: DiagnosticResultViewProps) {
   const result = detail.result_data;
   const isPending = detail.status === 'queued' || detail.status === 'running';
@@ -38,9 +47,10 @@ export default function DiagnosticResultView({ detail, onReviewRepair }: Diagnos
     <div className="space-y-4">
       {/* Meta header */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 border-b border-background-200/40 pb-3">
-        <Meta label="Last Run">{detail.started_at ? formatFullDateTime(detail.started_at) : '—'}</Meta>
+        <Meta label="Started">{detail.started_at ? formatFullDateTime(detail.started_at) : '—'}</Meta>
+        <Meta label="Completed">{detail.completed_at ? formatFullDateTime(detail.completed_at) : '—'}</Meta>
+        <Meta label="Duration">{formatDuration(resolveDurationMs(detail))}</Meta>
         <Meta label="Requested By">{detail.requested_by_name ?? 'Not available'}</Meta>
-        <Meta label="Duration">{formatDuration(detail.duration_ms)}</Meta>
         <Meta label="Site">{detail.site_name ?? 'Not available'}</Meta>
       </div>
 

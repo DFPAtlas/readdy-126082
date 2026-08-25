@@ -8,15 +8,18 @@ export type ResolutionStatus = 'resolved' | 'partial' | 'unresolved' | 'multiple
 export type DiagnosticStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface CustomerSearchResult {
-  customer_id: string;
+  customer_id: string | null;
+  organisation_id: string | null;
   email: string | null;
   full_name: string | null;
+  company_name: string | null;
   organisation_name: string | null;
   products: string | null;
   role: string | null;
   status: string | null;
   match_field: string;
   user_id_short: string | null;
+  entity_type: 'user' | 'client';
 }
 
 export interface TicketAccountCustomer {

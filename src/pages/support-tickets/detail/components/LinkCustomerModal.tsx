@@ -26,6 +26,8 @@ export default function LinkCustomerModal({
   const [submitting, setSubmitting] = useState(false);
   const { results, loading, error, searched, search } = useCustomerSearch();
 
+  const isClient = selected?.entity_type === 'client';
+
   const reset = () => {
     setQuery('');
     setSelected(null);
@@ -41,7 +43,13 @@ export default function LinkCustomerModal({
   const confirmLink = async () => {
     if (!selected) return;
     setSubmitting(true);
-    const res = await linkTicketCustomer(ticket.id, selected.customer_id, null, ticket.site_id);
+    const clientOnly = selected.entity_type === 'client';
+    const res = await linkTicketCustomer(
+      ticket.id,
+      clientOnly ? null : selected.customer_id,
+      clientOnly ? selected.organisation_id : null,
+      ticket.site_id,
+    );
     onToast(res.message, res.success ? 'success' : 'error');
     setSubmitting(false);
     if (res.success) {
@@ -96,7 +104,11 @@ export default function LinkCustomerModal({
               )}
               {!loading &&
                 results.map((r) => (
-                  <CustomerResultCard key={r.customer_id} result={r} onClick={() => setSelected(r)} />
+                  <CustomerResultCard
+                    key={r.entity_type === 'client' ? `org-${r.organisation_id}` : `user-${r.customer_id}`}
+                    result={r}
+                    onClick={() => setSelected(r)}
+                  />
                 ))}
             </div>
           </>
@@ -111,22 +123,54 @@ export default function LinkCustomerModal({
                 <span className="text-sm text-foreground-200 font-mono">{ticket.ticket_number}</span>
               </div>
               <div className="flex items-start justify-between gap-3 p-3">
-                <span className="text-xs text-foreground-600">Customer</span>
+                <span className="text-xs text-foreground-600">Type</span>
+                <span className="text-sm text-foreground-200">
+                  {isClient ? 'Client / Organisation' : 'User Customer'}
+                </span>
+              </div>
+              {isClient && selected.organisation_name && (
+                <div className="flex items-start justify-between gap-3 p-3">
+                  <span className="text-xs text-foreground-600">Organisation</span>
+                  <span className="text-sm text-foreground-200">{selected.organisation_name}</span>
+                </div>
+              )}
+              {isClient && selected.company_name && (
+                <div className="flex items-start justify-between gap-3 p-3">
+                  <span className="text-xs text-foreground-600">Company</span>
+                  <span className="text-sm text-foreground-200">{selected.company_name}</span>
+                </div>
+              )}
+              <div className="flex items-start justify-between gap-3 p-3">
+                <span className="text-xs text-foreground-600">Contact</span>
                 <span className="text-sm text-foreground-200">{selected.full_name ?? 'Unknown name'}</span>
               </div>
               <div className="flex items-start justify-between gap-3 p-3">
                 <span className="text-xs text-foreground-600">Email</span>
                 <span className="text-sm text-foreground-200 break-all">{displayValue(selected.email)}</span>
               </div>
-              <div className="flex items-start justify-between gap-3 p-3">
-                <span className="text-xs text-foreground-600">User ID</span>
-                <span className="text-sm text-foreground-200 font-mono">{formatShortId(selected.customer_id)}</span>
-              </div>
+              {isClient && selected.status && (
+                <div className="flex items-start justify-between gap-3 p-3">
+                  <span className="text-xs text-foreground-600">Status</span>
+                  <span className="text-sm text-foreground-200">{selected.status}</span>
+                </div>
+              )}
+              {!isClient && (
+                <div className="flex items-start justify-between gap-3 p-3">
+                  <span className="text-xs text-foreground-600">User ID</span>
+                  <span className="text-sm text-foreground-200 font-mono">{formatShortId(selected.customer_id)}</span>
+                </div>
+              )}
               <div className="flex items-start justify-between gap-3 p-3">
                 <span className="text-xs text-foreground-600">Site</span>
                 <span className="text-sm text-foreground-200">{ticket.site_name}</span>
               </div>
             </div>
+
+            {isClient && (
+              <p className="text-xs text-amber-400 bg-amber-500/10 rounded-lg px-3 py-2">
+                This client has no portal account. The ticket will be linked to the organisation only.
+              </p>
+            )}
 
             <div className="flex items-center justify-end gap-3">
               <button

@@ -53,6 +53,9 @@ export default function AccountPanel({
   const [busy, setBusy] = useState(false);
 
   const customerId = account?.customer?.customer_id ?? null;
+  const organisationId = account?.organisation?.id ?? null;
+  const isOrganisationOnly =
+    !customerId && Boolean(organisationId) && account?.resolution_status === 'resolved';
   const isLinked = Boolean(customerId);
   const resolution = account?.resolution_status ?? 'unresolved';
 
@@ -99,7 +102,14 @@ export default function AccountPanel({
           <Row label="Customer Name">{displayValue(account?.customer?.name)}</Row>
           <Row label="Email">{displayValue(account?.customer?.email)}</Row>
           <Row label="User ID">{formatShortId(customerId)}</Row>
-          <Row label="Organisation">{displayValue(account?.organisation?.name)}</Row>
+          <Row label="Organisation">
+            {displayValue(account?.organisation?.name)}
+            {isOrganisationOnly && (
+              <span className="inline-flex items-center text-[10px] font-label ml-1 px-1.5 py-0.5 rounded-full bg-accent-500/15 text-accent-400 whitespace-nowrap align-middle">
+                No portal account
+              </span>
+            )}
+          </Row>
           <Row label="Source Site">{displayValue(account?.source_site?.product)}</Row>
           <Row label="Product">
             {displayValue(account?.products?.[0]?.name ?? account?.source_site?.product)}
@@ -129,7 +139,7 @@ export default function AccountPanel({
           View Customer
         </button>
 
-        {canModify && canRunDiagnostics && customerId && (
+        {canModify && canRunDiagnostics && (customerId || isOrganisationOnly) && (
           <button
             type="button"
             onClick={onRunDiagnostics}

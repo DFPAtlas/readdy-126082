@@ -106,7 +106,7 @@ export function useCustomerSearch() {
     }
 
     try {
-      const { data, error: rpcError } = await supabase.rpc('support_search_customers', {
+      const { data, error: rpcError } = await supabase.rpc('support_search_customers_v2', {
         p_query: q,
         p_limit: 30,
       });
@@ -176,7 +176,7 @@ export function useCustomer360(customerId: string | undefined) {
 // ---------------------------------------------------------------------------
 export async function linkTicketCustomer(
   ticketId: string,
-  customerUserId: string,
+  customerUserId: string | null,
   organisationId: string | null,
   siteId: string | null,
 ): Promise<ActionResult> {
@@ -231,7 +231,8 @@ const DIAGNOSTIC_LIST_SELECT =
   'id,status,requested_by,started_at,completed_at,summary,error_message,diagnostic_scope,created_at';
 
 export interface RunDiagnosticPayload {
-  customer_id: string;
+  customer_id: string | null;
+  organisation_id?: string | null;
   site_id?: string | null;
   user_id?: string | null;
   ticket_id?: string | null;
@@ -314,7 +315,13 @@ export function useDiagnosticRuns(filter: { customerId?: string; ticketId?: stri
   return { runs, loading, error, refresh };
 }
 
-/** Fetches a single diagnostic run's full result (logs a diagnostic_viewed event). */
+/**
+ * Fetches a single diagnostic run's full result (logs a diagnostic_viewed event).
+ * While the run is queued/running this keeps polling so the UI transitions to
+ * the completed result (with result_data) as soon as n8n posts it back, without
+ * requiring a manual page reload. Polling stops the moment the run is completed
+ * or failed.
+ */
 export function useDiagnosticDetail(runId: string | null) {
   const [detail, setDetail] = useState<DiagnosticDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -329,24 +336,41 @@ export function useDiagnosticDetail(runId: string | null) {
       return;
     }
     const id = ++requestIdRef.current;
-    setLoading(true);
-    setError(null);
+    let cancelled = false;
+    let pollTimer: number | null = null;
 
-    (async () => {
+    const fetchDetail = async (initial: boolean) => {
+      if (cancelled) return;
+      if (initial) setLoading(true);
+      setError(null);
       try {
         const { data, error: rpcError } = await supabase.rpc('support_get_diagnostic', {
           p_run_id: runId,
         });
-        if (id !== requestIdRef.current) return;
+        if (cancelled || id !== requestIdRef.current) return;
         if (rpcError) throw rpcError;
-        setDetail(data as DiagnosticDetail);
+        const d = data as DiagnosticDetail;
+        setDetail(d);
+        // Keep polling only while the run is still in-flight.
+        if (d.status === 'queued' || d.status === 'running') {
+          pollTimer = window.setTimeout(() => {
+            void fetchDetail(false);
+          }, 3000);
+        }
       } catch (e: unknown) {
-        if (id !== requestIdRef.current) return;
+        if (cancelled || id !== requestIdRef.current) return;
         setError(readError(e));
       } finally {
-        if (id === requestIdRef.current) setLoading(false);
+        if (!cancelled && id === requestIdRef.current) setLoading(false);
       }
-    })();
+    };
+
+    void fetchDetail(true);
+
+    return () => {
+      cancelled = true;
+      if (pollTimer !== null) window.clearTimeout(pollTimer);
+    };
   }, [runId]);
 
   return { detail, loading, error };
@@ -622,7 +646,7 @@ export function useRepairsOverview() {
 
 export interface RequestRepairPayload {
   ticketId: string | null;
-  customerId: string;
+  customerId: string | null;
   siteId: string | null;
   userId: string | null;
   diagnosticRunId: string | null;
@@ -633,7 +657,7 @@ export async function requestRepair(payload: RequestRepairPayload): Promise<Acti
   const rec = payload.recommendation ?? null;
   const { data, error } = await supabase.rpc('support_request_repair', {
     p_ticket_id: payload.ticketId ?? null,
-    p_customer_id: payload.customerId,
+    p_customer_id: payload.customerId ?? null,
     p_site_id: payload.siteId ?? null,
     p_user_id: payload.userId ?? null,
     p_diagnostic_run_id: payload.diagnosticRunId ?? null,

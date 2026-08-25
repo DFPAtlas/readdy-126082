@@ -13,7 +13,7 @@ import type { RecommendedRepair } from '@/types/support-customers';
 interface RepairRequestModalProps {
   open: boolean;
   onClose: () => void;
-  customerId: string;
+  customerId: string | null;
   customerName?: string | null;
   customerEmail?: string | null;
   siteId?: string | null;

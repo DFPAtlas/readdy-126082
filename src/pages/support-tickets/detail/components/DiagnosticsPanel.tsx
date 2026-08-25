@@ -10,6 +10,7 @@ interface DiagnosticsPanelProps {
   canRun: boolean;
   canRetry: boolean;
   hasCustomer: boolean;
+  organisationOnly: boolean;
   onRun: () => void;
   onRetry: () => void;
   onReviewRepair: (rec: RecommendedRepair, runId: string | null) => void;
@@ -20,6 +21,7 @@ export default function DiagnosticsPanel({
   canRun,
   canRetry,
   hasCustomer,
+  organisationOnly,
   onRun,
   onRetry,
   onReviewRepair,
@@ -51,6 +53,16 @@ export default function DiagnosticsPanel({
           </button>
         )}
       </div>
+
+      {organisationOnly && hasCustomer && (
+        <div className="mb-3 bg-accent-500/10 border border-accent-500/30 rounded-lg px-3 py-2.5 flex items-start gap-2">
+          <i className="ri-information-line text-sm text-accent-400 w-4 h-4 flex items-center justify-center mt-0.5"></i>
+          <div className="text-xs text-accent-300 leading-relaxed space-y-0.5">
+            <p className="font-semibold">Organisation-only diagnostics</p>
+            <p>No portal account linked — authentication checks unavailable.</p>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-2">

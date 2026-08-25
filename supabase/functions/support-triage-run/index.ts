@@ -19,7 +19,8 @@ const encoder = new TextEncoder();
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -46,7 +47,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { status: 204, headers: CORS });
+    return new Response(null, {
+      status: 204,
+      headers: CORS,
+    });
   }
   if (req.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);

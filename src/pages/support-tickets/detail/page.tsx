@@ -276,6 +276,12 @@ export default function SupportTicketDetail() {
   const overdue = isOverdue(ticket.due_at, ticket.status);
 
   const resolvedCustomerId = account?.customer?.customer_id ?? ticket.customer_user_id ?? null;
+  const resolvedOrganisationId = account?.organisation?.id ?? null;
+  const isOrganisationOnly =
+    !resolvedCustomerId &&
+    Boolean(resolvedOrganisationId) &&
+    account?.resolution_status === 'resolved';
+  const hasDiagnosticSubject = Boolean(resolvedCustomerId || isOrganisationOnly);
   const diagSiteId = account?.source_site?.site_id ?? ticket.site_id ?? null;
   const diagSiteName = account?.source_site?.product ?? ticket.site_name;
 
@@ -419,7 +425,7 @@ export default function SupportTicketDetail() {
             loading={accountLoading}
             error={accountError}
             onRefresh={refreshAccount}
-            onRunDiagnostics={() => resolvedCustomerId && setDiagOpen(true)}
+            onRunDiagnostics={() => hasDiagnosticSubject && setDiagOpen(true)}
             onToast={showToast}
           />
           <SupportSessionPanel
@@ -436,9 +442,10 @@ export default function SupportTicketDetail() {
             ticketId={ticket.id}
             canRun={canRunDiagnostics}
             canRetry={canRetryDiagnostics}
-            hasCustomer={Boolean(resolvedCustomerId)}
-            onRun={() => resolvedCustomerId && setDiagOpen(true)}
-            onRetry={() => resolvedCustomerId && setDiagOpen(true)}
+            hasCustomer={hasDiagnosticSubject}
+            organisationOnly={isOrganisationOnly}
+            onRun={() => hasDiagnosticSubject && setDiagOpen(true)}
+            onRetry={() => hasDiagnosticSubject && setDiagOpen(true)}
             onReviewRepair={(rec, runId) => setRepairRequest({ rec, runId })}
           />
           {canModify && <NotificationStatus ticketId={ticket.id} canRetry={canModify} />}
@@ -494,7 +501,8 @@ export default function SupportTicketDetail() {
         open={diagOpen}
         onClose={() => setDiagOpen(false)}
         customerId={resolvedCustomerId ?? ''}
-        customerName={account?.customer?.name ?? ticket.customer_name}
+        organisationId={resolvedOrganisationId}
+        customerName={account?.customer?.name ?? account?.organisation?.name ?? ticket.customer_name}
         customerEmail={account?.customer?.email ?? ticket.customer_email}
         siteId={diagSiteId}
         siteName={diagSiteName}
@@ -522,7 +530,7 @@ export default function SupportTicketDetail() {
       <RepairRequestModal
         open={repairRequest !== null}
         onClose={() => setRepairRequest(null)}
-        customerId={resolvedCustomerId ?? ''}
+        customerId={resolvedCustomerId}
         customerName={account?.customer?.name ?? ticket.customer_name}
         customerEmail={account?.customer?.email ?? ticket.customer_email}
         siteId={diagSiteId}
