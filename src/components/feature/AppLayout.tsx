@@ -4,6 +4,9 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/feature/AuthGuard';
 import { useUnreadTicketCount } from '@/pages/support-tickets/hooks';
 import { hasPermission, ROLE_BADGE_COLORS, ROLE_LABELS, type Role } from '@/lib/permissions';
+import { SearchProvider } from '@/pages/ai-operations/search/SearchContext';
+import CommandPalette from '@/pages/ai-operations/search/components/CommandPalette';
+import SearchTrigger from '@/pages/ai-operations/search/components/SearchTrigger';
 
 const navItems = [
   { to: '/dashboard', icon: 'ri-dashboard-3-line', label: 'Dashboard' },
@@ -20,6 +23,7 @@ const navItems = [
   { to: '/system-status', icon: 'ri-pulse-line', label: 'System Status' },
   { to: '/activity-log', icon: 'ri-history-line', label: 'Activity' },
   { to: '/github', icon: 'ri-github-fill', label: 'GitHub' },
+  { to: '/ai-operations', icon: 'ri-robot-2-line', label: 'AI Operations' },
 ];
 
 const uatNavItems = [
@@ -82,6 +86,7 @@ export default function AppLayout() {
   };
 
   return (
+    <SearchProvider>
     <div className="min-h-screen bg-background-50 flex">
       {/* Sidebar backdrop (mobile only) */}
       {sidebarOpen && (
@@ -387,6 +392,7 @@ export default function AppLayout() {
           </div>
 
           <div className="flex items-center gap-3">
+            <SearchTrigger />
             <button className="w-9 h-9 flex items-center justify-center text-foreground-400 hover:text-foreground-200 transition-colors cursor-pointer rounded-lg hover:bg-background-100">
               <i className="ri-notification-3-line text-lg w-5 h-5 flex items-center justify-center"></i>
             </button>
@@ -405,5 +411,9 @@ export default function AppLayout() {
         </main>
       </div>
     </div>
+
+      {/* Global AI Operations command palette */}
+      <CommandPalette />
+    </SearchProvider>
   );
 }

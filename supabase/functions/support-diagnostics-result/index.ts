@@ -48,9 +48,9 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CHECK_STATUSES = new Set(["ok", "pass", "warning", "fail", "unavailable", "error"]);
+const CHECK_STATUSES = new Set(["pass", "warning", "fail", "unavailable", "error"]);
 const SEVERITIES = new Set(["info", "low", "medium", "high", "critical", "warning", "error"]);
-const OVERALL = new Set(["ok", "pass", "warning", "fail", "error"]);
+const OVERALL = new Set(["pass", "warning", "fail", "error"]);
 
 // Allowlist of repair action types -> risk classification. Only LOW and
 // MEDIUM are ever executable; HIGH/CRITICAL require manual admin process.
@@ -94,7 +94,7 @@ function cleanRecommendedRepair(raw: unknown): Record<string, unknown> | null {
 
 // Deterministic safe recommendation derived from cleaned/validated checks.
 // Triggers ONLY on a genuine account/profile mapping warning — never on
-// ok/pass/unavailable/info-only results, and never from subscription,
+// pass/unavailable/info-only results, and never from subscription,
 // email_delivery or recent_errors checks.
 function deriveSafeRecommendedRepair(
   checks: Record<string, unknown>[],
@@ -141,7 +141,9 @@ function cleanCheck(raw: unknown): Record<string, unknown> | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const name = typeof r.name === "string" ? r.name.slice(0, 120) : "";
-  const status = typeof r.status === "string" ? r.status : "";
+  const rawStatus = typeof r.status === "string" ? r.status : "";
+  // Legacy "ok" statuses are normalised to the canonical "pass".
+  const status = rawStatus === "ok" ? "pass" : rawStatus;
   const message = typeof r.message === "string" ? r.message.slice(0, 2000) : "";
   if (!name || !CHECK_STATUSES.has(status)) return null;
   const severity = typeof r.severity === "string" && SEVERITIES.has(r.severity)
@@ -171,8 +173,8 @@ serve(async (req: Request) => {
   if (!timestamp || !signature) {
     return json({ error: "Missing signature" }, 401);
   }
-  const tsMs = Date.parse(timestamp);
-  if (Number.isNaN(tsMs) || Math.abs(Date.now() - tsMs) > TIMESTAMP_WINDOW_MS) {
+  const tsMs = Number(timestamp);
+  if (!Number.isFinite(tsMs) || Math.abs(Date.now() - tsMs) > TIMESTAMP_WINDOW_MS) {
     return json({ error: "Timestamp out of range" }, 401);
   }
   const expected = await hmacSha256Hex(secret, `${timestamp}.${rawBody}`);
@@ -208,9 +210,9 @@ serve(async (req: Request) => {
     return json({ error: "Unknown diagnostic run" }, 404);
   }
 
-  const overallStatus = OVERALL.has(body.overall_status)
-    ? (body.overall_status as string)
-    : "error";
+  const rawOverall = typeof body.overall_status === "string" ? body.overall_status : "";
+  // Legacy "ok" overall status normalised to "pass".
+  const overallStatus = rawOverall === "ok" ? "pass" : OVERALL.has(rawOverall) ? rawOverall : "error";
 
   const checks = (Array.isArray(body.checks) ? body.checks : [])
     .map(cleanCheck)
@@ -240,7 +242,7 @@ serve(async (req: Request) => {
   const safeDerivedRecommendation = deriveSafeRecommendedRepair(checks);
   const recommendedRepair = n8nRecommendation ?? safeDerivedRecommendation;
 
-  const finalStatus = overallStatus === "ok" || overallStatus === "pass" || overallStatus === "warning"
+  const finalStatus = overallStatus === "pass" || overallStatus === "warning"
     ? "completed"
     : "failed";
 

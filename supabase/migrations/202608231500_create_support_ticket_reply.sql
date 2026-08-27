@@ -72,10 +72,14 @@ BEGIN
   )
   RETURNING id INTO v_message_id;
 
-  -- 6. Public reply: set last_staff_reply_at, transition new -> open, mark read.
-  --    Internal note: keep the ticket status untouched.
+  -- 6. Public reply: set last_staff_reply_at, transition the ticket to
+  --    waiting_on_customer (unless already terminal: resolved/closed/spam),
+  --    mark read. Internal note: keep the ticket status untouched.
   IF p_is_internal_note = false THEN
-    v_new_status := CASE WHEN v_ticket.status = 'new' THEN 'open' ELSE v_ticket.status END;
+    v_new_status := CASE
+      WHEN v_ticket.status IN ('resolved','closed','spam') THEN v_ticket.status
+      ELSE 'waiting_on_customer'
+    END;
     UPDATE public.internal_support_tickets
        SET last_staff_reply_at = now(),
            status             = v_new_status,

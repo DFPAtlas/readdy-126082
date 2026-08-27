@@ -38,6 +38,53 @@ import WebsiteUatDashboard from "@/pages/admin/website-uat/page";
 import SupportIntegrations from "@/pages/admin/support-integrations/page";
 import SupportIntegrationTestForm from "@/pages/admin/support-integrations/test-form/page";
 import UatAdminGuard from "@/components/feature/UatAdminGuard";
+import AiOperationsPage from "@/pages/ai-operations/page";
+import SitesLayout from "@/pages/ai-operations/sites/SitesLayout";
+import SitesPage from "@/pages/ai-operations/sites/page";
+import SiteDetailPage from "@/pages/ai-operations/sites/detail/page";
+import AgentsLayout from "@/pages/ai-operations/agents/AgentsLayout";
+import AgentsPage from "@/pages/ai-operations/agents/page";
+import AgentDetailPage from "@/pages/ai-operations/agents/detail/page";
+import RunsLayout from "@/pages/ai-operations/runs/RunsLayout";
+import RunsPage from "@/pages/ai-operations/runs/page";
+import RunDetailPage from "@/pages/ai-operations/runs/detail/page";
+import ApprovalsLayout from "@/pages/ai-operations/approvals/ApprovalsLayout";
+import ApprovalsPage from "@/pages/ai-operations/approvals/page";
+import ApprovalDetailPage from "@/pages/ai-operations/approvals/detail/page";
+import LiveOperationsPage from "@/pages/ai-operations/live/page";
+import OrchestratorLayout from "@/pages/ai-operations/orchestrator/OrchestratorLayout";
+import OrchestratorPage from "@/pages/ai-operations/orchestrator/page";
+import OrchestratorDetailPage from "@/pages/ai-operations/orchestrator/detail/page";
+import ToolsLayout from "@/pages/ai-operations/tools/ToolsLayout";
+import ToolsPage from "@/pages/ai-operations/tools/page";
+import ToolDetailPage from "@/pages/ai-operations/tools/detail/page";
+import ModelsLayout from "@/pages/ai-operations/models/ModelsLayout";
+import ModelsPage from "@/pages/ai-operations/models/page";
+import ModelDetailPage from "@/pages/ai-operations/models/detail/page";
+import KnowledgeLayout from "@/pages/ai-operations/knowledge/KnowledgeLayout";
+import KnowledgePage from "@/pages/ai-operations/knowledge/page";
+import KnowledgeDetailPage from "@/pages/ai-operations/knowledge/detail/page";
+import SecurityLayout from "@/pages/ai-operations/security/SecurityLayout";
+import SecurityPage from "@/pages/ai-operations/security/page";
+import PolicyDetailPage from "@/pages/ai-operations/security/detail/page";
+import AlertsLayout from "@/pages/ai-operations/alerts/AlertsLayout";
+import AlertsPage from "@/pages/ai-operations/alerts/page";
+import AlertDetailPage from "@/pages/ai-operations/alerts/detail/page";
+import AuditLayout from "@/pages/ai-operations/audit/AuditLayout";
+import AuditPage from "@/pages/ai-operations/audit/page";
+import AuditDetailPage from "@/pages/ai-operations/audit/detail/page";
+import CostsLayout from "@/pages/ai-operations/costs/CostsLayout";
+import CostsPage from "@/pages/ai-operations/costs/page";
+import BudgetsPage from "@/pages/ai-operations/costs/budgets/page";
+import NotificationsLayout from "@/pages/ai-operations/notifications/NotificationsLayout";
+import NotificationsPage from "@/pages/ai-operations/notifications/page";
+import RuleDetailPage from "@/pages/ai-operations/notifications/detail/page";
+import SchedulesLayout from "@/pages/ai-operations/schedules/SchedulesLayout";
+import SchedulesPage from "@/pages/ai-operations/schedules/page";
+import ScheduleDetailPage from "@/pages/ai-operations/schedules/detail/page";
+import SearchPage from "@/pages/ai-operations/search/page";
+import WallboardPage from "@/pages/ai-operations/wallboard/page";
+import ReadinessPage from "@/pages/ai-operations/readiness/page";
 
 const routes: RouteObject[] = [
   {
@@ -59,6 +106,10 @@ const routes: RouteObject[] = [
   {
     path: "/support",
     element: <Support />,
+  },
+  {
+    path: "/ai-operations/wallboard",
+    element: <WallboardPage />,
   },
   {
     path: "/",
@@ -93,6 +144,122 @@ const routes: RouteObject[] = [
       { path: "support-teams", element: <SupportTeams /> },
       { path: "support-routing", element: <SupportRouting /> },
       { path: "support-knowledge", element: <SupportKnowledge /> },
+      { path: "ai-operations", element: <AiOperationsPage /> },
+      {
+        path: "ai-operations/sites",
+        element: <SitesLayout />,
+        children: [
+          { index: true, element: <SitesPage /> },
+          { path: ":siteId", element: <SiteDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/agents",
+        element: <AgentsLayout />,
+        children: [
+          { index: true, element: <AgentsPage /> },
+          { path: ":agentId", element: <AgentDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/runs",
+        element: <RunsLayout />,
+        children: [
+          { index: true, element: <RunsPage /> },
+          { path: ":runId", element: <RunDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/approvals",
+        element: <ApprovalsLayout />,
+        children: [
+          { index: true, element: <ApprovalsPage /> },
+          { path: ":approvalId", element: <ApprovalDetailPage /> },
+        ],
+      },
+      { path: "ai-operations/live", element: <LiveOperationsPage /> },
+      {
+        path: "ai-operations/orchestrator",
+        element: <OrchestratorLayout />,
+        children: [
+          { index: true, element: <OrchestratorPage /> },
+          { path: ":orchestrationId", element: <OrchestratorDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/tools",
+        element: <ToolsLayout />,
+        children: [
+          { index: true, element: <ToolsPage /> },
+          { path: ":connectionId", element: <ToolDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/models",
+        element: <ModelsLayout />,
+        children: [
+          { index: true, element: <ModelsPage /> },
+          { path: ":modelId", element: <ModelDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/knowledge",
+        element: <KnowledgeLayout />,
+        children: [
+          { index: true, element: <KnowledgePage /> },
+          { path: ":sourceId", element: <KnowledgeDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/security",
+        element: <SecurityLayout />,
+        children: [
+          { index: true, element: <SecurityPage /> },
+          { path: "policies/:policyId", element: <PolicyDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/alerts",
+        element: <AlertsLayout />,
+        children: [
+          { index: true, element: <AlertsPage /> },
+          { path: ":alertId", element: <AlertDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/audit",
+        element: <AuditLayout />,
+        children: [
+          { index: true, element: <AuditPage /> },
+          { path: ":auditId", element: <AuditDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/costs",
+        element: <CostsLayout />,
+        children: [
+          { index: true, element: <CostsPage /> },
+          { path: "budgets", element: <BudgetsPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/notifications",
+        element: <NotificationsLayout />,
+        children: [
+          { index: true, element: <NotificationsPage /> },
+          { path: "rules/:ruleId", element: <RuleDetailPage /> },
+        ],
+      },
+      {
+        path: "ai-operations/schedules",
+        element: <SchedulesLayout />,
+        children: [
+          { index: true, element: <SchedulesPage /> },
+          { path: ":scheduleId", element: <ScheduleDetailPage /> },
+        ],
+      },
+      { path: "ai-operations/search", element: <SearchPage /> },
+      { path: "ai-operations/readiness", element: <ReadinessPage /> },
       { path: "command-centre/tickets", element: <SupportTickets /> },
       { path: "admin/website-uat", element: <UatAdminGuard><WebsiteUatDashboard /></UatAdminGuard> },
       { path: "admin/support-integrations", element: <SupportIntegrations /> },

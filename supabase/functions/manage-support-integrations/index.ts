@@ -16,6 +16,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // The caller is the authenticated Command Centre user (verify_jwt). The role
 // is re-checked server-side against internal_user_roles — owner/admin only.
 // No raw secret is ever written to logs or the database.
+//
+// Optional `keyPrefixBase` (default "dfp_") allows site-specific prefixes,
+// e.g. "qg_" for the QuickGuard server-to-server bridge. It must match
+// /^[a-z][a-z0-9]{0,7}_$/ and is appended with 6 random bytes.
 // ============================================================================
 
 const encoder = new TextEncoder();
@@ -96,6 +100,8 @@ const isValidOrigin = (o: string) => {
   }
 };
 
+const isValidKeyPrefixBase = (s: string) => /^[a-z][a-z0-9]{0,7}_$/.test(s);
+
 const isValidEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 
 const TEST_CATEGORIES = new Set([
@@ -171,12 +177,19 @@ serve(async (req: Request) => {
     return data ?? null;
   };
 
+  const readKeyPrefixBase = () => {
+    const raw = typeof body.keyPrefixBase === "string" ? body.keyPrefixBase.trim() : "dfp_";
+    if (!isValidKeyPrefixBase(raw)) return null;
+    return raw;
+  };
+
   const persistCredential = async (args: {
     siteId: string; clientName: string; integrationMode: string;
     allowedOrigins: string[]; turnstileRequired: boolean;
     elevatedPriorityAllowed: boolean; expiresAt: string | null;
+    keyPrefixBase: string;
   }) => {
-    const keyPrefix = "dfp_" + randomHex(6);
+    const keyPrefix = args.keyPrefixBase + randomHex(6);
     const secret = randomHex(32);
     const secretHash = await sha256Hex(secret);
     const secretCiphertext = await encryptSecret(secret);
@@ -208,6 +221,8 @@ serve(async (req: Request) => {
         ? body.allowedOrigins.filter((o): o is string => typeof o === "string")
         : [];
       const expiresAt = body.expiresAt ? String(body.expiresAt) : null;
+      const keyPrefixBase = readKeyPrefixBase();
+      if (keyPrefixBase === null) return json({ error: "Invalid key prefix base" }, 400);
 
       if (!clientName) return json({ error: "Client name is required" }, 400);
       if (!["public_form", "server_to_server"].includes(integrationMode)) {
@@ -228,6 +243,7 @@ serve(async (req: Request) => {
         turnstileRequired: body.turnstileRequired === true,
         elevatedPriorityAllowed: body.elevatedPriorityAllowed === true,
         expiresAt,
+        keyPrefixBase,
       });
 
       await logAudit("support_credential", "created",
@@ -248,6 +264,8 @@ serve(async (req: Request) => {
         ? body.allowedOrigins.filter((o): o is string => typeof o === "string")
         : [];
       const revokeOld = body.revokeOld !== false; // default: revoke immediately
+      const keyPrefixBase = readKeyPrefixBase();
+      if (keyPrefixBase === null) return json({ error: "Invalid key prefix base" }, 400);
 
       if (!oldKeyPrefix) return json({ error: "oldKeyPrefix is required" }, 400);
       if (!clientName) return json({ error: "Client name is required" }, 400);
@@ -263,6 +281,7 @@ serve(async (req: Request) => {
         turnstileRequired: body.turnstileRequired === true,
         elevatedPriorityAllowed: body.elevatedPriorityAllowed === true,
         expiresAt: null,
+        keyPrefixBase,
       });
 
       let revoked = false;

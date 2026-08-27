@@ -214,10 +214,24 @@ export default function SupportTicketDetail() {
         }
       }
 
+      // QuickGuard connector: forward public staff replies on QuickGuard tickets.
+      // The browser only ever sends the inserted message UUID — never the reply
+      // body, the QuickGuard ticket UUID, or any secret.
+      let quickguardNote = '';
+      if (mode === 'reply' && ticket.site_slug === 'quickguard' && messageId) {
+        const qg = await supabase.functions.invoke('send-quickguard-support-reply', {
+          body: { messageId },
+        });
+        const qgData = qg?.data as { success?: boolean } | null;
+        if (qg.error || !qgData?.success) {
+          quickguardNote = ' Reply saved in DFP Command, but QuickGuard delivery could not be confirmed.';
+        }
+      }
+
       refresh();
       return {
         success: true,
-        message: mode === 'reply' ? `Reply sent.${notifyNote}` : 'Internal note added.',
+        message: mode === 'reply' ? `Reply sent.${notifyNote}${quickguardNote}` : 'Internal note added.',
       };
     } finally {
       setSubmitting(false);

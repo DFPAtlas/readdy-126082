@@ -29,7 +29,7 @@ const CHECK_NAMES: Record<string, string> = {
   recent_errors: "recent_errors",
 };
 
-type CheckStatus = "ok" | "warning" | "error" | "unavailable";
+type CheckStatus = "pass" | "warning" | "fail" | "error" | "unavailable";
 type CheckSeverity = "info" | "warning" | "error";
 
 interface Check {
@@ -119,7 +119,7 @@ async function checkAccount(admin: ReturnType<typeof createClient>, organisation
 
   return {
     name: CHECK_NAMES.account,
-    status: isActive ? "ok" : "warning",
+    status: isActive ? "pass" : "warning",
     severity: isActive ? "info" : "warning",
     message: isActive
       ? "Organisation record is active."
@@ -172,7 +172,7 @@ async function checkAuthentication(admin: ReturnType<typeof createClient>, custo
 
   return {
     name: CHECK_NAMES.authentication,
-    status: "ok",
+    status: "pass",
     severity: "info",
     message: "Portal account exists.",
     details: {
@@ -219,11 +219,31 @@ async function checkSubscription(admin: ReturnType<typeof createClient>, organis
     };
   }
 
-  const isActive = (s: { status?: string | null }) =>
-    typeof s.status === "string" && s.status.toLowerCase() === "active";
+  const normalise = (s: string | null | undefined) =>
+    typeof s === "string" ? s.toLowerCase() : "";
+
+  const isActive = (s: { status?: string | null }) => normalise(s.status) === "active";
+  const attentionStates = new Set([
+    "suspended", "past_due", "pastdue", "paused", "cancelled", "canceled",
+    "failed", "expired", "overdue", "unpaid", "trial_expired",
+  ]);
+  const needsAttention = (s: { status?: string | null }) =>
+    attentionStates.has(normalise(s.status));
 
   const activeSubs = subs.filter(isActive);
   const activeServices = services.filter(isActive);
+  const attentionSubs = subs.filter(needsAttention);
+  const attentionServices = services.filter(needsAttention);
+
+  const hasActive = activeSubs.length > 0 || activeServices.length > 0;
+  const hasAttention = attentionSubs.length > 0 || attentionServices.length > 0;
+
+  // Safe aggregate status counts (subscriptions + services combined).
+  const statusCounts: Record<string, number> = {};
+  for (const s of [...subs, ...services]) {
+    const key = normalise(s.status) || "unknown";
+    statusCounts[key] = (statusCounts[key] ?? 0) + 1;
+  }
 
   const now = Date.now();
   const upcoming = subs
@@ -232,16 +252,30 @@ async function checkSubscription(admin: ReturnType<typeof createClient>, organis
     .filter((d) => new Date(d).getTime() >= now)
     .sort()[0] ?? null;
 
+  let status: CheckStatus;
+  let message: string;
+  if (hasActive && !hasAttention) {
+    status = "pass";
+    message = "At least one subscription or service is active.";
+  } else if (hasActive && hasAttention) {
+    status = "warning";
+    message = "Active subscription/service found, but some records require attention.";
+  } else {
+    status = "warning";
+    message = "Subscription or service records exist but none are active.";
+  }
+
   return {
     name: CHECK_NAMES.subscription,
-    status: "ok",
-    severity: "info",
-    message: "Subscription and service records found.",
+    status,
+    severity: status === "pass" ? "info" : "warning",
+    message,
     details: {
       subscription_count: subs.length,
       active_subscription_count: activeSubs.length,
       service_count: services.length,
       active_service_count: activeServices.length,
+      status_counts: statusCounts,
       next_billing_date: upcoming,
     },
     source: SOURCE,
@@ -293,11 +327,35 @@ async function checkEmailDelivery(admin: ReturnType<typeof createClient>, organi
     else if (/complain|spam/.test(t)) counts.complained++;
   }
 
+  const problemCount = counts.bounced + counts.failed + counts.complained;
+
+  let status: CheckStatus;
+  let severity: CheckSeverity;
+  let message: string;
+
+  if (problemCount === 0 && counts.delivered > 0) {
+    status = "pass";
+    severity = "info";
+    message = "Email delivery looks healthy with no meaningful failures.";
+  } else if (problemCount > 0 && counts.delivered > 0) {
+    status = "warning";
+    severity = "warning";
+    message = "Email delivery is working but has failures requiring investigation.";
+  } else if (problemCount > 0 && counts.delivered === 0) {
+    status = "fail";
+    severity = "error";
+    message = "Email delivery has serious failure conditions with no successful deliveries.";
+  } else {
+    status = "unavailable";
+    severity = "info";
+    message = "Email delivery events are present but could not be classified.";
+  }
+
   return {
     name: CHECK_NAMES.email,
-    status: "ok",
-    severity: "info",
-    message: "Recent email delivery events found.",
+    status,
+    severity,
+    message,
     details: counts,
     source: SOURCE,
   };
@@ -354,7 +412,7 @@ async function checkRecentErrors(admin: ReturnType<typeof createClient>, organis
 
   return {
     name: CHECK_NAMES.recent_errors,
-    status: errorEvents > 0 ? "warning" : "ok",
+    status: errorEvents > 0 ? "warning" : "pass",
     severity: errorEvents > 0 ? "warning" : "info",
     message: errorEvents > 0
       ? `${errorEvents} recent error event(s) found.`
@@ -382,8 +440,8 @@ serve(async (req: Request) => {
     return json({ ok: false, error: "Missing signature" }, 401);
   }
 
-  const tsMs = Date.parse(timestamp);
-  if (Number.isNaN(tsMs) || Math.abs(Date.now() - tsMs) > TIMESTAMP_WINDOW_MS) {
+  const tsMs = Number(timestamp);
+  if (!Number.isFinite(tsMs) || Math.abs(Date.now() - tsMs) > TIMESTAMP_WINDOW_MS) {
     return json({ ok: false, error: "Timestamp out of range" }, 401);
   }
 

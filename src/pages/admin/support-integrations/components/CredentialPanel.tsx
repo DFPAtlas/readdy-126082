@@ -281,6 +281,7 @@ interface CredentialFormModalProps {
     allowedOrigins: string[];
     turnstileRequired: boolean;
     elevatedPriorityAllowed: boolean;
+    keyPrefixBase: string;
   }) => Promise<boolean>;
   busy: boolean;
   initialClientName?: string;
@@ -294,6 +295,7 @@ function CredentialFormModal({ title, site, onClose, onSubmit, busy, initialClie
   const [allowedOrigins, setAllowedOrigins] = useState<string[]>(initialOrigins ?? site.allowed_origins ?? []);
   const [turnstileRequired, setTurnstileRequired] = useState(false);
   const [elevatedPriorityAllowed, setElevatedPriorityAllowed] = useState(false);
+  const [keyPrefixBase, setKeyPrefixBase] = useState('dfp_');
   const [err, setErr] = useState('');
 
   const submit = async () => {
@@ -306,12 +308,17 @@ function CredentialFormModal({ title, site, onClose, onSubmit, busy, initialClie
       setErr('Public-form credentials need at least one allowed origin.');
       return;
     }
+    if (!/^[a-z][a-z0-9]{0,7}_$/.test(keyPrefixBase.trim())) {
+      setErr('Key prefix must be lowercase letters/numbers ending in an underscore (e.g. dfp_, qg_).');
+      return;
+    }
     const ok = await onSubmit({
       clientName: clientName.trim(),
       integrationMode,
       allowedOrigins,
       turnstileRequired,
       elevatedPriorityAllowed,
+      keyPrefixBase: keyPrefixBase.trim(),
     });
     if (!ok) return;
   };
@@ -335,6 +342,12 @@ function CredentialFormModal({ title, site, onClose, onSubmit, busy, initialClie
         <div>
           <label className="block text-xs font-medium text-foreground-400 mb-1">Allowed origins</label>
           <OriginEditor origins={allowedOrigins} onChange={setAllowedOrigins} />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-foreground-400 mb-1" htmlFor="cf-prefix">Key prefix</label>
+          <input id="cf-prefix" value={keyPrefixBase} onChange={(e) => setKeyPrefixBase(e.target.value)} className="w-full text-sm bg-background-50 border border-background-300/60 rounded-md px-3 py-2 text-foreground-100 focus:outline-none focus:ring-2 focus:ring-accent-500/40" placeholder="dfp_" />
+          <p className="text-[11px] text-foreground-500 mt-1">Lowercase prefix ending in "_" (e.g. dfp_, qg_). A random suffix is appended automatically.</p>
         </div>
 
         {integrationMode === 'public_form' && (

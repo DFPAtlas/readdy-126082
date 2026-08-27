@@ -114,6 +114,19 @@ export const overallStatusTones: Record<OverallStatus, string> = {
   error: 'bg-red-500/15 text-red-400',
 };
 
+/**
+ * Legacy diagnostic results may contain the historical "ok" status. Normalise
+ * it to the canonical "pass" so older records still render correctly without
+ * any data loss or migration.
+ */
+export function normalizeCheckStatus(status: string): CheckStatus {
+  return status === 'ok' ? 'pass' : (status as CheckStatus);
+}
+
+export function normalizeOverallStatus(status: string): OverallStatus {
+  return status === 'ok' ? 'pass' : (status as OverallStatus);
+}
+
 export const severityLabels: Record<CheckSeverity, string> = {
   info: 'Info',
   low: 'Low',

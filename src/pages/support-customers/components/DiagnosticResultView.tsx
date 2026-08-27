@@ -11,6 +11,8 @@ import {
   repairTypeLabel,
   repairRiskLabels,
   repairRiskColors,
+  normalizeCheckStatus,
+  normalizeOverallStatus,
 } from '@/pages/support-customers/constants';
 import { formatFullDateTime } from '@/pages/support-tickets/constants';
 
@@ -38,7 +40,16 @@ function resolveDurationMs(detail: DiagnosticDetail): number | null {
 }
 
 export default function DiagnosticResultView({ detail, onReviewRepair }: DiagnosticResultViewProps) {
-  const result = detail.result_data;
+  const result = detail.result_data
+    ? {
+        ...detail.result_data,
+        overall_status: normalizeOverallStatus(detail.result_data.overall_status),
+        checks: (detail.result_data.checks ?? []).map((c) => ({
+          ...c,
+          status: normalizeCheckStatus(c.status),
+        })),
+      }
+    : null;
   const isPending = detail.status === 'queued' || detail.status === 'running';
   const isFailedWithoutResult = detail.status === 'failed' && !result;
   const recommendation = result?.recommended_repair ?? null;

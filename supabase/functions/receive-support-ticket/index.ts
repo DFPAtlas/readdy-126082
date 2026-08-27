@@ -53,16 +53,20 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 function hashSubject(value: string): Promise<string> {
-  const pepper = Deno.env.get("TICKET_HASH_PEPPER") ?? "";
+  const pepper = Deno.env.get("TICKET_HASH_PEPPER");
+  if (!pepper) {
+    throw new Error("TICKET_HASH_PEPPER_NOT_CONFIGURED");
+  }
   return hmacSha256Hex(pepper, value.trim().toLowerCase());
 }
 
 function corsHeadersFor(origin: string | null) {
   const h: Record<string, string> = {
     "Access-Control-Allow-Headers":
-      "content-type, x-dfp-site, x-dfp-key, x-dfp-timestamp, x-dfp-nonce, x-dfp-signature, x-idempotency-key, x-dfp-turnstile-token",
+      "authorization, x-client-info, apikey, content-type, x-dfp-site, x-dfp-key, x-dfp-timestamp, x-dfp-nonce, x-dfp-signature, x-idempotency-key, x-dfp-turnstile-token",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Max-Age": "86400",
+    "Vary": "Origin, Access-Control-Request-Headers",
   };
   if (origin) h["Access-Control-Allow-Origin"] = origin;
   return h;
