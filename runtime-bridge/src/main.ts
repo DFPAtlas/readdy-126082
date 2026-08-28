@@ -83,7 +83,9 @@ async function sendRequest(operation: string, body: Record<string, unknown>): Pr
   const payloadHash = await sha256Hex(rawBody);
 
   const url = new URL(config.endpoint);
-  const path = url.pathname;
+  // Supabase strips /functions/v1 before the request reaches the Edge Function.
+  // Sign the function-relative path so local and server canonical strings match.
+  const path = url.pathname.replace(/^\/functions\/v1/, "") || "/";
   const canonical = `${config.identity}\n${timestamp}\n${nonce}\nPOST\n${path}\n${payloadHash}`;
   const signature = await hmacSha256Hex(config.signingSecret, canonical);
 
