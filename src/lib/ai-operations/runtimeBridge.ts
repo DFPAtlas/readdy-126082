@@ -84,8 +84,8 @@ export interface AiRuntimeBridgeMessage {
 
 export type BridgeNodeState = 'reachable' | 'degraded' | 'stale' | 'offline' | 'not_registered';
 
-const REACHABLE_WINDOW_MS = 2 * 60_000; // last heartbeat < 2 min → reachable
-const STALE_WINDOW_MS = 5 * 60_000; // 2–5 min → stale; > 5 min → offline
+export const REACHABLE_WINDOW_MS = 2 * 60_000; // last heartbeat < 2 min → reachable
+export const STALE_WINDOW_MS = 5 * 60_000; // 2–5 min → stale; > 5 min → offline
 
 /** Derive the honest bridge node state from its last-seen/last-heartbeat time.
  *  Reachable does NOT imply execution — execution_enabled is always false. */

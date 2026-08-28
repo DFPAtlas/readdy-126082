@@ -19,6 +19,7 @@ import {
   type ConfigReadinessState,
   type ConfigHealthInput,
 } from '@/lib/ai-operations/runtimeConfig';
+import { resolveEffectiveHealth } from '@/lib/ai-operations/runtimeHealthSource';
 
 const TONE_STYLES: Record<'emerald' | 'amber' | 'red' | 'secondary', string> = {
   emerald: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
@@ -31,6 +32,7 @@ function healthForSystem(
   system: string,
   results: ReturnType<typeof useRuntimeHealth>['results'],
   latestBySystem: ReturnType<typeof useRuntimeHealth>['latestBySystem'],
+  effectivePaths: ReturnType<typeof useRuntimeHealth>['effectivePaths'],
 ): ConfigHealthInput | null {
   const session = Object.values(results).find((r) => r.system === system);
   if (session) {
@@ -40,7 +42,7 @@ function healthForSystem(
       reachable: session.reachable,
     };
   }
-  const persisted = latestBySystem.get(system);
+  const persisted = resolveEffectiveHealth(latestBySystem, system, effectivePaths);
   if (persisted) {
     return {
       status: persisted.currentStatus,
@@ -147,7 +149,7 @@ export default function ConfigurationReadiness() {
                 </tr>
               ) : (
                 health.config.map((cfg) => {
-                  const healthInput = healthForSystem(cfg.systemSlug, health.results, health.latestBySystem);
+                  const healthInput = healthForSystem(cfg.systemSlug, health.results, health.latestBySystem, health.effectivePaths);
                   const readiness: ConfigReadinessState = deriveReadiness(cfg, healthInput);
                   const meta = CONFIG_READINESS_META[readiness];
 

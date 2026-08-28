@@ -3,39 +3,36 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ============================================================================
 // runtime-bridge — secure OUTBOUND-FIRST private-runtime bridge API for DFP AI
-// Operations (Phase 3 Prompt 08).
+// Operations (Phase 3 Prompt 08 + 09C + 10).
 //
 // The trusted server-side endpoint that a local trusted runtime machine (the
 // `dfp-runtime-bridge` local service) calls OUTBOUND over HTTPS. The cloud never
 // requires direct inbound TCP access to n8n / Ollama / Docker / private LAN.
-// This phase is CONNECTIVITY + HEARTBEAT + SAFE HEALTH RELAY ONLY.
+// This phase is CONNECTIVITY + HEARTBEAT + SAFE HEALTH RELAY + SANITISED OLLAMA
+// CATALOGUE RELAY + DRY-RUN TRANSPORT PROBE (Prompt 10).
 //
 // It NEVER:
 //   * executes an agent or n8n workflow
-//   * performs Ollama inference
+//   * performs Ollama inference (no /api/generate|/chat|/embed|/pull|/delete)
 //   * calls a model/tool, retrieves knowledge, sends notifications
 //   * creates/updates a Run or mutates orchestration execution state
 //   * runs schedules or performs remediation
 //   * proxies arbitrary URLs/IPs/ports/files/shell commands
+//   * mutates the ai_operations_models registry automatically
 //
 // Machine authentication (fail-closed, no internal-staff JWT):
 //   * Signed headers: X-DFP-Identity, X-DFP-Timestamp, X-DFP-Nonce,
 //     X-DFP-Signature-Version, X-DFP-Signature.
 //   * Canonical HMAC-SHA256 over identity \n timestamp \n nonce \n method \n
 //     path \n payload-hash.
-//   * Signing secret = DFP_RUNTIME_BRIDGE_SIGNING_KEY (server-side only). If it
-//     is not configured → fails closed with `configuration_missing`.
-//   * Service identity `dfp-local-runtime-bridge` is revalidated server-side.
-//     Callback/connectivity auth is separate from execution permission — the
-//     identity remains BLOCKED for execution, and `execution_enabled` on every
-//     node is forced FALSE.
-//   * ±5-minute timestamp window, nonce replay protection (hashed + reuse
-//     rejected), idempotent message_id (duplicates return the stored result).
+//   * Signing secret = DFP_RUNTIME_BRIDGE_SIGNING_KEY (server-side only).
+//   * Service identity `dfp-local-runtime-bridge` revalidated server-side;
+//     `execution_enabled` on every node is forced FALSE.
+//   * ±5-minute timestamp window, nonce replay protection, idempotent message_id.
 //
-// Allowlisted operations only: handshake, heartbeat, report_health,
-// report_capabilities, fetch_control_messages. Unknown → reject. No arbitrary
-// URL proxy is possible — local check targets are configured in the bridge
-// itself, never supplied by the cloud.
+// Allowlisted operations: handshake, heartbeat, report_health,
+// report_capabilities, report_ollama_catalogue, fetch_control_messages,
+// report_transport_probe_ack.
 // ============================================================================
 
 const CORS = {
@@ -53,13 +50,19 @@ const SIGNATURE_VERSION = "v1";
 const TIMESTAMP_WINDOW_MS = 5 * 60_000; // ±5 minutes
 const MAX_BODY_BYTES = 64 * 1024; // 64 KB
 const MAX_SUMMARY_CHARS = 500;
+const MAX_CATALOGUE_MODELS = 200;
+const MAX_NAME_CHARS = 200;
+const MAX_META_CHARS = 120;
+const PROBE_TTL_MS = 2 * 60_000; // transport probe expires in 2 minutes
 
 const ALLOWED_OPERATIONS = new Set([
   "handshake",
   "heartbeat",
   "report_health",
   "report_capabilities",
+  "report_ollama_catalogue",
   "fetch_control_messages",
+  "report_transport_probe_ack",
 ]);
 
 // Allowlisted capabilities only — never shell/arbitrary_http/filesystem/docker.
@@ -79,7 +82,22 @@ const ALLOWED_STATUSES = new Set([
   "healthy", "degraded", "unavailable", "not_configured", "unknown",
 ]);
 
-const ALLOWED_CONTROL_MESSAGE_TYPES = new Set(["health_request", "capability_request"]);
+const ALLOWED_CONTROL_MESSAGE_TYPES = new Set([
+  "health_request",
+  "capability_request",
+  "ollama_catalogue_request",
+  "ollama_catalogue_response",
+  "runtime_transport_probe",
+]);
+
+// The transport probe is a control message that must NOT be marked
+// "acknowledged" on fetch — it has its own signed-ack lifecycle.
+const PROBE_CONTROL_TYPES = new Set(["runtime_transport_probe"]);
+
+const ALLOWED_PROBE_ACK_STATUSES = new Set(["verified", "rejected"]);
+
+// Safe Ollama catalogue fields — never prompts / content / credentials / raw config.
+const ALLOWED_CATALOGUE_CLASSIFICATIONS = new Set(["local", "remote"]);
 
 const enc = new TextEncoder();
 
@@ -150,6 +168,87 @@ async function auditEvent(
     notes,
     ...extra,
   });
+}
+
+// --- Sanitised Ollama catalogue helpers (Prompt 09C) --------------------------
+
+function sanitiseCatalogueModel(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const m = raw as Record<string, unknown>;
+  const name = str(m.name).slice(0, MAX_NAME_CHARS);
+  if (!name) return null;
+
+  const family = str(m.family).slice(0, MAX_META_CHARS) || null;
+  const parameterSize = str(m.parameter_size).slice(0, MAX_META_CHARS) || null;
+  const quantization = str(m.quantization).slice(0, MAX_META_CHARS) || null;
+  const modifiedAt = str(m.modified_at) || null;
+  const classification = ALLOWED_CATALOGUE_CLASSIFICATIONS.has(str(m.classification))
+    ? str(m.classification)
+    : (/[:\s]cloud$/i.test(name) ? "remote" : "local");
+
+  return {
+    name,
+    family,
+    parameter_size: parameterSize,
+    quantization,
+    classification,
+    modified_at: modifiedAt,
+  };
+}
+
+function normaliseModelName(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+/** Deterministic catalogue→registry comparison for audit only. Never mutates
+ *  the registry. Returns { present, missing, unregistered }. */
+async function compareCatalogueToRegistry(
+  admin: ReturnType<typeof createClient>,
+  models: Record<string, unknown>[],
+): Promise<{ present: number; missing: number; unregistered: number }> {
+  const { data: regRows } = await admin
+    .from("ai_operations_models")
+    .select("name, model_reference, display_name, hosting_type, is_active")
+    .eq("hosting_type", "local")
+    .eq("is_active", true);
+
+  const localNames = new Set(models.map((m) => normaliseModelName(str(m.name))));
+  const localBases = new Map<string, string>();
+  for (const m of models) {
+    const name = str(m.name);
+    const base = name.split(":")[0] ?? "";
+    if (base) localBases.set(normaliseModelName(base), name);
+  }
+
+  let present = 0;
+  let missing = 0;
+  for (const row of regRows ?? []) {
+    const keys = [row.name, row.model_reference, row.display_name]
+      .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      .map(normaliseModelName);
+    const exact = keys.some((k) => localNames.has(k));
+    const familyMatch = keys.some((k) => localBases.has(k));
+    if (exact || familyMatch) present += 1;
+    else missing += 1;
+  }
+
+  const regKeySet = new Set<string>();
+  for (const row of regRows ?? []) {
+    for (const k of [row.name, row.model_reference, row.display_name]) {
+      if (typeof k === "string" && k.trim().length > 0) {
+        regKeySet.add(normaliseModelName(k));
+        regKeySet.add(normaliseModelName(k.split(":")[0] ?? ""));
+      }
+    }
+  }
+  const localEntries = models.filter((m) => str(m.classification) === "local");
+  const unregistered = localEntries.filter((m) => {
+    const n = normaliseModelName(str(m.name));
+    const base = normaliseModelName((str(m.name).split(":")[0] ?? ""));
+    return !regKeySet.has(n) && !regKeySet.has(base);
+  }).length;
+
+  return { present, missing, unregistered };
 }
 
 serve(async (req: Request) => {
@@ -243,7 +342,7 @@ serve(async (req: Request) => {
   const now = new Date();
   const receivedAt = now.toISOString();
 
-  // --- Idempotency (duplicate message_id → stored result, no re-process) ------
+  // --- Idempotency -----------------------------------------------------------
   const { data: dupRows } = await admin
     .from("ai_runtime_bridge_messages")
     .select("message_key, message_id, status")
@@ -259,7 +358,7 @@ serve(async (req: Request) => {
     });
   }
 
-  // --- Replay protection (nonce reuse) ---------------------------------------
+  // --- Replay protection -----------------------------------------------------
   const { data: nonceRows } = await admin
     .from("ai_runtime_bridge_messages")
     .select("id")
@@ -274,7 +373,6 @@ serve(async (req: Request) => {
   const nodeKey = str(body.node_key);
   const correlationId = str(body.correlation_id) || null;
 
-  // Resolve node (for non-handshake operations).
   let nodeId: string | null = null;
   let nodeRow: Record<string, unknown> | null = null;
   if (nodeKey) {
@@ -287,7 +385,6 @@ serve(async (req: Request) => {
     nodeId = nodeRow ? (nodeRow.id as string) : null;
   }
 
-  // --- Helper: persist the inbound message ledger row ------------------------
   const insertMessage = async (type: string, payloadType: string | null, safePayload: unknown) => {
     await admin.from("ai_runtime_bridge_messages").insert({
       message_key: uid("BRM"),
@@ -306,7 +403,7 @@ serve(async (req: Request) => {
   };
 
   // ===========================================================================
-  // HANDSHAKE — register node, record handshake evidence, NO execution.
+  // HANDSHAKE
   // ===========================================================================
   if (operation === "handshake") {
     if (!nodeKey) return json({ error: "node_key is required." }, 400);
@@ -321,7 +418,6 @@ serve(async (req: Request) => {
       ? (body.capabilities as string[]).filter((c) => ALLOWED_CAPABILITIES.has(c))
       : [];
 
-    // Upsert node — execution_enabled is ALWAYS forced false.
     const upsert = {
       node_key: nodeKey,
       name,
@@ -390,13 +486,12 @@ serve(async (req: Request) => {
     });
   }
 
-  // Node required for all remaining operations.
   if (!nodeKey || !nodeId) {
     return json({ error: "Unknown bridge node — handshake required first." }, 404);
   }
 
   // ===========================================================================
-  // HEARTBEAT — outbound connectivity evidence, persisted state. NO execution.
+  // HEARTBEAT
   // ===========================================================================
   if (operation === "heartbeat") {
     const bridgeTimestamp = str(body.bridge_timestamp) || receivedAt;
@@ -466,10 +561,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_HEALTH — relay sanitised LOCAL n8n / Ollama / bridge health only.
-  //   Persisted into ai_runtime_health_checks with source='local_bridge' so the
-  //   cloud-vs-local distinction is preserved. NO inference, NO workflow, NO
-  //   arbitrary targets.
+  // REPORT_HEALTH
   // ===========================================================================
   if (operation === "report_health") {
     const checks = Array.isArray(body.checks) ? body.checks : [];
@@ -537,7 +629,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_CAPABILITIES — update allowlisted capabilities only.
+  // REPORT_CAPABILITIES
   // ===========================================================================
   if (operation === "report_capabilities") {
     const capabilities = Array.isArray(body.capabilities)
@@ -567,8 +659,67 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // FETCH_CONTROL_MESSAGES — return only allowlisted pending control messages.
-  //   health_request / capability_request only. NO execute/run/call/shell.
+  // REPORT_OLLAMA_CATALOGUE — relay sanitised local Ollama /api/tags catalogue.
+  //   Persisted as an inbound ollama_catalogue_response message with
+  //   source=local_bridge. Compared against ai_operations_models (deterministic,
+  //   audit-only — the registry is NEVER mutated). NO inference, NO prompts,
+  //   NO embeddings, NO pull/delete.
+  // ===========================================================================
+  if (operation === "report_ollama_catalogue") {
+    const rawModels = Array.isArray(body.models) ? (body.models as unknown[]) : [];
+    const catalogueAt = str(body.catalogue_at) || receivedAt;
+
+    const models = rawModels
+      .map(sanitiseCatalogueModel)
+      .filter((m): m is Record<string, unknown> => m !== null)
+      .slice(0, MAX_CATALOGUE_MODELS);
+
+    const safePayload = {
+      source: "local_bridge",
+      catalogue_at: catalogueAt,
+      model_count: models.length,
+      models,
+    };
+
+    await admin.from("ai_runtime_bridge_nodes").update({
+      last_seen_at: receivedAt,
+      status: "reachable",
+      execution_enabled: false,
+    }).eq("id", nodeId);
+
+    await insertMessage("ollama_catalogue_response", "ollama_catalogue", safePayload);
+
+    // Deterministic registry comparison for audit only — never mutate registry.
+    const comparison = await compareCatalogueToRegistry(admin, models);
+
+    await auditEvent(admin, "ollama_catalogue_verified", "success", "low",
+      `Local Ollama catalogue relayed via bridge: ${models.length} model(s), ` +
+      `${comparison.present} registered+present, ${comparison.missing} registered+missing, ` +
+      `${comparison.unregistered} present+unregistered. Catalogue only — no inference occurred.`);
+
+    if (comparison.missing > 0 || comparison.unregistered > 0) {
+      await auditEvent(admin, "ollama_registry_mismatch_detected", "review_required", "medium",
+        `Ollama catalogue ↔ model registry mismatch: ${comparison.missing} registered model(s) missing locally, ` +
+        `${comparison.unregistered} local model(s) not registered. Registry NOT auto-mutated (no pull, no registration).`);
+    }
+
+    return json({
+      accepted: true,
+      allowed: false,
+      blocked: false,
+      operation: "report_ollama_catalogue",
+      nodeKey,
+      modelCount: models.length,
+      registeredPresent: comparison.present,
+      registeredMissing: comparison.missing,
+      presentUnregistered: comparison.unregistered,
+      executionEnabled: false,
+      message: "Sanitised Ollama catalogue relayed (catalogue only — no inference). Registry not mutated.",
+    });
+  }
+
+  // ===========================================================================
+  // FETCH_CONTROL_MESSAGES
   // ===========================================================================
   if (operation === "fetch_control_messages") {
     const { data: pending } = await admin
@@ -585,11 +736,27 @@ serve(async (req: Request) => {
     );
 
     if (messages.length > 0) {
-      const keys = messages.map((m) => m.message_key);
-      await admin.from("ai_runtime_bridge_messages").update({
-        status: "acknowledged",
-        acknowledged_at: receivedAt,
-      }).in("message_key", keys);
+      // Transport probes keep a distinct "delivered" lifecycle (they await a
+      // signed ack); all other control messages are marked acknowledged here.
+      const probeKeys = messages
+        .filter((m) => PROBE_CONTROL_TYPES.has(m.message_type as string))
+        .map((m) => m.message_key);
+      const otherKeys = messages
+        .filter((m) => !PROBE_CONTROL_TYPES.has(m.message_type as string))
+        .map((m) => m.message_key);
+
+      if (probeKeys.length > 0) {
+        await admin.from("ai_runtime_bridge_messages").update({
+          status: "delivered",
+          acknowledged_at: receivedAt,
+        }).in("message_key", probeKeys);
+      }
+      if (otherKeys.length > 0) {
+        await admin.from("ai_runtime_bridge_messages").update({
+          status: "acknowledged",
+          acknowledged_at: receivedAt,
+        }).in("message_key", otherKeys);
+      }
     }
 
     return json({
@@ -608,6 +775,139 @@ serve(async (req: Request) => {
       })),
       executionEnabled: false,
       message: "Pending control messages returned (allowlisted types only). No execution control exists.",
+    });
+  }
+
+  // ===========================================================================
+  // REPORT_TRANSPORT_PROBE_ACK — signed acknowledgement for a dry-run transport
+  //   probe (Prompt 10). The bridge replies with a NON-EXECUTING ack. The cloud
+  //   validates: authenticated identity (already done), correct node, original
+  //   outbound probe exists, correlation matches, not expired, and not already
+  //   acknowledged. Never trusts caller-provided status blindly.
+  // ===========================================================================
+  if (operation === "report_transport_probe_ack") {
+    const probeKey = str(body.probe_key);
+    const originalMessageKey = str(body.original_message_key);
+    const ackCorrelationId = str(body.correlation_id);
+    const receivedAtLocal = str(body.received_at);
+    const acknowledgedAtLocal = str(body.acknowledged_at) || receivedAtLocal || receivedAt;
+    const ackStatus = ALLOWED_PROBE_ACK_STATUSES.has(str(body.status)) ? str(body.status) : "rejected";
+    const summary = str(body.summary).slice(0, MAX_SUMMARY_CHARS) || "Transport probe acknowledgement.";
+
+    if (!originalMessageKey) {
+      return json({ error: "original_message_key is required for a transport probe ack." }, 400);
+    }
+
+    // Original outbound probe must exist and be the correct direction/type.
+    const { data: origRows } = await admin
+      .from("ai_runtime_bridge_messages")
+      .select("message_key, node_id, correlation_id, status, safe_payload, created_at")
+      .eq("message_key", originalMessageKey)
+      .eq("direction", "outbound")
+      .eq("message_type", "runtime_transport_probe")
+      .limit(1);
+    const orig = origRows && origRows.length > 0 ? origRows[0] : null;
+
+    if (!orig) {
+      await auditEvent(admin, "runtime_transport_probe_rejected", "rejected", "medium",
+        `Transport probe ack rejected: no matching outbound probe for key ${originalMessageKey}. No execution occurred.`);
+      return json({ error: "Original transport probe not found." }, 404);
+    }
+
+    // Correct node + correlation must match.
+    if ((orig.node_id as string | null) !== nodeId) {
+      await auditEvent(admin, "runtime_transport_probe_rejected", "rejected", "high",
+        `Transport probe ack rejected: node mismatch for probe ${probeKey || originalMessageKey}. No execution occurred.`);
+      return json({ error: "Probe ack node does not match the originating node." }, 403);
+    }
+    if (ackCorrelationId && (orig.correlation_id as string | null) !== ackCorrelationId) {
+      await auditEvent(admin, "runtime_transport_probe_rejected", "rejected", "high",
+        `Transport probe ack rejected: correlation mismatch for probe ${probeKey || originalMessageKey}. No execution occurred.`);
+      return json({ error: "Probe ack correlation ID does not match." }, 409);
+    }
+
+    // Expiry check — an expired probe must never be acknowledged as successful.
+    const origPayload = (orig.safe_payload as Record<string, unknown>) ?? {};
+    const expiresAt = str(origPayload.expires_at);
+    const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
+
+    if (expired && orig.status !== "acknowledged") {
+      await admin.from("ai_runtime_bridge_messages").update({ status: "expired" }).eq("message_key", originalMessageKey);
+      await auditEvent(admin, "runtime_transport_probe_expired", "expired", "low",
+        `Transport probe ${probeKey || originalMessageKey} expired before a valid acknowledgement. No execution occurred.`);
+      return json({
+        accepted: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_transport_probe_ack",
+        status: "expired",
+        executionEnabled: false,
+        message: "Transport probe expired — acknowledgement not accepted.",
+      });
+    }
+
+    // Idempotency — a probe already acknowledged returns its existing state.
+    if (orig.status === "acknowledged") {
+      return json({
+        accepted: true,
+        duplicate: true,
+        operation: "report_transport_probe_ack",
+        status: "acknowledged",
+        executionEnabled: false,
+        message: "Transport probe already acknowledged — no duplicate evidence created.",
+      });
+    }
+
+    // Deterministic status transition (never running/executing/completed_workflow).
+    const finalStatus = ackStatus === "verified" ? "acknowledged" : "rejected";
+
+    await admin.from("ai_runtime_bridge_messages").update({
+      status: finalStatus,
+      acknowledged_at: acknowledgedAtLocal,
+    }).eq("message_key", originalMessageKey);
+
+    // Persist the signed ack as an inbound message (transport evidence).
+    await admin.from("ai_runtime_bridge_messages").insert({
+      message_key: uid("BRM"),
+      message_id: messageId,
+      nonce_hash: nonceHash,
+      node_id: nodeId,
+      direction: "inbound",
+      message_type: "runtime_transport_probe_ack",
+      correlation_id: ackCorrelationId || (orig.correlation_id as string | null),
+      status: "recorded",
+      payload_type: "transport_probe_ack",
+      safe_payload: {
+        probe_key: probeKey,
+        original_message_key: originalMessageKey,
+        node_key: nodeKey,
+        received_at: receivedAtLocal,
+        status: ackStatus,
+        summary,
+      },
+      payload_hash: payloadHash,
+      created_at: receivedAt,
+    });
+
+    if (finalStatus === "acknowledged") {
+      await auditEvent(admin, "runtime_transport_probe_verified", "success", "low",
+        `Transport probe ${probeKey || originalMessageKey} verified via signed acknowledgement. Transport only — no execution occurred.`);
+    } else {
+      await auditEvent(admin, "runtime_transport_probe_rejected", "rejected", "medium",
+        `Transport probe ${probeKey || originalMessageKey} rejected by bridge (${summary}). No execution occurred.`);
+    }
+
+    return json({
+      accepted: true,
+      allowed: false,
+      blocked: false,
+      operation: "report_transport_probe_ack",
+      status: finalStatus,
+      duplicate: false,
+      executionEnabled: false,
+      message: finalStatus === "acknowledged"
+        ? "Transport probe acknowledged — no execution performed."
+        : "Transport probe rejected — no execution performed.",
     });
   }
 

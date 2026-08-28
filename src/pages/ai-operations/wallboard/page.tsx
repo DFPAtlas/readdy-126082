@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { GroupLiveDataProvider, useGroupLiveData, refreshGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
 import { useRuntimeHealth, refreshHistory } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
+import { effectivePathSummary, resolveEffectiveHealth } from '@/lib/ai-operations/runtimeHealthSource';
 import WallboardHeader from '@/pages/ai-operations/wallboard/components/WallboardHeader';
 import KpiStrip from '@/pages/ai-operations/wallboard/components/KpiStrip';
 import GroupSiteStatus from '@/pages/ai-operations/wallboard/components/GroupSiteStatus';
@@ -91,13 +92,26 @@ function WallboardInner() {
     let healthy = 0;
     let degraded = 0;
     let unavailable = 0;
-    for (const v of latest.values()) {
+    for (const system of latest.keys()) {
+      const v = resolveEffectiveHealth(latest, system, healthState.effectivePaths);
+      if (!v) continue;
       if (v.currentStatus === 'healthy') healthy += 1;
       else if (v.currentStatus === 'degraded') degraded += 1;
       else if (v.currentStatus === 'unavailable') unavailable += 1;
     }
     return `${healthy} healthy · ${degraded} degraded · ${unavailable} unavailable`;
-  }, [healthState.latestBySystem]);
+  }, [healthState.latestBySystem, healthState.effectivePaths]);
+
+  const localPathLabel = useMemo(() => {
+    const lines: string[] = [];
+    for (const system of ['n8n', 'ollama']) {
+      const path = healthState.effectivePaths[system];
+      if (!path) continue;
+      const sources = healthState.latestBySystem.get(system);
+      lines.push(effectivePathSummary(system, path, sources?.local_bridge, sources?.cloud_edge));
+    }
+    return lines.length ? lines.join('  ·  ') : null;
+  }, [healthState.latestBySystem, healthState.effectivePaths]);
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-background-50 text-foreground-50">
@@ -131,6 +145,12 @@ function WallboardInner() {
               ? `Runtime: ${runtimeSummary}`
               : 'Runtime Connectivity: Not Checked'}
           </span>
+          {localPathLabel && (
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-label text-foreground-500 bg-background-100 border border-background-200/60 rounded-full px-2.5 py-0.5 whitespace-nowrap">
+              <i className="ri-server-line w-3.5 h-3.5 flex items-center justify-center"></i>
+              {localPathLabel}
+            </span>
+          )}
           <span className="inline-flex items-center gap-1.5 text-[11px] font-label font-semibold text-red-400 bg-red-500/10 border border-red-500/25 rounded-full px-2.5 py-0.5 whitespace-nowrap">
             <i className="ri-shield-cross-line w-3.5 h-3.5 flex items-center justify-center"></i>
             Runtime Execution: BLOCKED

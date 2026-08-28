@@ -18,6 +18,7 @@ import ModelKpis from '@/pages/ai-operations/models/components/ModelKpis';
 import ProviderStatus from '@/pages/ai-operations/models/components/ProviderStatus';
 import ModelRegistry from '@/pages/ai-operations/models/components/ModelRegistry';
 import RoutingPolicy from '@/pages/ai-operations/models/components/RoutingPolicy';
+import OllamaCataloguePanel from '@/pages/ai-operations/models/components/OllamaCataloguePanel';
 import ModelFormModal from '@/pages/ai-operations/models/components/ModelFormModal';
 import ProviderFormModal from '@/pages/ai-operations/models/components/ProviderFormModal';
 
@@ -187,6 +188,9 @@ export default function ModelsPage() {
 
       {/* Provider status */}
       {!loading && mode !== 'error' && <ProviderStatus providers={providers} />}
+
+      {/* Local Ollama catalogue (relayed + registry comparison) */}
+      {!loading && mode !== 'error' && <OllamaCataloguePanel />}
 
       {/* Search + filters */}
       {!loading && mode !== 'error' && (

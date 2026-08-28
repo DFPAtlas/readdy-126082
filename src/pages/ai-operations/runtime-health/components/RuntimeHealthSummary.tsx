@@ -1,12 +1,19 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useRuntimeHealth } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
+import {
+  effectivePathSummary,
+  resolveEffectiveHealth,
+} from '@/lib/ai-operations/runtimeHealthSource';
+
+const LOCAL_SYSTEMS = ['n8n', 'ollama'];
 
 /**
  * Compact, reusable runtime-health summary strip used by Live Operations and
  * the Wallboard. Never triggers a check — it only surfaces the latest persisted
- * monitoring state (ai_runtime_health_checks). Shows "Not Checked" until any
- * check has been persisted.
+ * monitoring state (ai_runtime_health_checks + bridge heartbeat). Shows the
+ * deterministic effective runtime path for n8n / Ollama so a healthy local
+ * bridge is never presented as a cloud connection.
  */
 export default function RuntimeHealthSummary() {
   const health = useRuntimeHealth();
@@ -19,7 +26,9 @@ export default function RuntimeHealthSummary() {
     let unavailable = 0;
     let notConfigured = 0;
     let notTestable = 0;
-    for (const v of latest.values()) {
+    for (const system of latest.keys()) {
+      const v = resolveEffectiveHealth(latest, system, health.effectivePaths);
+      if (!v) continue;
       if (v.currentStatus === 'healthy') healthy += 1;
       else if (v.currentStatus === 'degraded') degraded += 1;
       else if (v.currentStatus === 'unavailable') unavailable += 1;
@@ -33,12 +42,26 @@ export default function RuntimeHealthSummary() {
     if (notConfigured) parts.push(`${notConfigured} not configured`);
     if (notTestable) parts.push(`${notTestable} not testable`);
     return parts.length ? parts.join(' · ') : 'No results';
-  }, [latest]);
+  }, [latest, health.effectivePaths]);
 
   const hasUnavailable = useMemo(
-    () => [...latest.values()].some((v) => v.currentStatus === 'unavailable'),
-    [latest],
+    () =>
+      [...latest.keys()].some(
+        (system) => resolveEffectiveHealth(latest, system, health.effectivePaths)?.currentStatus === 'unavailable',
+      ),
+    [latest, health.effectivePaths],
   );
+
+  const localPaths = useMemo(() => {
+    const lines: string[] = [];
+    for (const system of LOCAL_SYSTEMS) {
+      const path = health.effectivePaths[system];
+      if (!path) continue;
+      const sources = latest.get(system);
+      lines.push(effectivePathSummary(system, path, sources?.local_bridge, sources?.cloud_edge));
+    }
+    return lines;
+  }, [latest, health.effectivePaths]);
 
   return (
     <section className="bg-background-100 border border-background-200/60 rounded-lg px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
@@ -52,6 +75,13 @@ export default function RuntimeHealthSummary() {
             <p className="text-xs text-foreground-500 truncate">{summary}</p>
           ) : (
             <p className="text-xs text-foreground-600">Not Checked</p>
+          )}
+          {localPaths.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+              {localPaths.map((line) => (
+                <span key={line} className="text-[11px] font-label text-accent-400 whitespace-nowrap">{line}</span>
+              ))}
+            </div>
           )}
         </div>
       </div>

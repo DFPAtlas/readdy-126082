@@ -4,6 +4,10 @@ import {
   refreshBridge,
 } from '@/pages/ai-operations/runtime-controls/runtimeBridgeStore';
 import {
+  useOllamaCatalogue,
+  refreshOllamaCatalogue,
+} from '@/pages/ai-operations/models/ollamaCatalogueStore';
+import {
   deriveBridgeNodeState,
   BRIDGE_NODE_STATE_META,
 } from '@/lib/ai-operations/runtimeBridge';
@@ -22,15 +26,18 @@ function formatTime(iso: string | null | undefined): string {
  */
 export default function PrivateRuntimeBridge() {
   const { nodes, summary } = useRuntimeBridge();
+  const catalogue = useOllamaCatalogue();
 
   useEffect(() => {
     void refreshBridge();
+    void refreshOllamaCatalogue();
   }, []);
 
   const firstNode = nodes[0] ?? null;
   const nodeState = firstNode ? deriveBridgeNodeState(firstNode) : 'not_registered';
   const stateMeta = BRIDGE_NODE_STATE_META[nodeState];
   const latest = summary?.latest ?? null;
+  const comparison = catalogue.comparison;
 
   const stateTone =
     stateMeta.tone === 'emerald' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
@@ -65,9 +72,16 @@ export default function PrivateRuntimeBridge() {
         <div className="grid grid-cols-2 gap-2">
           <MiniStat label="n8n local" value={latest?.n8n_status ?? '—'} tone={latest?.n8n_status === 'healthy' ? 'emerald' : 'secondary'} />
           <MiniStat label="Ollama local" value={latest?.ollama_status ?? '—'} tone={latest?.ollama_status === 'healthy' ? 'emerald' : 'secondary'} />
-          <MiniStat label="Nodes" value={String(summary?.nodeCount ?? 0)} tone="secondary" />
+          <MiniStat label="Local models" value={comparison ? String(comparison.totalCatalogueModels) : '—'} tone="secondary" />
           <MiniStat label="Heartbeat" value={firstNode ? formatTime(firstNode.last_heartbeat_at) : '—'} tone="secondary" />
         </div>
+
+        {comparison && (
+          <div className="mt-2.5 flex items-center justify-between gap-2">
+            <span className="text-[9px] font-label text-foreground-600 uppercase tracking-wide whitespace-nowrap">Registered-present</span>
+            <span className="text-xs font-heading font-semibold text-emerald-400 whitespace-nowrap">{comparison.registeredPresent}</span>
+          </div>
+        )}
       </div>
     </section>
   );

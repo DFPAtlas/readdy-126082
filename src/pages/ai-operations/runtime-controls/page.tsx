@@ -11,6 +11,7 @@ import N8nConnectorPanel from '@/pages/ai-operations/runtime-controls/components
 import RuntimeMessageBoundary from '@/pages/ai-operations/runtime-controls/components/RuntimeMessageBoundary';
 import CallbackChannel from '@/pages/ai-operations/runtime-controls/components/CallbackChannel';
 import PrivateRuntimeBridge from '@/pages/ai-operations/runtime-controls/components/PrivateRuntimeBridge';
+import TransportProbeVerification from '@/pages/ai-operations/runtime-controls/components/TransportProbeVerification';
 
 export default function RuntimeControlsPage() {
   const { controls, loading, error } = useRuntimeControls();
@@ -108,6 +109,9 @@ export default function RuntimeControlsPage() {
 
       {/* Private runtime bridge (outbound-first local runtime connectivity) */}
       <PrivateRuntimeBridge />
+
+      {/* Dry-run transport verification (cloud → HAL → cloud control-message path) */}
+      <TransportProbeVerification />
 
       {/* Change history */}
       <ControlHistory />

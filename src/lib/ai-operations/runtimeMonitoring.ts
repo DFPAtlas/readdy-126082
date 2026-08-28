@@ -88,8 +88,11 @@ export interface AiRuntimeMonitoringRuleRow {
 
 // --- Derived per-system health -----------------------------------------------
 
+export type HealthSource = 'cloud_edge' | 'local_bridge';
+
 export interface DerivedSystemHealth {
   system: string;
+  source: HealthSource;
   currentStatus: RuntimeHealthStatus;
   lastCheckedAt: string | null;
   lastHealthyAt: string | null;
@@ -148,6 +151,7 @@ export function deriveLatestBySystem(
 
     result.set(system, {
       system,
+      source: 'cloud_edge',
       currentStatus: (ordered[0]?.status as RuntimeHealthStatus) ?? 'unknown',
       lastCheckedAt: ordered[0]?.checked_at ?? null,
       lastHealthyAt,

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useRuntimeHealth } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import { computeAvailability } from '@/lib/ai-operations/runtimeMonitoring';
+import { resolveEffectiveHealth } from '@/lib/ai-operations/runtimeHealthSource';
 import { HEALTH_STATUS_META } from '@/lib/ai-operations/runtimeHealth';
 import type { RuntimeHealthStatus } from '@/lib/ai-operations/runtimeHealth';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
@@ -24,14 +25,14 @@ function formatDateTime(iso: string | null): string {
 }
 
 export default function SystemHealthDetail({ system, onClose }: SystemHealthDetailProps) {
-  const { checks, latestBySystem } = useRuntimeHealth();
+  const { checks, latestBySystem, effectivePaths } = useRuntimeHealth();
 
   const systemChecks = useMemo(
     () => checks.filter((c) => c.system_slug === system),
     [checks, system],
   );
 
-  const derived = latestBySystem.get(system);
+  const derived = resolveEffectiveHealth(latestBySystem, system, effectivePaths);
 
   const availability = useMemo(() => computeAvailability(systemChecks), [systemChecks]);
 

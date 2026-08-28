@@ -1,6 +1,7 @@
 import { useRuntimeHealth, checkRuntimeHealth } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import { HEALTH_STATUS_META } from '@/lib/ai-operations/runtimeHealth';
 import { computeAvailability } from '@/lib/ai-operations/runtimeMonitoring';
+import { resolveEffectiveHealth } from '@/lib/ai-operations/runtimeHealthSource';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
 interface RuntimeConnectivityProps {
@@ -30,7 +31,7 @@ export default function RuntimeConnectivity({ connectionKey, system }: RuntimeCo
   const checking = health.checkingKeys.includes(connectionKey);
   const meta = result ? HEALTH_STATUS_META[result.status] : null;
 
-  const derived = system ? health.latestBySystem.get(system) : undefined;
+  const derived = system ? resolveEffectiveHealth(health.latestBySystem, system, health.effectivePaths) : undefined;
   const systemChecks = system
     ? health.checks.filter((c) => c.system_slug === system)
     : [];

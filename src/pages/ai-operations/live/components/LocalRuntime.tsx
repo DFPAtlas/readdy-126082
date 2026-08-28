@@ -5,6 +5,10 @@ import {
   refreshBridge,
 } from '@/pages/ai-operations/runtime-controls/runtimeBridgeStore';
 import {
+  useOllamaCatalogue,
+  refreshOllamaCatalogue,
+} from '@/pages/ai-operations/models/ollamaCatalogueStore';
+import {
   deriveBridgeNodeState,
   BRIDGE_NODE_STATE_META,
 } from '@/lib/ai-operations/runtimeBridge';
@@ -24,15 +28,18 @@ function formatTime(iso: string | null | undefined): string {
  */
 export default function LocalRuntime() {
   const { nodes, summary } = useRuntimeBridge();
+  const catalogue = useOllamaCatalogue();
 
   useEffect(() => {
     void refreshBridge();
+    void refreshOllamaCatalogue();
   }, []);
 
   const firstNode = nodes[0] ?? null;
   const nodeState = firstNode ? deriveBridgeNodeState(firstNode) : 'not_registered';
   const stateMeta = BRIDGE_NODE_STATE_META[nodeState];
   const latest = summary?.latest ?? null;
+  const comparison = catalogue.comparison;
 
   return (
     <section className="bg-background-100 border border-background-200/60 rounded-lg">
@@ -58,6 +65,15 @@ export default function LocalRuntime() {
         <Metric label="Ollama local health" value={latest?.ollama_status ?? 'Not reported'} tone={latest?.ollama_status === 'healthy' ? 'emerald' : latest?.ollama_status === 'unavailable' ? 'red' : latest?.ollama_status === 'degraded' ? 'amber' : 'secondary'} />
         <Metric label="Last heartbeat" value={formatTime(firstNode?.last_heartbeat_at)} tone="secondary" muted />
         <Metric label="Runtime execution" value="Disabled" tone="red" />
+      </div>
+
+      {/* Compact model-runtime summary (relayed catalogue — no inference) */}
+      <div className="px-4 py-2.5 border-t border-background-200/60 grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <MiniStat label="HAL Ollama" value={latest?.ollama_status === 'healthy' ? 'Healthy' : latest?.ollama_status ?? 'Not reported'} tone={latest?.ollama_status === 'healthy' ? 'emerald' : 'secondary'} />
+        <MiniStat label="Catalogue" value={comparison ? `${comparison.totalCatalogueModels} models` : '—'} tone="secondary" />
+        <MiniStat label="Registered-present" value={comparison ? String(comparison.registeredPresent) : '—'} tone={comparison && comparison.registeredPresent > 0 ? 'emerald' : 'secondary'} />
+        <MiniStat label="Missing" value={comparison ? String(comparison.registeredMissing) : '—'} tone={comparison && comparison.registeredMissing > 0 ? 'amber' : 'secondary'} />
+        <MiniStat label="Inference" value="Disabled" tone="red" />
       </div>
 
       <div className="px-4 py-2.5 border-t border-background-200/60 flex items-center justify-between gap-3">
@@ -88,6 +104,20 @@ function Metric({ label, value, tone, muted }: { label: string; value: string; t
     <div className="bg-background-100 px-4 py-3">
       <p className="text-[10px] font-label text-foreground-600 uppercase tracking-wide whitespace-nowrap">{label}</p>
       <p className={`text-sm font-heading font-semibold mt-0.5 truncate ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function MiniStat({ label, value, tone }: { label: string; value: string; tone: 'emerald' | 'amber' | 'red' | 'secondary' }) {
+  const color =
+    tone === 'emerald' ? 'text-emerald-400'
+      : tone === 'amber' ? 'text-amber-400'
+        : tone === 'red' ? 'text-red-400'
+          : 'text-foreground-300';
+  return (
+    <div className="bg-background-50 border border-background-200/40 rounded-md px-2.5 py-1.5">
+      <p className="text-[9px] font-label text-foreground-600 uppercase tracking-wide whitespace-nowrap">{label}</p>
+      <p className={`text-xs font-heading font-semibold mt-0.5 truncate ${color}`}>{value}</p>
     </div>
   );
 }

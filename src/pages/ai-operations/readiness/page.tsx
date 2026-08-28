@@ -7,6 +7,8 @@ import RuntimeBoundaryReadiness from '@/pages/ai-operations/readiness/components
 import RuntimeN8nConnectorReadiness from '@/pages/ai-operations/readiness/components/RuntimeN8nConnectorReadiness';
 import RuntimeMessageBoundaryReadiness from '@/pages/ai-operations/readiness/components/RuntimeMessageBoundaryReadiness';
 import RuntimeBridgeReadiness from '@/pages/ai-operations/readiness/components/RuntimeBridgeReadiness';
+import OllamaCatalogueReadiness from '@/pages/ai-operations/readiness/components/OllamaCatalogueReadiness';
+import RuntimeTransportReadiness from '@/pages/ai-operations/readiness/components/RuntimeTransportReadiness';
 import ModuleReadinessMatrix from '@/pages/ai-operations/readiness/components/ModuleReadinessMatrix';
 import MockDataAudit from '@/pages/ai-operations/readiness/components/MockDataAudit';
 import DatabasePlan from '@/pages/ai-operations/readiness/components/DatabasePlan';
@@ -74,6 +76,12 @@ export default function ReadinessPage() {
 
       {/* Phase 3 private runtime bridge (outbound local runtime connectivity) */}
       <RuntimeBridgeReadiness />
+
+      {/* Phase 3 local Ollama catalogue relay + registry comparison */}
+      <OllamaCatalogueReadiness />
+
+      {/* Phase 3 private runtime dry-run transport probe */}
+      <RuntimeTransportReadiness />
 
       {/* Module readiness matrix */}
       <ModuleReadinessMatrix />

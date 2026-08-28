@@ -192,6 +192,35 @@ export const runtimeBridgeReadiness: RuntimeHealthReadinessItem[] = [
   { name: 'Execution Transport', state: 'not_started', note: 'Not Started / Disabled — the bridge is transport only and never owns execution authority.' },
 ];
 
+// --- Phase 3 Prompt 10 — Private runtime dry-run transport probe --------------
+
+export const runtimeTransportReadiness: RuntimeHealthReadinessItem[] = [
+  { name: 'Outbound Bridge', state: 'ready', note: 'Reuses the verified HAL private runtime bridge — no new transport or queue is created.' },
+  { name: 'Signed Authentication', state: 'ready', note: 'Existing HMAC-SHA256 signed bridge identity + `dfp-local-runtime-bridge` service identity (fail-closed).' },
+  { name: 'Control Message Delivery', state: 'partial', note: 'Ready once a queued `runtime_transport_probe` is delivered to HAL and signed back — verified on a real probe.' },
+  { name: 'Signed Acknowledgement', state: 'partial', note: '`report_transport_probe_ack` allowlisted; verified once a genuine signed ack is received and validated.' },
+  { name: 'Replay / Idempotency', state: 'ready', note: 'Duplicate probe ACK returns the existing acknowledgement — no duplicate transport evidence.' },
+  { name: 'Round-Trip Verification', state: 'partial', note: 'Measures queued → signed-acknowledgement latency; Ready only when a real probe succeeds.' },
+  { name: 'Execution Transport', state: 'partial', note: 'Dry-Run Only — the probe proves transport, never execution; no n8n/Ollama/agent action.' },
+  { name: 'Execution Dispatch', state: 'not_started', note: 'Not Started — transport verification never satisfies the master kill switch, production, site/agent/approval/policy gates.' },
+];
+
+// --- Phase 3 Prompt 09C — Local Ollama catalogue relay + registry comparison ---
+
+export interface OllamaCatalogueReadinessItem {
+  name: string;
+  state: RuntimeHealthReadinessState;
+  note: string;
+}
+
+export const ollamaCatalogueReadiness: OllamaCatalogueReadinessItem[] = [
+  { name: 'Bridge Connectivity', state: 'ready', note: 'HAL runtime bridge deployed with a verified outbound handshake + fresh heartbeat.' },
+  { name: 'Catalogue Relay', state: 'partial', note: 'Sanitised `/api/tags` relay (name/family/parameters/quantisation/classification) via `report_ollama_catalogue`. Verified once a genuine catalogue is relayed.' },
+  { name: 'Registry Comparison', state: 'ready', note: 'Deterministic exact-match comparison against `ai_operations_models` — no fuzzy/AI matching, no auto-registration.' },
+  { name: 'Model Availability', state: 'partial', note: 'Partial until the relayed catalogue is compared — present/missing/unregistered is derived from the actual mapping.' },
+  { name: 'Inference Runtime', state: 'not_started', note: 'Not Started — no prompt, embedding, pull or delete is ever issued. Catalogue observation only.' },
+];
+
 export const pilotExecutionGate: {
   name: string;
   state: 'blocked' | 'open';

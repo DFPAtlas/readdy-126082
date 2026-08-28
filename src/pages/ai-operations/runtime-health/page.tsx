@@ -4,6 +4,7 @@ import { useRuntimeHealth, checkRuntimeHealth, sweepRuntimeHealth, refreshHistor
 import { buildRuntimeHealthRows, type HealthTarget } from '@/lib/ai-operations/runtimeHealth';
 import HealthKpis from '@/pages/ai-operations/runtime-health/components/HealthKpis';
 import ConnectionTable from '@/pages/ai-operations/runtime-health/components/ConnectionTable';
+import EffectiveRuntimePanel from '@/pages/ai-operations/runtime-health/components/EffectiveRuntimePanel';
 import HealthHistory from '@/pages/ai-operations/runtime-health/components/HealthHistory';
 import MonitoringRules from '@/pages/ai-operations/runtime-health/components/MonitoringRules';
 import ConfigurationReadiness from '@/pages/ai-operations/runtime-health/components/ConfigurationReadiness';
@@ -133,6 +134,8 @@ export default function RuntimeHealthPage() {
             checkingKeys={health.checkingKeys}
             onCheck={(system, key) => void checkRuntimeHealth(system, key)}
           />
+
+          <EffectiveRuntimePanel />
 
           {/* Runtime execution note */}
           <div className="bg-background-100 border border-background-200/60 rounded-lg px-4 py-3 flex items-center gap-3">

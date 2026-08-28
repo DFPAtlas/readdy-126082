@@ -1,10 +1,33 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import type { AiOrchestration } from '@/pages/ai-operations/types';
 import { AGENT_HEALTH, CAPACITY_STATE } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
+import {
+  useOllamaCatalogue,
+  refreshOllamaCatalogue,
+} from '@/pages/ai-operations/models/ollamaCatalogueStore';
 
 export default function CandidateAgents({ orchestration }: { orchestration: AiOrchestration }) {
   const { candidates } = orchestration;
+  const catalogue = useOllamaCatalogue();
+
+  useEffect(() => {
+    void refreshOllamaCatalogue();
+  }, []);
+
+  const comparison = catalogue.comparison;
+  const hasMissing = comparison ? comparison.registeredMissing > 0 : false;
+
+  const missingBanner = hasMissing ? (
+    <div className="mt-3 bg-red-500/10 border border-red-500/25 rounded-lg px-3 py-2.5 flex items-center gap-2">
+      <i className="ri-error-warning-line text-red-400 text-sm w-4 h-4 flex items-center justify-center shrink-0"></i>
+      <p className="text-[11px] text-foreground-500">
+        <strong className="text-red-400">BLOCKED — Model not present on HAL catalogue.</strong>{' '}
+        {comparison?.registeredMissing} required local model(s) are registered but missing locally. This is a planning/governance check only — no inference or pull is issued.
+      </p>
+    </div>
+  ) : null;
 
   if (candidates.length === 0) {
     return (
@@ -80,6 +103,7 @@ export default function CandidateAgents({ orchestration }: { orchestration: AiOr
           </div>
         ))}
       </div>
+      {missingBanner}
     </section>
   );
 }

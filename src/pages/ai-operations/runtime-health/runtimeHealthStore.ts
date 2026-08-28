@@ -30,9 +30,21 @@ import {
   type AiRuntimeHealthCheckRow,
   type AiRuntimeHealthSweepRow,
   type AiRuntimeMonitoringRuleRow,
-  type DerivedSystemHealth,
   type AiRuntimeMonitoringRuleUpdate,
 } from '@/lib/ai-operations/runtimeMonitoring';
+import {
+  getAiRuntimeBridgeNodes,
+  getAiRuntimeBridgeHeartbeats,
+  type AiRuntimeBridgeNode,
+  type AiRuntimeBridgeHeartbeat,
+} from '@/lib/ai-operations/runtimeBridge';
+import {
+  buildLatestBySystem,
+  computeEffectivePaths,
+  deriveLocalBridgeHealth,
+  type EffectivePath,
+  type LatestBySystem,
+} from '@/lib/ai-operations/runtimeHealthSource';
 import { createAiAuditEvent } from '@/lib/ai-operations';
 
 interface RuntimeHealthState {
@@ -47,7 +59,10 @@ interface RuntimeHealthState {
   checks: AiRuntimeHealthCheckRow[];
   sweeps: AiRuntimeHealthSweepRow[];
   rules: AiRuntimeMonitoringRuleRow[];
-  latestBySystem: Map<string, DerivedSystemHealth>;
+  latestBySystem: LatestBySystem;
+  effectivePaths: Record<string, EffectivePath>;
+  bridgeNode: AiRuntimeBridgeNode | null;
+  latestHeartbeat: AiRuntimeBridgeHeartbeat | null;
   historyLoading: boolean;
   historyError: string | null;
   rulesSaving: boolean;
@@ -68,6 +83,9 @@ const EMPTY: RuntimeHealthState = {
   sweeps: [],
   rules: [],
   latestBySystem: new Map(),
+  effectivePaths: {},
+  bridgeNode: null,
+  latestHeartbeat: null,
   historyLoading: false,
   historyError: null,
   rulesSaving: false,
@@ -118,14 +136,17 @@ function mergeResults(
 
 // --- Persisted history -------------------------------------------------------
 
-/** Load persisted checks/sweeps/rules and derive latest per-system state. */
+/** Load persisted checks/sweeps/rules + bridge nodes/heartbeats and derive a
+ *  source-aware latest-per-system state + deterministic effective path. */
 export async function refreshHistory(): Promise<void> {
   setSnapshot({ ...getSnapshot(), historyLoading: true, historyError: null });
 
-  const [checksRes, sweepsRes, rulesRes] = await Promise.all([
+  const [checksRes, sweepsRes, rulesRes, nodesRes, heartbeatsRes] = await Promise.all([
     getRuntimeHealthChecks(200),
     getRuntimeHealthSweeps(50),
     getRuntimeMonitoringRules(),
+    getAiRuntimeBridgeNodes(),
+    getAiRuntimeBridgeHeartbeats(50),
   ]);
 
   const state = getSnapshot();
@@ -141,13 +162,26 @@ export async function refreshHistory(): Promise<void> {
   const checks = checksRes.data ?? [];
   const sweeps = sweepsRes.data ?? [];
   const rules = rulesRes.data ?? [];
+  const nodes = nodesRes.data ?? [];
+  const heartbeats = heartbeatsRes.data ?? [];
+
+  const bridgeNode = nodes[0] ?? null;
+  const latestHeartbeat = heartbeats[0] ?? null;
+
+  const cloudEdge = deriveLatestBySystem(checks);
+  const localBridge = deriveLocalBridgeHealth(latestHeartbeat);
+  const latestBySystem = buildLatestBySystem(cloudEdge, localBridge);
+  const effectivePaths = computeEffectivePaths(latestBySystem, bridgeNode, latestHeartbeat);
 
   setSnapshot({
     ...state,
     checks,
     sweeps,
     rules,
-    latestBySystem: deriveLatestBySystem(checks),
+    latestBySystem,
+    effectivePaths,
+    bridgeNode,
+    latestHeartbeat,
     historyLoading: false,
     historyError: null,
   });

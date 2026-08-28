@@ -83,9 +83,7 @@ async function sendRequest(operation: string, body: Record<string, unknown>): Pr
   const payloadHash = await sha256Hex(rawBody);
 
   const url = new URL(config.endpoint);
-  // Supabase strips /functions/v1 before the request reaches the Edge Function.
-  // Sign the function-relative path so local and server canonical strings match.
-  const path = url.pathname.replace(/^\/functions\/v1/, "") || "/";
+  const path = url.pathname;
   const canonical = `${config.identity}\n${timestamp}\n${nonce}\nPOST\n${path}\n${payloadHash}`;
   const signature = await hmacSha256Hex(config.signingSecret, canonical);
 
@@ -152,6 +150,142 @@ async function checkOllama(): Promise<{ status: string; latency_ms: number | nul
   }
 }
 
+// --- Sanitised Ollama catalogue relay (Prompt 09C) ----------------------------
+// Relays ONLY safe catalogue fields from GET /api/tags: model name, family,
+// parameter size, quantisation, local/remote classification, modified timestamp,
+// and model count. Never relays prompts, generated content, credentials, raw
+// config, or the full API response. NEVER calls /api/generate|/chat|/embed|pull|delete.
+
+function deriveFamily(name: string): string | null {
+  const base = name.split(":")[0] ?? "";
+  return base.trim() ? base.trim() : null;
+}
+
+function deriveParameterSize(name: string, raw: string | null): string | null {
+  if (raw) return raw;
+  const match = name.match(/(\d+(\.\d+)?[bB])/);
+  return match ? match[1] : null;
+}
+
+function sanitiseCatalogueModel(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const m = raw as Record<string, unknown>;
+  const name = typeof m.name === "string" ? m.name.trim() : "";
+  if (!name) return null;
+
+  const details = (m.details && typeof m.details === "object") ? (m.details as Record<string, unknown>) : {};
+  const familyRaw = typeof details.family === "string" ? details.family.trim() : null;
+  const paramRaw = typeof details.parameter_size === "string" ? details.parameter_size.trim() : null;
+  const quantRaw = typeof details.quantization_level === "string" ? details.quantization_level.trim() : null;
+  const modifiedAt = typeof m.modified_at === "string" ? m.modified_at : null;
+
+  return {
+    name,
+    family: familyRaw || deriveFamily(name),
+    parameter_size: deriveParameterSize(name, paramRaw),
+    quantization: quantRaw,
+    classification: /:cloud$/i.test(name) ? "remote" : "local",
+    modified_at: modifiedAt,
+  };
+}
+
+async function fetchOllamaCatalogue(): Promise<Record<string, unknown>[]> {
+  if (!config.ollamaUrl) return [];
+  try {
+    const res = await fetch(config.ollamaUrl.replace(/\/+$/, "") + "/api/tags", { method: "GET" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const rawModels = Array.isArray((data as { models?: unknown[] })?.models)
+      ? ((data as { models: unknown[] }).models)
+      : [];
+    return rawModels
+      .map(sanitiseCatalogueModel)
+      .filter((m): m is Record<string, unknown> => m !== null);
+  } catch {
+    return [];
+  }
+}
+
+async function relayOllamaCatalogue(): Promise<void> {
+  const models = await fetchOllamaCatalogue();
+  const result = await sendRequest("report_ollama_catalogue", {
+    node_key: config.nodeKey,
+    catalogue_at: new Date().toISOString(),
+    model_count: models.length,
+    models,
+  });
+  if (result) {
+    log(`relayed sanitised Ollama catalogue (${models.length} model(s), catalogue only — no inference).`);
+  }
+}
+
+// --- Dry-run transport probe handling (Prompt 10) ------------------------------
+// On receiving a valid `runtime_transport_probe` control message, HAL ONLY:
+//   1. validates message type
+//   2. validates expected node key
+//   3. validates expiry
+//   4. records receipt locally (in-memory/log — no filesystem)
+//   5. sends a signed non-executing acknowledgement
+// It NEVER calls n8n, Ollama, the filesystem, a shell, or an arbitrary URL.
+
+interface ControlMessage {
+  messageKey?: string;
+  messageType?: string;
+  correlationId?: string | null;
+  safePayload?: Record<string, unknown>;
+}
+
+async function handleTransportProbe(m: ControlMessage): Promise<void> {
+  // Reject any unrecognised message type explicitly (fail-closed).
+  if (m.messageType !== "runtime_transport_probe") {
+    log(`rejected unrecognised control message type: ${m.messageType ?? "(none)"} (ignored, no execution).`);
+    return;
+  }
+
+  const payload = m.safePayload ?? {};
+  const probeKey = typeof payload.probe_key === "string" ? payload.probe_key : "";
+  const expectedNodeKey = typeof payload.expected_node_key === "string" ? payload.expected_node_key : "";
+  const expiresAt = typeof payload.expires_at === "string" ? payload.expires_at : "";
+  const nowIso = new Date().toISOString();
+
+  // 2. Expected node key must match this node.
+  if (expectedNodeKey && expectedNodeKey !== config.nodeKey) {
+    log(`transport probe ${probeKey || m.messageKey} rejected: expected node ${expectedNodeKey} != ${config.nodeKey}.`);
+    await sendRequest("report_transport_probe_ack", {
+      node_key: config.nodeKey,
+      probe_key: probeKey,
+      original_message_key: m.messageKey ?? "",
+      correlation_id: m.correlationId ?? (typeof payload.correlation_id === "string" ? payload.correlation_id : ""),
+      received_at: nowIso,
+      acknowledged_at: nowIso,
+      status: "rejected",
+      summary: "Transport probe rejected: expected node key mismatch.",
+    });
+    return;
+  }
+
+  // 3. Stale/expired probes must never be acknowledged as successful.
+  if (expiresAt && Date.now() > new Date(expiresAt).getTime()) {
+    log(`transport probe ${probeKey || m.messageKey} ignored: probe expired (no ack sent).`);
+    return;
+  }
+
+  // 4. Record receipt locally (in-memory log only — no filesystem, no service call).
+  log(`transport probe ${probeKey || m.messageKey} received and validated (transport only — no execution).`);
+
+  // 5. Send signed non-executing acknowledgement.
+  await sendRequest("report_transport_probe_ack", {
+    node_key: config.nodeKey,
+    probe_key: probeKey,
+    original_message_key: m.messageKey ?? "",
+    correlation_id: m.correlationId ?? (typeof payload.correlation_id === "string" ? payload.correlation_id : ""),
+    received_at: nowIso,
+    acknowledged_at: nowIso,
+    status: "verified",
+    summary: "Transport probe acknowledged. Transport verification only — no execution performed.",
+  });
+}
+
 // --- Operations --------------------------------------------------------------
 async function handshake(): Promise<boolean> {
   const result = await sendRequest("handshake", {
@@ -204,9 +338,22 @@ async function heartbeat(): Promise<void> {
 async function pollControlMessages(): Promise<void> {
   const result = await sendRequest("fetch_control_messages", { node_key: config.nodeKey });
   if (result && Array.isArray((result as { messages?: unknown[] }).messages)) {
-    const messages = (result as { messages: unknown[] }).messages;
+    const messages = (result as { messages: unknown[] }).messages as ControlMessage[];
     if (messages.length > 0) {
-      log(`received ${messages.length} control message(s) (allowlisted health/capability only).`);
+      log(`received ${messages.length} control message(s) (allowlisted health/capability/transport-probe only).`);
+    }
+
+    // Dry-run transport probes (non-executing) — validate + signed ack.
+    const probes = messages.filter((m) => m.messageType === "runtime_transport_probe");
+    for (const p of probes) {
+      await handleTransportProbe(p);
+    }
+
+    const wantsCatalogue = messages.some(
+      (m) => m.messageType === "ollama_catalogue_request",
+    );
+    if (wantsCatalogue) {
+      await relayOllamaCatalogue();
     }
   }
 }
@@ -230,11 +377,17 @@ async function main() {
 
   const heartbeatInterval = Math.max(10, config.heartbeatSeconds) * 1000;
   const pollInterval = config.pollSeconds > 0 ? Math.max(10, config.pollSeconds) * 1000 : 0;
+  const catalogueInterval = Math.max(120, config.pollSeconds * 2 || 300) * 1000;
 
   // Heartbeat loop.
   setInterval(() => {
     void heartbeat();
   }, heartbeatInterval);
+
+  // Catalogue relay loop — sanitised Ollama catalogue only, no inference.
+  setInterval(() => {
+    void relayOllamaCatalogue();
+  }, catalogueInterval);
 
   // Optional control-message polling (health_request / capability_request only).
   if (pollInterval > 0) {
@@ -245,6 +398,7 @@ async function main() {
 
   // Kick off immediately.
   void heartbeat();
+  void relayOllamaCatalogue();
   if (pollInterval > 0) void pollControlMessages();
 
   log("heartbeat loop running. Offline = fail closed (no autonomous execution).");

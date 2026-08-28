@@ -1,6 +1,27 @@
+import { useEffect } from 'react';
 import type { LocalModelMeta } from '@/pages/ai-operations/types';
+import {
+  useOllamaCatalogue,
+  refreshOllamaCatalogue,
+} from '@/pages/ai-operations/models/ollamaCatalogueStore';
+import {
+  cataloguePresenceForModel,
+  CATALOGUE_MATCH_META,
+  describeCatalogueFreshness,
+} from '@/lib/ai-operations/runtimeOllama';
+import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
 export default function LocalModel({ meta }: { meta: LocalModelMeta }) {
+  const catalogue = useOllamaCatalogue();
+
+  useEffect(() => {
+    void refreshOllamaCatalogue();
+  }, []);
+
+  const presence = cataloguePresenceForModel(catalogue.comparison, meta.modelName);
+  const presenceMeta = presence ? CATALOGUE_MATCH_META[presence] : null;
+  const freshness = describeCatalogueFreshness(catalogue.comparison);
+
   const rows = [
     { label: 'Host reference', value: meta.hostRef },
     { label: 'Runtime', value: meta.runtime },
@@ -24,6 +45,26 @@ export default function LocalModel({ meta }: { meta: LocalModelMeta }) {
         </span>
       </div>
 
+      {/* Catalogue presence (relayed via HAL bridge — no direct Ollama contact) */}
+      <div className="mt-4 bg-background-50 border border-background-200/40 rounded-lg p-3 space-y-2">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-[10px] font-label text-foreground-600 uppercase tracking-wide">Catalogue Presence</span>
+          {presenceMeta ? (
+            <StatusPill tone={presenceMeta.tone} label={presenceMeta.label} />
+          ) : (
+            <span className="text-[11px] font-label text-foreground-600">Not in relayed catalogue</span>
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[10px] font-label text-foreground-600 uppercase tracking-wide">Last Catalogue Verification</span>
+          <StatusPill tone={freshness.tone} label={freshness.label} />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[10px] font-label text-foreground-600 uppercase tracking-wide">Inference</span>
+          <span className="text-[11px] font-label font-semibold text-foreground-300 whitespace-nowrap">Disabled / Not Tested</span>
+        </div>
+      </div>
+
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3">
         {rows.map((r) => (
           <div key={r.label} className="flex items-baseline justify-between gap-3 border-b border-background-200/40 pb-2 sm:flex-col sm:items-start sm:border-0 sm:pb-0 sm:bg-background-50 sm:border sm:border-background-200/40 sm:rounded-lg sm:p-3">
@@ -34,7 +75,7 @@ export default function LocalModel({ meta }: { meta: LocalModelMeta }) {
       </div>
 
       <p className="text-[11px] font-label text-foreground-600 mt-3">
-        Future local infrastructure metadata only — no connection to local servers is made, and no credentials are exposed.
+        Catalogue presence is relayed from the HAL runtime bridge (source local_bridge) — the browser never contacts Ollama and inference remains disabled.
       </p>
     </section>
   );
