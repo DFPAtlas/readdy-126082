@@ -65,7 +65,7 @@ const OLLAMA_PROBE_PROMPT_ID = "dfp_ollama_ping_v1";
 const OLLAMA_PROBE_MODEL = "qwen2.5-coder:7b";
 const OLLAMA_PROBE_MODE = "sandbox_diagnostic";
 const OLLAMA_PROBE_EXPECTED_OUTPUT = "DFP_OLLAMA_SANDBOX_OK";
-const MAX_OUTPUT_CHARS = 256;
+const MAX_OUTPUT_CHARS = 100;
 
 const ALLOWED_OPERATIONS = new Set([
   "handshake",
@@ -1026,7 +1026,7 @@ serve(async (req: Request) => {
     }
 
     // Determine verified: output must exactly equal the fixed expected string.
-    const verified = output.toUpperCase() === OLLAMA_PROBE_EXPECTED_OUTPUT;
+    const verified = output.trim() === OLLAMA_PROBE_EXPECTED_OUTPUT;
     const finalStatus = verified && resultStatus === "completed" ? "completed"
       : resultStatus === "completed" ? "failed"
       : resultStatus;

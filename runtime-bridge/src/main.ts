@@ -94,16 +94,15 @@ async function sendRequest(operation: string, body: Record<string, unknown>): Pr
   const payloadHash = await sha256Hex(rawBody);
 
   const url = new URL(config.endpoint);
-  // Normalise the path we actually dial so the path the cloud observes equals
-  // the canonical path we sign (prevents a 308 redirect from silently changing
-  // the pathname between signature and verification).
+  // Compute the canonical path for HMAC signing only. The actual HTTP request
+  // still goes to the full configured endpoint (which includes
+  // /functions/v1/runtime-bridge) — we never rewrite the dialled URL.
   const path = canonicalPath(url.pathname);
-  url.pathname = path;
   const canonical = `${config.identity}\n${timestamp}\n${nonce}\nPOST\n${path}\n${payloadHash}`;
   const signature = await hmacSha256Hex(config.signingSecret, canonical);
 
   try {
-    const res = await fetch(url.toString(), {
+    const res = await fetch(config.endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -431,7 +430,7 @@ async function handleOllamaInferenceProbe(m: ControlMessage): Promise<void> {
         ? ((data as { response: string }).response)
         : "";
       status = "completed";
-      const matchedExpected = output.toUpperCase() === OLLAMA_PROBE_EXPECTED;
+      const matchedExpected = output.trim() === OLLAMA_PROBE_EXPECTED;
       log(`ollama probe ${probeKey || m.messageKey} generation returned ${matchedExpected ? "expected" : "unexpected"} output (local sentinel ${matchedExpected ? "matched" : "not matched"}).`);
     }
   } catch (err) {
@@ -443,7 +442,8 @@ async function handleOllamaInferenceProbe(m: ControlMessage): Promise<void> {
     clearTimeout(timeoutId);
   }
 
-  await report(status, output, latencyMs);
+  const safeOutput = output.trim().slice(0, 100);
+  await report(status, safeOutput, latencyMs);
 }
 
 // --- Operations --------------------------------------------------------------

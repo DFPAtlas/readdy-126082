@@ -12,6 +12,7 @@ import RuntimeMessageBoundary from '@/pages/ai-operations/runtime-controls/compo
 import CallbackChannel from '@/pages/ai-operations/runtime-controls/components/CallbackChannel';
 import PrivateRuntimeBridge from '@/pages/ai-operations/runtime-controls/components/PrivateRuntimeBridge';
 import TransportProbeVerification from '@/pages/ai-operations/runtime-controls/components/TransportProbeVerification';
+import OllamaInferenceProbeVerification from '@/pages/ai-operations/runtime-controls/components/OllamaInferenceProbeVerification';
 
 export default function RuntimeControlsPage() {
   const { controls, loading, error } = useRuntimeControls();
@@ -112,6 +113,9 @@ export default function RuntimeControlsPage() {
 
       {/* Dry-run transport verification (cloud → HAL → cloud control-message path) */}
       <TransportProbeVerification />
+
+      {/* Controlled Ollama sandbox inference probe (Prompt 11A fixed diagnostic) */}
+      <OllamaInferenceProbeVerification />
 
       {/* Change history */}
       <ControlHistory />
