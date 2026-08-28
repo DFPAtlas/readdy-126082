@@ -32,6 +32,7 @@ const config = {
   nodeKey: (Deno.env.get("DFP_BRIDGE_NODE_KEY") ?? "").trim(),
   nodeName: (Deno.env.get("DFP_BRIDGE_NODE_NAME") ?? "").trim(),
   n8nUrl: (Deno.env.get("N8N_LOCAL_URL") ?? "").trim(),
+  n8nSandboxWebhookPath: (Deno.env.get("N8N_SANDBOX_WEBHOOK_PATH") ?? "").trim(),
   ollamaUrl: (Deno.env.get("OLLAMA_LOCAL_URL") ?? "").trim(),
   heartbeatSeconds: parseInt(Deno.env.get("HEARTBEAT_INTERVAL_SECONDS") ?? "60", 10),
   pollSeconds: parseInt(Deno.env.get("POLL_INTERVAL_SECONDS") ?? "30", 10),
@@ -446,6 +447,202 @@ async function handleOllamaInferenceProbe(m: ControlMessage): Promise<void> {
   await report(status, safeOutput, latencyMs);
 }
 
+// --- Controlled n8n sandbox workflow probe (Prompt 12) --------------------------
+// The ONLY n8n workflow execution permitted is the single fixed, harmless
+// "DFP Runtime Sandbox Ping" diagnostic, invoked through ONE fixed local n8n
+// webhook path (N8N_SANDBOX_WEBHOOK_PATH) configured LOCALLY and never supplied
+// by the cloud or the browser. Invalid/missing configuration fails closed. This
+// is a diagnostic ping only — it never creates a generic execute-workflow
+// capability, never runs a business workflow, and never accepts arbitrary IDs,
+// URLs or payloads.
+const N8N_SANDBOX_PROBE_ID = "dfp_n8n_ping_v1";
+const N8N_SANDBOX_PROBE_MODE = "sandbox_diagnostic";
+const N8N_SANDBOX_PROBE_WORKFLOW_ALIAS = "DFP Runtime Sandbox Ping";
+const N8N_SANDBOX_PROBE_STATUS = "DFP_N8N_SANDBOX_OK";
+// Canonical deterministic expected output (exact string equality, no case folding).
+const N8N_SANDBOX_PROBE_EXPECTED_OUTPUT = JSON.stringify({
+  status: N8N_SANDBOX_PROBE_STATUS,
+  probe: N8N_SANDBOX_PROBE_ID,
+});
+const N8N_SANDBOX_PROBE_TIMEOUT_MS = 30000;
+const N8N_SANDBOX_PROBE_MAX_OUTPUT_CHARS = 200;
+
+// Validate the fixed local webhook path. Reject anything that is empty, an
+// absolute URL, contains protocol syntax or a hostname, or does not start with
+// the /webhook/ prefix. The path is loaded from local HAL environment only.
+function isValidSandboxWebhookPath(path: string): boolean {
+  if (!path) return false;
+  if (!path.startsWith("/webhook/")) return false;
+  if (path.includes("://")) return false; // protocol / absolute URL
+  if (path.includes("//")) return false;  // hostname / absolute path signal
+  if (!/^\/webhook\/[A-Za-z0-9._-]+$/.test(path)) return false;
+  return true;
+}
+
+// Bounded recursive search for the workflow's echoed { status, probe } object.
+// n8n wraps execution output in version-dependent envelopes, so we search for
+// the deterministic result rather than assuming a fixed response shape.
+function findSandboxResult(node: unknown, depth: number): { status: string; probe: string } | null {
+  if (depth > 6 || !node) return null;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const r = findSandboxResult(item, depth + 1);
+      if (r) return r;
+    }
+    return null;
+  }
+  if (typeof node === "object") {
+    const obj = node as Record<string, unknown>;
+    if (typeof obj.status === "string" && typeof obj.probe === "string") {
+      return { status: obj.status, probe: obj.probe };
+    }
+    for (const key of Object.keys(obj)) {
+      const r = findSandboxResult(obj[key], depth + 1);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+async function handleN8nSandboxProbe(m: ControlMessage): Promise<void> {
+  if (m.messageType !== "n8n_sandbox_probe") {
+    log(`rejected unrecognised control message type: ${m.messageType ?? "(none)"} (ignored, no n8n execution).`);
+    return;
+  }
+
+  const payload = m.safePayload ?? {};
+  const probeKey = typeof payload.probe_key === "string" ? payload.probe_key : "";
+  const expectedNodeKey = typeof payload.expected_node_key === "string" ? payload.expected_node_key : "";
+  const expiresAt = typeof payload.expires_at === "string" ? payload.expires_at : "";
+  const probeMode = typeof payload.probe_mode === "string" ? payload.probe_mode : "";
+  const probeId = typeof payload.probe_id === "string" ? payload.probe_id : "";
+  const correlationId = m.correlationId ?? (typeof payload.correlation_id === "string" ? payload.correlation_id : "");
+  const nowIso = new Date().toISOString();
+
+  const report = async (
+    status: string,
+    verified: boolean,
+    safeOutput: string,
+    latencyMs: number | null,
+    errorCategory: string | null,
+  ) => {
+    const res = await sendRequest("report_n8n_sandbox_probe", {
+      node_key: config.nodeKey,
+      probe_key: probeKey,
+      original_message_key: m.messageKey ?? "",
+      correlation_id: correlationId,
+      probe_id: N8N_SANDBOX_PROBE_ID,
+      probe_mode: N8N_SANDBOX_PROBE_MODE,
+      workflow_reference: N8N_SANDBOX_PROBE_WORKFLOW_ALIAS,
+      status,
+      verified,
+      safe_output: safeOutput,
+      latency_ms: latencyMs,
+      error_category: errorCategory,
+      started_at: nowIso,
+      completed_at: new Date().toISOString(),
+    });
+    log(`n8n probe ${probeKey || m.messageKey} result report ${res ? (res.status ?? "sent") : "FAILED"} (status=${status}, verified=${verified}).`);
+  };
+
+  // 1. Expected node key must match this node.
+  if (expectedNodeKey && expectedNodeKey !== config.nodeKey) {
+    log(`n8n probe ${probeKey || m.messageKey} rejected: expected node ${expectedNodeKey} != ${config.nodeKey}.`);
+    await report("rejected", false, "", null, "node_mismatch");
+    return;
+  }
+
+  // 2. Stale/expired probes must never execute the workflow.
+  if (expiresAt && Date.now() > new Date(expiresAt).getTime()) {
+    log(`n8n probe ${probeKey || m.messageKey} ignored: probe expired (no n8n execution).`);
+    return;
+  }
+
+  // 3. probe_mode must be exactly sandbox_diagnostic.
+  if (probeMode !== N8N_SANDBOX_PROBE_MODE) {
+    log(`n8n probe ${probeKey || m.messageKey} rejected: unexpected probe_mode ${probeMode || "(none)"} (fail closed, no n8n execution).`);
+    await report("rejected", false, "", null, "invalid_mode");
+    return;
+  }
+
+  // 4. probe_id must be exactly dfp_n8n_ping_v1 (unknown IDs fail closed).
+  if (probeId !== N8N_SANDBOX_PROBE_ID) {
+    log(`n8n probe ${probeKey || m.messageKey} rejected: unknown probe_id ${probeId || "(none)"} (fail closed, no n8n execution).`);
+    await report("rejected", false, "", null, "invalid_probe_id");
+    return;
+  }
+
+  // 5. The fixed local webhook path must be configured and valid.
+  if (!isValidSandboxWebhookPath(config.n8nSandboxWebhookPath)) {
+    log(`n8n probe ${probeKey || m.messageKey} failed: N8N_SANDBOX_WEBHOOK_PATH not configured or invalid (must be a local /webhook/ path).`);
+    await report("failed", false, "", null, "workflow_not_configured");
+    return;
+  }
+
+  // 6. Local n8n must be configured.
+  if (!config.n8nUrl) {
+    log(`n8n probe ${probeKey || m.messageKey} failed: N8N_LOCAL_URL not configured.`);
+    await report("failed", false, "", null, "n8n_not_configured");
+    return;
+  }
+
+  // All validation passed — execute the SINGLE fixed diagnostic workflow once.
+  log(`n8n probe ${probeKey || m.messageKey} validated — executing fixed sandbox workflow (probe_id=${N8N_SANDBOX_PROBE_ID}).`);
+
+  let safeOutput = "";
+  let verified = false;
+  let status = "failed";
+  let latencyMs: number | null = null;
+  let errorCategory: string | null = null;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), N8N_SANDBOX_PROBE_TIMEOUT_MS);
+  try {
+    const started = Date.now();
+    // Fixed local n8n target only — the URL + webhook path are configured
+    // locally and never supplied by the cloud/browser.
+    const executeUrl = config.n8nUrl.replace(/\/+$/, "") + config.n8nSandboxWebhookPath;
+    const res = await fetch(executeUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        probe: N8N_SANDBOX_PROBE_ID,
+        mode: N8N_SANDBOX_PROBE_MODE,
+      }),
+    });
+    latencyMs = Date.now() - started;
+
+    if (!res.ok) {
+      log(`n8n probe ${probeKey || m.messageKey} workflow execution failed (${res.status}).`);
+      errorCategory = "workflow_http_" + res.status;
+    } else {
+      const data = await res.json();
+      const found = findSandboxResult(data, 0);
+      const statusStr = found?.status ?? "";
+      const probeStr = found?.probe ?? "";
+      safeOutput = JSON.stringify({ status: statusStr, probe: probeStr })
+        .slice(0, N8N_SANDBOX_PROBE_MAX_OUTPUT_CHARS);
+      verified = safeOutput === N8N_SANDBOX_PROBE_EXPECTED_OUTPUT;
+      status = verified ? "completed" : "failed";
+      if (!verified) errorCategory = "output_mismatch";
+      log(`n8n probe ${probeKey || m.messageKey} workflow returned ${verified ? "expected" : "unexpected"} result (exact match ${verified ? "true" : "false"}).`);
+    }
+  } catch (err) {
+    const aborted = (err as Error)?.name === "AbortError";
+    log(`n8n probe ${probeKey || m.messageKey} workflow ${aborted ? "timed out" : "network error"}: ${(err as Error)?.message ?? "unknown"}.`);
+    status = "failed";
+    errorCategory = aborted ? "timeout" : "network_error";
+    latencyMs = null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  await report(status, verified, safeOutput, latencyMs, errorCategory);
+}
+
 // --- Operations --------------------------------------------------------------
 async function handshake(): Promise<boolean> {
   const result = await sendRequest("handshake", {
@@ -513,6 +710,13 @@ async function pollControlMessages(): Promise<void> {
     const inferenceProbes = messages.filter((m) => m.messageType === "ollama_inference_probe");
     for (const p of inferenceProbes) {
       await handleOllamaInferenceProbe(p);
+    }
+
+    // Controlled n8n sandbox workflow probes (Prompt 12) — single fixed diagnostic
+    // workflow execution, fail-closed, one invocation per queued probe.
+    const n8nProbes = messages.filter((m) => m.messageType === "n8n_sandbox_probe");
+    for (const p of n8nProbes) {
+      await handleN8nSandboxProbe(p);
     }
 
     const wantsCatalogue = messages.some(

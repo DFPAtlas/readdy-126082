@@ -13,6 +13,7 @@ import CallbackChannel from '@/pages/ai-operations/runtime-controls/components/C
 import PrivateRuntimeBridge from '@/pages/ai-operations/runtime-controls/components/PrivateRuntimeBridge';
 import TransportProbeVerification from '@/pages/ai-operations/runtime-controls/components/TransportProbeVerification';
 import OllamaInferenceProbeVerification from '@/pages/ai-operations/runtime-controls/components/OllamaInferenceProbeVerification';
+import N8nSandboxProbeVerification from '@/pages/ai-operations/runtime-controls/components/N8nSandboxProbeVerification';
 
 export default function RuntimeControlsPage() {
   const { controls, loading, error } = useRuntimeControls();
@@ -116,6 +117,9 @@ export default function RuntimeControlsPage() {
 
       {/* Controlled Ollama sandbox inference probe (Prompt 11A fixed diagnostic) */}
       <OllamaInferenceProbeVerification />
+
+      {/* Controlled n8n sandbox workflow probe (Prompt 12 fixed diagnostic) */}
+      <N8nSandboxProbeVerification />
 
       {/* Change history */}
       <ControlHistory />

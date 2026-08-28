@@ -4,10 +4,14 @@ Private local runtime bridge for **DFP AI Operations** — the secure outbound-f
 link between DFP Command / Supabase and trusted local infrastructure (n8n, Ollama,
 future local runtime services).
 
-> **This is connectivity + heartbeat + safe local health relay ONLY.** It never
-> executes an agent, triggers an n8n workflow, performs Ollama inference, runs a
-> shell command, or proxies arbitrary URLs. It never owns execution authority —
-> it is transport only.
+> **This is connectivity + heartbeat + safe local health relay + three single fixed
+> sandbox diagnostics only.** It never executes an agent or a business workflow,
+> never performs arbitrary Ollama inference, never runs a shell command, and never
+> proxies arbitrary URLs. The only "execution" permitted is: (1) the fixed
+> `dfp_ollama_ping_v1` Ollama sandbox ping (Prompt 11A), and (2) the fixed
+> `DFP Runtime Sandbox Ping` n8n diagnostic workflow (Prompt 12) — both hard-coded
+> and fail-closed. It never owns execution authority — it is transport + diagnostics
+> only.
 
 ## Architecture
 
@@ -46,6 +50,7 @@ Required variables:
 | `DFP_BRIDGE_SIGNING_SECRET` | HMAC signing secret (must equal `DFP_RUNTIME_BRIDGE_SIGNING_KEY` in Supabase Secrets) |
 | `DFP_BRIDGE_NODE_KEY` | Stable key for this node |
 | `N8N_LOCAL_URL` | Local n8n URL (optional) |
+| `N8N_SANDBOX_WEBHOOK_PATH` | Fixed local n8n webhook path for the dedicated `DFP Runtime Sandbox Ping` diagnostic (e.g. `/webhook/dfp-runtime-sandbox-ping`); probe fails closed when unset/invalid |
 | `OLLAMA_LOCAL_URL` | Local Ollama URL (optional) |
 
 ## Run
