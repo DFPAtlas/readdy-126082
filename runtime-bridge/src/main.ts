@@ -83,7 +83,9 @@ async function sendRequest(operation: string, body: Record<string, unknown>): Pr
   const payloadHash = await sha256Hex(rawBody);
 
   const url = new URL(config.endpoint);
-  const path = url.pathname;
+
+  let path = url.pathname.replace(/^\/functions\/v1/, "");
+  path = path.replace(/\/+$/, "") || "/";
   const canonical = `${config.identity}\n${timestamp}\n${nonce}\nPOST\n${path}\n${payloadHash}`;
   const signature = await hmacSha256Hex(config.signingSecret, canonical);
 
