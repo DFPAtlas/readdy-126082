@@ -870,6 +870,169 @@ async function handleRuntimeChainProbe(m: ControlMessage): Promise<void> {
   });
 }
 
+// --- Controlled registered-agent dry-run probe (Prompt 14) -----------------------
+// The ONLY agent-runtime dry-run permitted: resolve the fixed diagnostic agent
+// binding (dfp-runtime-diagnostic-agent → qwen2.5-coder:7b) locally and run ONE
+// fixed harmless Ollama generation. Prompt text + model are hard-coded here and
+// can NEVER be supplied by cloud/browser. No tools, no n8n, no business workflow,
+// no DB write, no notification, no filesystem/shell, no autonomous action.
+const AGENT_DRY_RUN_PROBE_MESSAGE_TYPE = "agent_dry_run_probe";
+const AGENT_DRY_RUN_PROBE_ID = "dfp_agent_dry_run_v1";
+const AGENT_DRY_RUN_PROBE_MODE = "sandbox_diagnostic";
+const AGENT_DRY_RUN_AGENT_KEY = "dfp-runtime-diagnostic-agent";
+const AGENT_DRY_RUN_MODEL = "qwen2.5-coder:7b";
+const AGENT_DRY_RUN_PROMPT =
+  "You are the DFP Runtime Diagnostic Agent.\n" +
+  "This is a controlled sandbox verification.\n" +
+  "Perform no action and call no tools.\n" +
+  "Reply with exactly:\n" +
+  "DFP_AGENT_DRY_RUN_OK";
+const AGENT_DRY_RUN_EXPECTED = "DFP_AGENT_DRY_RUN_OK";
+const AGENT_DRY_RUN_MAX_TOKENS = 16;
+const AGENT_DRY_RUN_TIMEOUT_MS = 30000;
+
+async function handleAgentDryRunProbe(m: ControlMessage): Promise<void> {
+  if (m.messageType !== AGENT_DRY_RUN_PROBE_MESSAGE_TYPE) {
+    log(`rejected unrecognised control message type: ${m.messageType ?? "(none)"} (ignored, no agent dry-run).`);
+    return;
+  }
+
+  const payload = m.safePayload ?? {};
+  const probeKey = typeof payload.probe_key === "string" ? payload.probe_key : "";
+  const expectedNodeKey = typeof payload.expected_node_key === "string" ? payload.expected_node_key : "";
+  const expiresAt = typeof payload.expires_at === "string" ? payload.expires_at : "";
+  const probeMode = typeof payload.probe_mode === "string" ? payload.probe_mode : "";
+  const probeId = typeof payload.probe_id === "string" ? payload.probe_id : "";
+  const diagnosticAgentKey = typeof payload.diagnostic_agent_key === "string" ? payload.diagnostic_agent_key : "";
+  const resolvedModelReference = typeof payload.resolved_model_reference === "string" ? payload.resolved_model_reference : "";
+  const correlationId = m.correlationId ?? (typeof payload.correlation_id === "string" ? payload.correlation_id : "");
+  const startedAtIso = new Date().toISOString();
+
+  const report = async (
+    status: string,
+    verified: boolean,
+    safeOutput: string,
+    latencyMs: number | null,
+    errorCategory: string | null,
+  ) => {
+    const res = await sendRequest("report_agent_dry_run_probe", {
+      node_key: config.nodeKey,
+      probe_key: probeKey,
+      original_message_key: m.messageKey ?? "",
+      correlation_id: correlationId,
+      probe_id: AGENT_DRY_RUN_PROBE_ID,
+      probe_mode: AGENT_DRY_RUN_PROBE_MODE,
+      diagnostic_agent_key: AGENT_DRY_RUN_AGENT_KEY,
+      resolved_model_reference: AGENT_DRY_RUN_MODEL,
+      status,
+      verified,
+      safe_output: safeOutput,
+      latency_ms: latencyMs,
+      error_category: errorCategory,
+      started_at: startedAtIso,
+      completed_at: new Date().toISOString(),
+    });
+    log(`agent dry-run probe ${probeKey || m.messageKey} result report ${res ? (res.status ?? "sent") : "FAILED"} (status=${status}, verified=${verified}).`);
+  };
+
+  // 1. Expected node key must match this node.
+  if (expectedNodeKey && expectedNodeKey !== config.nodeKey) {
+    log(`agent dry-run probe ${probeKey || m.messageKey} rejected: expected node ${expectedNodeKey} != ${config.nodeKey}.`);
+    await report("rejected", false, "", null, "node_mismatch");
+    return;
+  }
+
+  // 2. Stale/expired probes must never run inference.
+  if (expiresAt && Date.now() > new Date(expiresAt).getTime()) {
+    log(`agent dry-run probe ${probeKey || m.messageKey} ignored: probe expired (no agent dry-run).`);
+    return;
+  }
+
+  // 3. probe_mode must be exactly sandbox_diagnostic.
+  if (probeMode !== AGENT_DRY_RUN_PROBE_MODE) {
+    log(`agent dry-run probe ${probeKey || m.messageKey} rejected: unexpected probe_mode ${probeMode || "(none)"} (fail closed).`);
+    await report("rejected", false, "", null, "invalid_mode");
+    return;
+  }
+
+  // 4. probe_id must be exactly dfp_agent_dry_run_v1.
+  if (probeId !== AGENT_DRY_RUN_PROBE_ID) {
+    log(`agent dry-run probe ${probeKey || m.messageKey} rejected: unknown probe_id ${probeId || "(none)"} (fail closed).`);
+    await report("rejected", false, "", null, "invalid_probe_id");
+    return;
+  }
+
+  // 5. diagnostic agent key must be the exact allowed agent.
+  if (diagnosticAgentKey !== AGENT_DRY_RUN_AGENT_KEY) {
+    log(`agent dry-run probe ${probeKey || m.messageKey} rejected: unexpected diagnostic_agent_key ${diagnosticAgentKey || "(none)"} (fail closed).`);
+    await report("rejected", false, "", null, "invalid_agent_key");
+    return;
+  }
+
+  // 6. resolved model reference must be the exact allowed model.
+  if (resolvedModelReference !== AGENT_DRY_RUN_MODEL) {
+    log(`agent dry-run probe ${probeKey || m.messageKey} rejected: unexpected resolved_model_reference ${resolvedModelReference || "(none)"} (fail closed).`);
+    await report("rejected", false, "", null, "invalid_model_reference");
+    return;
+  }
+
+  // 7. Local Ollama must be configured.
+  if (!config.ollamaUrl) {
+    log(`agent dry-run probe ${probeKey || m.messageKey} failed: OLLAMA_LOCAL_URL not configured.`);
+    await report("failed", false, "", null, "ollama_not_configured");
+    return;
+  }
+
+  // All validation passed — run the SINGLE fixed agent→model dry-run generation.
+  log(`agent dry-run probe ${probeKey || m.messageKey} validated — running fixed agent→model diagnostic (agent=${AGENT_DRY_RUN_AGENT_KEY}, model=${AGENT_DRY_RUN_MODEL}).`);
+
+  let output = "";
+  let verified = false;
+  let status = "failed";
+  let latencyMs: number | null = null;
+  let errorCategory: string | null = null;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AGENT_DRY_RUN_TIMEOUT_MS);
+  try {
+    const started = Date.now();
+    const res = await fetch(config.ollamaUrl.replace(/\/+$/, "") + "/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: AGENT_DRY_RUN_MODEL,
+        prompt: AGENT_DRY_RUN_PROMPT,
+        stream: false,
+        options: { temperature: 0, num_predict: AGENT_DRY_RUN_MAX_TOKENS },
+      }),
+    });
+    latencyMs = Date.now() - started;
+    if (!res.ok) {
+      errorCategory = "ollama_http_" + res.status;
+    } else {
+      const data = await res.json();
+      output = typeof (data as { response?: unknown })?.response === "string"
+        ? ((data as { response: string }).response).trim()
+        : "";
+      // Exact match only — no case folding, no fuzzy matching.
+      verified = output === AGENT_DRY_RUN_EXPECTED;
+      status = verified ? "completed" : "failed";
+      if (!verified) errorCategory = "output_mismatch";
+    }
+  } catch (err) {
+    const aborted = (err as Error)?.name === "AbortError";
+    status = "failed";
+    errorCategory = aborted ? "timeout" : "network_error";
+    latencyMs = null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const safeOutput = output.slice(0, 100);
+  await report(status, verified, safeOutput, latencyMs, errorCategory);
+}
+
 // --- Operations --------------------------------------------------------------
 async function handshake(): Promise<boolean> {
   const result = await sendRequest("handshake", {
@@ -951,6 +1114,13 @@ async function pollControlMessages(): Promise<void> {
     const chainProbes = messages.filter((m) => m.messageType === "runtime_chain_probe");
     for (const p of chainProbes) {
       await handleRuntimeChainProbe(p);
+    }
+
+    // Controlled registered-agent dry-run probes (Prompt 14) — fixed agent→model
+    // diagnostic binding, single fixed Ollama generation, fail-closed, no retry.
+    const agentDryRunProbes = messages.filter((m) => m.messageType === "agent_dry_run_probe");
+    for (const p of agentDryRunProbes) {
+      await handleAgentDryRunProbe(p);
     }
 
     const wantsCatalogue = messages.some(

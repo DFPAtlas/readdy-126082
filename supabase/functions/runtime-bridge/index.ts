@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ============================================================================
 // runtime-bridge — secure OUTBOUND-FIRST private-runtime bridge API for DFP AI
-// Operations (Phase 3 Prompt 08 + 09C + 10 + 11A + 12 + 13).
+// Operations (Phase 3 Prompt 08 + 09C + 10 + 11A + 12 + 13 + 14).
 //
 // The trusted server-side endpoint that a local trusted runtime machine (the
 // `dfp-runtime-bridge` local service) calls OUTBOUND over HTTPS. The cloud never
@@ -11,13 +11,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // This phase is CONNECTIVITY + HEARTBEAT + SAFE HEALTH RELAY + SANITISED OLLAMA
 // CATALOGUE RELAY + DRY-RUN TRANSPORT PROBE (Prompt 10) + CONTROLLED OLLAMA
 // SANDBOX INFERENCE PROBE (Prompt 11A) + CONTROLLED N8N SANDBOX WORKFLOW PROBE
-// (Prompt 12) + CONTROLLED MULTI-RUNTIME CHAIN PROBE (Prompt 13).
+// (Prompt 12) + CONTROLLED MULTI-RUNTIME CHAIN PROBE (Prompt 13) + CONTROLLED
+// REGISTERED-AGENT DRY-RUN PROBE (Prompt 14).
 //
 // It NEVER:
 //   * executes an agent or a business n8n workflow (the ONLY n8n execution is
 //     the single fixed `DFP Runtime Sandbox Ping` diagnostic, Prompt 12/13)
 //   * performs arbitrary Ollama inference (the ONLY generation allowed is the
-//     single fixed dfp_ollama_ping_v1 sandbox diagnostic, mapped server-side)
+//     single fixed dfp_ollama_ping_v1 sandbox diagnostic + the single fixed
+//     dfp_agent_dry_run_v1 agent dry-run diagnostic, mapped server-side)
 //   * calls a model/tool, retrieves knowledge, sends notifications
 //   * creates/updates a Run or mutates orchestration execution state
 //   * runs schedules or performs remediation
@@ -37,7 +39,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // Allowlisted operations: handshake, heartbeat, report_health,
 // report_capabilities, report_ollama_catalogue, fetch_control_messages,
 // report_transport_probe_ack, report_ollama_inference_probe,
-// report_n8n_sandbox_probe, report_runtime_chain_probe.
+// report_n8n_sandbox_probe, report_runtime_chain_probe,
+// report_agent_dry_run_probe.
 // ============================================================================
 
 const CORS = {
@@ -89,6 +92,16 @@ const CHAIN_PROBE_RESULT_MESSAGE_TYPE = "runtime_chain_probe_result";
 const CHAIN_PROBE_ID = "dfp_runtime_chain_v1";
 const CHAIN_PROBE_MODE = "sandbox_diagnostic";
 
+// --- Controlled registered-agent dry-run probe (Prompt 14) --------------------
+const AGENT_DRY_RUN_PROBE_MESSAGE_TYPE = "agent_dry_run_probe";
+const AGENT_DRY_RUN_PROBE_RESULT_MESSAGE_TYPE = "agent_dry_run_probe_result";
+const AGENT_DRY_RUN_PROBE_ID = "dfp_agent_dry_run_v1";
+const AGENT_DRY_RUN_PROBE_MODE = "sandbox_diagnostic";
+const AGENT_DRY_RUN_AGENT_KEY = "dfp-runtime-diagnostic-agent";
+const AGENT_DRY_RUN_MODEL = "qwen2.5-coder:7b";
+const AGENT_DRY_RUN_EXPECTED_OUTPUT = "DFP_AGENT_DRY_RUN_OK";
+const MAX_AGENT_OUTPUT_CHARS = 100;
+
 const ALLOWED_OPERATIONS = new Set([
   "handshake",
   "heartbeat",
@@ -100,6 +113,7 @@ const ALLOWED_OPERATIONS = new Set([
   "report_ollama_inference_probe",
   "report_n8n_sandbox_probe",
   "report_runtime_chain_probe",
+  "report_agent_dry_run_probe",
 ]);
 
 // Allowlisted capabilities only — never shell/arbitrary_http/filesystem/docker.
@@ -128,6 +142,7 @@ const ALLOWED_CONTROL_MESSAGE_TYPES = new Set([
   "ollama_inference_probe",
   "n8n_sandbox_probe",
   "runtime_chain_probe",
+  "agent_dry_run_probe",
 ]);
 
 // Control messages that have their own distinct signed-result lifecycle (they
@@ -137,11 +152,12 @@ const PROBE_CONTROL_TYPES = new Set([
   "ollama_inference_probe",
   "n8n_sandbox_probe",
   "runtime_chain_probe",
+  "agent_dry_run_probe",
 ]);
 
 const ALLOWED_PROBE_ACK_STATUSES = new Set(["verified", "rejected"]);
 
-// Terminal result statuses the HAL may report for an Ollama/n8n/chain probe.
+// Terminal result statuses the HAL may report for an Ollama/n8n/chain/agent probe.
 const ALLOWED_RESULT_STATUSES = new Set(["completed", "failed", "rejected"]);
 
 // Safe Ollama catalogue fields — never prompts / content / credentials / raw config.
@@ -297,6 +313,49 @@ async function compareCatalogueToRegistry(
   }).length;
 
   return { present, missing, unregistered };
+}
+
+// Cloud-side revalidation of the diagnostic agent + model assignment. The bridge
+// never trusts HAL-supplied values alone — it re-queries the registry before
+// marking any agent dry-run result verified.
+async function validateDiagnosticAgentAndModel(
+  admin: ReturnType<typeof createClient>,
+): Promise<{ ok: boolean; detail: string | null }> {
+  const { data: agentRows } = await admin
+    .from("ai_operations_agents")
+    .select("id, agent_key, status, is_active")
+    .eq("agent_key", AGENT_DRY_RUN_AGENT_KEY)
+    .eq("is_active", true)
+    .in("status", ["active", "registered"])
+    .limit(1);
+  const agent = agentRows && agentRows.length > 0 ? agentRows[0] : null;
+  if (!agent) return { ok: false, detail: "diagnostic_agent_invalid" };
+
+  const { data: assignRows } = await admin
+    .from("ai_agent_model_assignments")
+    .select("model_id")
+    .eq("agent_id", agent.id)
+    .eq("is_active", true)
+    .limit(1);
+  const assignment = assignRows && assignRows.length > 0 ? assignRows[0] : null;
+  if (!assignment) return { ok: false, detail: "model_assignment_missing" };
+
+  const { data: modelRows } = await admin
+    .from("ai_operations_models")
+    .select("id, model_reference, name, status, is_active")
+    .eq("id", assignment.model_id)
+    .eq("is_active", true)
+    .in("status", ["available", "active"])
+    .limit(1);
+  const model = modelRows && modelRows.length > 0 ? modelRows[0] : null;
+  if (!model) return { ok: false, detail: "model_inactive_or_missing" };
+
+  const reference = (typeof model.model_reference === "string" && str(model.model_reference)
+    ? model.model_reference
+    : model.name)?.trim();
+  if (reference !== AGENT_DRY_RUN_MODEL) return { ok: false, detail: "model_reference_mismatch" };
+
+  return { ok: true, detail: null };
 }
 
 serve(async (req: Request) => {
@@ -1399,6 +1458,186 @@ serve(async (req: Request) => {
       message: verified
         ? "Runtime chain verified — n8n and Ollama completed the fixed diagnostic chain successfully. No agent, tool or business workflow was executed."
         : "Runtime chain recorded — controlled n8n → Ollama diagnostic chain only, no agent/tool/model/business workflow executed.",
+    });
+  }
+
+  // ===========================================================================
+  // REPORT_AGENT_DRY_RUN_PROBE — signed result for the fixed registered-agent
+  //   dry-run (Prompt 14). The local HAL reports the outcome of the single fixed
+  //   agent→model diagnostic inference. The cloud validates: correct node, original
+  //   outbound probe exists, correlation matches, probe_id/mode are the fixed
+  //   values, diagnostic agent key + resolved model reference match, not expired,
+  //   not already recorded. The cloud INDEPENDENTLY re-checks the registered
+  //   diagnostic agent + model assignment before marking the result verified.
+  //   "verified" is true ONLY when the safe output exactly equals the sentinel AND
+  //   the cloud-side registry revalidation passes AND status is completed. No raw
+  //   Ollama response, prompt, credential or hidden reasoning is ever stored.
+  // ===========================================================================
+  if (operation === "report_agent_dry_run_probe") {
+    const probeKey = str(body.probe_key);
+    const originalMessageKey = str(body.original_message_key);
+    const resultCorrelationId = str(body.correlation_id);
+    const probeId = str(body.probe_id);
+    const probeMode = str(body.probe_mode);
+    const diagnosticAgentKey = str(body.diagnostic_agent_key);
+    const resolvedModelReference = str(body.resolved_model_reference);
+    const resultStatus = ALLOWED_RESULT_STATUSES.has(str(body.status)) ? str(body.status) : "failed";
+    const safeOutput = str(body.safe_output).slice(0, MAX_AGENT_OUTPUT_CHARS);
+    const latencyMs = typeof body.latency_ms === "number" && body.latency_ms >= 0 ? body.latency_ms : null;
+    const errorCategory = str(body.error_category).slice(0, MAX_META_CHARS) || null;
+    const startedAt = str(body.started_at) || receivedAt;
+    const completedAt = str(body.completed_at) || receivedAt;
+
+    if (!originalMessageKey) {
+      return json({ error: "original_message_key is required for an agent dry-run probe result." }, 400);
+    }
+
+    const { data: origRows } = await admin
+      .from("ai_runtime_bridge_messages")
+      .select("message_key, node_id, correlation_id, status, safe_payload, created_at")
+      .eq("message_key", originalMessageKey)
+      .eq("direction", "outbound")
+      .eq("message_type", AGENT_DRY_RUN_PROBE_MESSAGE_TYPE)
+      .limit(1);
+    const orig = origRows && origRows.length > 0 ? origRows[0] : null;
+
+    if (!orig) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "medium",
+        `Agent dry-run probe result rejected: no matching outbound probe for key ${originalMessageKey}. Controlled agent → model dry-run only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Original agent dry-run probe not found." }, 404);
+    }
+
+    if ((orig.node_id as string | null) !== nodeId) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high",
+        `Agent dry-run probe result rejected: node mismatch for probe ${probeKey || originalMessageKey}. Controlled agent → model dry-run only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Probe result node does not match the originating node." }, 403);
+    }
+    if (resultCorrelationId && (orig.correlation_id as string | null) !== resultCorrelationId) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high",
+        `Agent dry-run probe result rejected: correlation mismatch for probe ${probeKey || originalMessageKey}. Controlled agent → model dry-run only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Probe result correlation ID does not match." }, 409);
+    }
+
+    if (probeId && probeId !== AGENT_DRY_RUN_PROBE_ID) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high",
+        `Agent dry-run probe result rejected: unexpected probe_id ${probeId} for probe ${probeKey || originalMessageKey}. Controlled agent → model dry-run only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Unexpected probe_id — probe result rejected." }, 422);
+    }
+    if (probeMode && probeMode !== AGENT_DRY_RUN_PROBE_MODE) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high",
+        `Agent dry-run probe result rejected: unexpected probe_mode ${probeMode} for probe ${probeKey || originalMessageKey}. Controlled agent → model dry-run only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Unexpected probe_mode — probe result rejected." }, 422);
+    }
+    if (diagnosticAgentKey && diagnosticAgentKey !== AGENT_DRY_RUN_AGENT_KEY) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high",
+        `Agent dry-run probe result rejected: unexpected diagnostic_agent_key ${diagnosticAgentKey} for probe ${probeKey || originalMessageKey}. Controlled agent → model dry-run only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Unexpected diagnostic_agent_key — probe result rejected." }, 422);
+    }
+    if (resolvedModelReference && resolvedModelReference !== AGENT_DRY_RUN_MODEL) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high",
+        `Agent dry-run probe result rejected: unexpected resolved_model_reference ${resolvedModelReference} for probe ${probeKey || originalMessageKey}. Controlled agent → model dry-run only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Unexpected resolved_model_reference — probe result rejected." }, 422);
+    }
+
+    const origPayload = (orig.safe_payload as Record<string, unknown>) ?? {};
+    const expiresAt = str(origPayload.expires_at);
+    const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
+
+    if (expired && !ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
+      await admin.from("ai_runtime_bridge_messages").update({ status: "expired" }).eq("message_key", originalMessageKey);
+      await auditEvent(admin, "agent_dry_run_probe_expired", "expired", "low",
+        `Agent dry-run probe ${probeKey || originalMessageKey} expired before a valid result. Controlled agent → model dry-run only — no agent, tool, model or business workflow executed.`);
+      return json({
+        accepted: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_agent_dry_run_probe",
+        status: "expired",
+        executionEnabled: false,
+        message: "Agent dry-run probe expired — result not accepted.",
+      });
+    }
+
+    if (ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
+      return json({
+        accepted: true,
+        duplicate: true,
+        operation: "report_agent_dry_run_probe",
+        status: str(orig.status),
+        executionEnabled: false,
+        message: "Agent dry-run probe already recorded — no duplicate evidence created.",
+      });
+    }
+
+    // Exact output verification (no case folding / fuzzy matching).
+    const outputVerified = safeOutput.trim() === AGENT_DRY_RUN_EXPECTED_OUTPUT;
+
+    // Cloud independently re-checks the registered diagnostic agent + model
+    // assignment before marking the result verified.
+    const recheck = await validateDiagnosticAgentAndModel(admin);
+
+    const verified = outputVerified && recheck.ok && resultStatus === "completed";
+    const finalStatus = verified && resultStatus === "completed" ? "completed"
+      : resultStatus === "completed" ? "failed"
+      : resultStatus;
+    const finalErrorCategory = !outputVerified ? "output_mismatch"
+      : (!recheck.ok ? (recheck.detail ?? "cloud_revalidation_failed") : errorCategory);
+
+    await admin.from("ai_runtime_bridge_messages").update({
+      status: finalStatus,
+      acknowledged_at: completedAt,
+    }).eq("message_key", originalMessageKey);
+
+    await admin.from("ai_runtime_bridge_messages").insert({
+      message_key: uid("BRM"),
+      message_id: messageId,
+      nonce_hash: nonceHash,
+      node_id: nodeId,
+      direction: "inbound",
+      message_type: AGENT_DRY_RUN_PROBE_RESULT_MESSAGE_TYPE,
+      correlation_id: resultCorrelationId || (orig.correlation_id as string | null),
+      status: "recorded",
+      payload_type: "agent_dry_run_probe_result",
+      safe_payload: {
+        probe_key: probeKey,
+        original_message_key: originalMessageKey,
+        node_key: nodeKey,
+        probe_id: probeId || AGENT_DRY_RUN_PROBE_ID,
+        probe_mode: probeMode || AGENT_DRY_RUN_PROBE_MODE,
+        diagnostic_agent_key: diagnosticAgentKey || AGENT_DRY_RUN_AGENT_KEY,
+        resolved_model_reference: resolvedModelReference || AGENT_DRY_RUN_MODEL,
+        status: finalStatus,
+        verified,
+        safe_output: safeOutput,
+        latency_ms: latencyMs,
+        error_category: finalErrorCategory,
+        started_at: startedAt,
+        completed_at: completedAt,
+      },
+      payload_hash: payloadHash,
+      created_at: receivedAt,
+    });
+
+    if (verified) {
+      await auditEvent(admin, "agent_dry_run_probe_verified", "success", "low",
+        `Agent dry-run probe ${probeKey || originalMessageKey} verified — fixed agent → model diagnostic returned expected sentinel and cloud revalidated the registered agent + model assignment. Controlled agent → model dry-run only — no agent, tool, model or business workflow executed.`);
+    } else {
+      await auditEvent(admin, "agent_dry_run_probe_failed", "failed", "medium",
+        `Agent dry-run probe ${probeKey || originalMessageKey} did not verify (status=${finalStatus}, error=${finalErrorCategory ?? "none"}). Controlled agent → model dry-run only — no agent, tool, model or business workflow executed.`);
+    }
+
+    return json({
+      accepted: true,
+      allowed: false,
+      blocked: false,
+      operation: "report_agent_dry_run_probe",
+      status: finalStatus,
+      verified,
+      duplicate: false,
+      executionEnabled: false,
+      message: verified
+        ? "Registered agent dry-run verified — the diagnostic agent resolved its approved local model and returned the expected sandbox result. No agent, tool or business workflow was executed."
+        : "Registered agent dry-run recorded — controlled agent → model dry-run only, no agent/tool/model/business workflow executed.",
     });
   }
 

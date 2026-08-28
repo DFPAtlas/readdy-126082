@@ -5,31 +5,35 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // runtime-bridge-control — authenticated internal-staff control endpoint for
 // the private runtime transport probe (Phase 3 Prompt 10), the controlled
 // Ollama sandbox inference probe (Phase 3 Prompt 11A), the controlled n8n
-// sandbox workflow probe (Phase 3 Prompt 12), and the controlled multi-runtime
-// chain probe (Phase 3 Prompt 13).
+// sandbox workflow probe (Phase 3 Prompt 12), the controlled multi-runtime
+// chain probe (Phase 3 Prompt 13), and the controlled registered-agent dry-run
+// probe (Phase 3 Prompt 14).
 //
-// This is TRANSPORT TESTING + THREE SINGLE FIXED DIAGNOSTIC PINGS only. It queues
+// This is TRANSPORT TESTING + FOUR SINGLE FIXED DIAGNOSTIC PINGS only. It queues
 // a safe dry-run transport probe, OR one fixed harmless Ollama generation, OR
 // one fixed harmless n8n diagnostic workflow, OR one fixed n8n → Ollama
-// diagnostic chain, through the existing private runtime bridge, and reads back
-// signed evidence. It NEVER executes an arbitrary n8n workflow, performs
-// arbitrary inference, runs an agent, creates a run, calls a tool, retrieves
-// knowledge, sends notifications, runs schedules, or mutates business data.
+// diagnostic chain, OR one fixed registered-agent → model dry-run, through the
+// existing private runtime bridge, and reads back signed evidence. It NEVER
+// executes an arbitrary n8n workflow, performs arbitrary inference, runs an
+// agent, creates a run, calls a tool, retrieves knowledge, sends notifications,
+// runs schedules, or mutates business data.
 //
 // The probes are STRICTLY constrained (fail-closed):
 //   * Ollama: only prompt_id = dfp_ollama_ping_v1, model = qwen2.5-coder:7b.
 //   * n8n:    only probe_id = dfp_n8n_ping_v1, one fixed diagnostic workflow.
 //   * chain:  only probe_id = dfp_runtime_chain_v1 (n8n then Ollama, fixed).
+//   * agent:  only probe_id = dfp_agent_dry_run_v1, diagnostic agent
+//             dfp-runtime-diagnostic-agent → qwen2.5-coder:7b (fixed, zero tools).
 //   * probe_mode is always "sandbox_diagnostic".
-//   * Prompt text, model name, workflow reference and payload are generated
-//     SERVER-SIDE only. The browser can NEVER supply them — those inputs are
-//     ignored.
+//   * Prompt text, model name, workflow reference, agent identity and payload
+//     are generated SERVER-SIDE only. The browser can NEVER supply them — those
+//     inputs are ignored.
 //
 // SECURITY:
 //   * verify_jwt = true -> only authenticated users reach this.
 //   * internal_role() gate: owner/admin may queue a probe; any internal role
 //     (including viewer) may read status only.
-//   * Only eight allowlisted operations exist. No generic queue-message endpoint.
+//   * Only ten allowlisted operations exist. No generic queue-message endpoint.
 //   * Probe payloads are strictly limited to safe metadata — no URLs, commands,
 //     workflow IDs, arbitrary prompts, SQL, or file paths.
 // ============================================================================
@@ -53,6 +57,8 @@ const ALLOWED_OPERATIONS = new Set([
   "get_n8n_sandbox_probe_status",
   "queue_runtime_chain_probe",
   "get_runtime_chain_probe_status",
+  "queue_agent_dry_run_probe",
+  "get_agent_dry_run_probe_status",
 ]);
 
 const PROBE_MESSAGE_TYPE = "runtime_transport_probe";
@@ -84,6 +90,17 @@ const CHAIN_PROBE_RESULT_MESSAGE_TYPE = "runtime_chain_probe_result";
 // can never override these.
 const CHAIN_PROBE_ID = "dfp_runtime_chain_v1";
 const CHAIN_PROBE_MODE = "sandbox_diagnostic";
+
+// --- Controlled registered-agent dry-run probe (Prompt 14) --------------------
+const AGENT_DRY_RUN_PROBE_MESSAGE_TYPE = "agent_dry_run_probe";
+const AGENT_DRY_RUN_PROBE_RESULT_MESSAGE_TYPE = "agent_dry_run_probe_result";
+
+// The ONLY permitted agent dry-run diagnostic values — fixed server-side. The
+// browser can never override these.
+const AGENT_DRY_RUN_PROBE_ID = "dfp_agent_dry_run_v1";
+const AGENT_DRY_RUN_PROBE_MODE = "sandbox_diagnostic";
+const AGENT_DRY_RUN_AGENT_KEY = "dfp-runtime-diagnostic-agent";
+const AGENT_DRY_RUN_MODEL = "qwen2.5-coder:7b";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -175,6 +192,53 @@ async function resolveNode(
   if (!Number.isFinite(beatAge) || beatAge > HEARTBEAT_FRESH_MS) return null;
 
   return node;
+}
+
+// Resolve the fixed diagnostic agent from the existing registry (fail closed).
+async function resolveDiagnosticAgent(
+  admin: ReturnType<typeof createClient>,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await admin
+    .from("ai_operations_agents")
+    .select("id, agent_key, name, status, is_active")
+    .eq("agent_key", AGENT_DRY_RUN_AGENT_KEY)
+    .eq("is_active", true)
+    .in("status", ["active", "registered"])
+    .limit(1);
+  return data && data.length > 0 ? data[0] : null;
+}
+
+// Resolve the diagnostic agent's model assignment through the existing registry
+// and confirm it resolves to the fixed local model. Fail closed on any mismatch.
+async function resolveDiagnosticModelAssignment(
+  admin: ReturnType<typeof createClient>,
+  agentId: string,
+): Promise<{ ok: boolean; modelReference: string | null; detail: string | null }> {
+  const { data: assignRows } = await admin
+    .from("ai_agent_model_assignments")
+    .select("model_id")
+    .eq("agent_id", agentId)
+    .eq("is_active", true)
+    .limit(1);
+  const assignment = assignRows && assignRows.length > 0 ? assignRows[0] : null;
+  if (!assignment) return { ok: false, modelReference: null, detail: "model_assignment_missing" };
+
+  const { data: modelRows } = await admin
+    .from("ai_operations_models")
+    .select("id, model_reference, name, status, is_active")
+    .eq("id", assignment.model_id)
+    .eq("is_active", true)
+    .in("status", ["available", "active"])
+    .limit(1);
+  const model = modelRows && modelRows.length > 0 ? modelRows[0] : null;
+  if (!model) return { ok: false, modelReference: null, detail: "model_inactive_or_missing" };
+
+  const reference = (typeof model.model_reference === "string" && str(model.model_reference)
+    ? model.model_reference
+    : model.name)?.trim();
+  if (reference !== AGENT_DRY_RUN_MODEL) return { ok: false, modelReference: null, detail: "model_reference_mismatch" };
+
+  return { ok: true, modelReference: AGENT_DRY_RUN_MODEL, detail: null };
 }
 
 serve(async (req: Request) => {
@@ -819,6 +883,212 @@ serve(async (req: Request) => {
       message: verified
         ? "Runtime chain verified — n8n and Ollama completed the fixed diagnostic chain successfully. No agent, tool or business workflow was executed."
         : "Runtime chain probe status read (controlled n8n → Ollama diagnostic chain only — no agent, tool, model or business workflow executed).",
+    });
+  }
+
+  // ===========================================================================
+  // QUEUE_AGENT_DRY_RUN_PROBE — owner/admin only.
+  //   Queues ONE fixed registered-agent → model dry-run through the bridge. The
+  //   agent identity, model reference, prompt and payload are FIXED server-side
+  //   — the browser can never supply an agent, model, prompt, workflow, URL,
+  //   tool, payload, temperature or token limit.
+  //
+  //   Before queueing, the server verifies (fail closed):
+  //     1. owner/admin
+  //     2. fresh reachable HAL bridge exists
+  //     3. diagnostic agent exists
+  //     4. diagnostic agent is active/registered
+  //     5. diagnostic agent is the exact allowed agent
+  //     6. model assignment exists
+  //     7. assigned model resolves to qwen2.5-coder:7b
+  //     8. assigned model is active/enabled in registry
+  //     9. runtime execution remains disabled (execution_enabled always false)
+  //    10. no tool permissions are required (zero tool access for the agent)
+  // ===========================================================================
+  if (operation === "queue_agent_dry_run_probe") {
+    if (!isPrivileged) return json({ error: "Owner or admin role required to queue an agent dry-run probe." }, 403);
+
+    const node = await resolveNode(admin, str(body.node_key));
+    if (!node) {
+      return json({
+        error: "No reachable, freshly-heartbeating bridge node found.",
+        detail: "queue_blocked",
+      }, 404);
+    }
+
+    // 3–5. Diagnostic agent must exist, be active/registered, and be the exact
+    // allowed agent (resolved server-side by fixed agent_key — never from browser).
+    const agent = await resolveDiagnosticAgent(admin);
+    if (!agent) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
+        `Agent dry-run queue rejected: diagnostic agent ${AGENT_DRY_RUN_AGENT_KEY} not registered/active. No agent dry-run queued.`);
+      return json({ error: "Diagnostic agent is not registered or not active.", detail: "agent_not_registered" }, 409);
+    }
+
+    // 6–8. Model assignment must exist and resolve to the fixed local model.
+    const modelRes = await resolveDiagnosticModelAssignment(admin, agent.id as string);
+    if (!modelRes.ok) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
+        `Agent dry-run queue rejected: model assignment invalid (${modelRes.detail}). No agent dry-run queued.`);
+      return json({ error: "Diagnostic agent model assignment is invalid.", detail: modelRes.detail ?? "model_assignment_invalid" }, 409);
+    }
+
+    // 10. Zero tool permissions required for the diagnostic agent.
+    const { data: toolRows } = await admin
+      .from("ai_tool_agent_access")
+      .select("id")
+      .eq("agent_id", agent.id as string)
+      .eq("is_active", true)
+      .limit(1);
+    if (toolRows && toolRows.length > 0) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
+        `Agent dry-run queue rejected: diagnostic agent has tool permissions. No agent dry-run queued.`);
+      return json({ error: "Diagnostic agent must have zero tool permissions.", detail: "tool_access_present" }, 409);
+    }
+
+    const now = new Date();
+    const probeKey = uid("ADP");
+    const correlationId = uid("COR");
+
+    // FIXED safe payload — no agent ID, model override, prompt, URL, workflow or
+    // payload. Only safe identifiers; the local HAL binds the fixed prompt text.
+    const safePayload = {
+      probe_key: probeKey,
+      correlation_id: correlationId,
+      requested_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + PROBE_TTL_MS).toISOString(),
+      expected_node_key: node.node_key,
+      probe_id: AGENT_DRY_RUN_PROBE_ID,
+      probe_mode: AGENT_DRY_RUN_PROBE_MODE,
+      diagnostic_agent_key: AGENT_DRY_RUN_AGENT_KEY,
+      resolved_model_reference: AGENT_DRY_RUN_MODEL,
+    };
+
+    const payloadHash = await sha256Hex(JSON.stringify(safePayload));
+
+    await admin.from("ai_runtime_bridge_messages").insert({
+      message_key: uid("BRM"),
+      message_id: probeKey,
+      nonce_hash: null,
+      node_id: node.id,
+      direction: "outbound",
+      message_type: AGENT_DRY_RUN_PROBE_MESSAGE_TYPE,
+      correlation_id: correlationId,
+      status: "pending",
+      payload_type: "agent_dry_run_probe",
+      safe_payload: safePayload,
+      payload_hash: payloadHash,
+      created_at: now.toISOString(),
+    });
+
+    await auditEvent(admin, "agent_dry_run_probe_queued", "success", "low", actor,
+      `Agent dry-run probe ${probeKey} queued for node ${node.node_key} ` +
+      `(probe_id=${AGENT_DRY_RUN_PROBE_ID}, agent=${AGENT_DRY_RUN_AGENT_KEY}, model=${AGENT_DRY_RUN_MODEL}). ` +
+      `Controlled agent→model dry-run only — no agent, tool, model or business workflow executed.`,
+      correlationId);
+
+    return json({
+      accepted: true,
+      operation: "queue_agent_dry_run_probe",
+      probeKey,
+      correlationId,
+      nodeKey: node.node_key,
+      nodeName: node.name ?? null,
+      requestedAt: now.toISOString(),
+      expiresAt: safePayload.expires_at,
+      probeId: AGENT_DRY_RUN_PROBE_ID,
+      probeMode: AGENT_DRY_RUN_PROBE_MODE,
+      diagnosticAgentKey: AGENT_DRY_RUN_AGENT_KEY,
+      resolvedModelReference: AGENT_DRY_RUN_MODEL,
+      status: "pending",
+      executionEnabled: false,
+      message: "Agent dry-run probe queued (fixed registered agent → model dry-run only — no agent, tool, model or business workflow executed).",
+    });
+  }
+
+  // ===========================================================================
+  // GET_AGENT_DRY_RUN_PROBE_STATUS — any internal role (viewer read-only).
+  // ===========================================================================
+  if (operation === "get_agent_dry_run_probe_status") {
+    const correlationIdParam = str(body.correlation_id);
+
+    let query = admin
+      .from("ai_runtime_bridge_messages")
+      .select("*")
+      .eq("direction", "outbound")
+      .eq("message_type", AGENT_DRY_RUN_PROBE_MESSAGE_TYPE);
+    if (correlationIdParam) query = query.eq("correlation_id", correlationIdParam);
+    query = query.order("created_at", { ascending: false }).limit(5);
+
+    const { data: probeRows } = await query;
+    if (!probeRows || probeRows.length === 0) {
+      return json({ operation: "get_agent_dry_run_probe_status", found: false, probes: [], executionEnabled: false });
+    }
+
+    const probes: Record<string, unknown>[] = [];
+    for (const p of probeRows) {
+      probes.push(await expireProbeIfNeeded(admin, p, actor));
+    }
+
+    const results = await Promise.all(probes.map(async (p) => {
+      const corr = str(p.correlation_id);
+      const resRows = corr
+        ? await admin.from("ai_runtime_bridge_messages")
+          .select("message_key, status, safe_payload, acknowledged_at, created_at")
+          .eq("direction", "inbound")
+          .eq("message_type", AGENT_DRY_RUN_PROBE_RESULT_MESSAGE_TYPE)
+          .eq("correlation_id", corr)
+          .order("created_at", { ascending: false })
+          .limit(1)
+        : { data: [] };
+
+      const res = resRows.data && resRows.data.length > 0 ? resRows.data[0] : null;
+      const payload = (p.safe_payload as Record<string, unknown>) ?? {};
+      const resPayload = res ? ((res.safe_payload as Record<string, unknown>) ?? {}) : {};
+      const queuedAt = str(p.created_at);
+      const resultAt = res ? (str(res.acknowledged_at) || str(res.created_at)) : null;
+
+      let roundTripMs: number | null = null;
+      if (queuedAt && resultAt) {
+        const delta = new Date(resultAt).getTime() - new Date(queuedAt).getTime();
+        if (Number.isFinite(delta)) roundTripMs = Math.max(0, delta);
+      }
+
+      return {
+        probeKey: str(payload.probe_key),
+        messageKey: str(p.message_key),
+        correlationId: corr,
+        nodeId: p.node_id ?? null,
+        status: str(p.status),
+        queuedAt,
+        resultAt,
+        expiresAt: str(payload.expires_at),
+        expectedNodeKey: str(payload.expected_node_key),
+        probeId: str(payload.probe_id),
+        probeMode: str(payload.probe_mode),
+        diagnosticAgentKey: str(payload.diagnostic_agent_key) || AGENT_DRY_RUN_AGENT_KEY,
+        resolvedModelReference: str(payload.resolved_model_reference) || AGENT_DRY_RUN_MODEL,
+        hasResult: res ? true : false,
+        resultStatus: res ? (str(resPayload.status) || str(res.status)) : null,
+        safeOutput: res ? (str(resPayload.safe_output) || null) : null,
+        verified: res ? (resPayload.verified === true) : false,
+        errorCategory: res ? (str(resPayload.error_category) || null) : null,
+        latencyMs: res ? (resPayload.latency_ms ?? null) : null,
+        roundTripMs,
+      };
+    }));
+
+    const verified = results.some((r) => r.verified === true);
+
+    return json({
+      operation: "get_agent_dry_run_probe_status",
+      found: true,
+      verified,
+      probes: results,
+      executionEnabled: false,
+      message: verified
+        ? "Registered agent dry-run verified — the diagnostic agent resolved its approved local model and returned the expected sandbox result. No agent, tool or business workflow was executed."
+        : "Registered agent dry-run probe status read (controlled agent → model dry-run only — no agent, tool, model or business workflow executed).",
     });
   }
 

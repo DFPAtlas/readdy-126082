@@ -15,6 +15,7 @@ import TransportProbeVerification from '@/pages/ai-operations/runtime-controls/c
 import OllamaInferenceProbeVerification from '@/pages/ai-operations/runtime-controls/components/OllamaInferenceProbeVerification';
 import N8nSandboxProbeVerification from '@/pages/ai-operations/runtime-controls/components/N8nSandboxProbeVerification';
 import RuntimeChainProbeVerification from '@/pages/ai-operations/runtime-controls/components/RuntimeChainProbeVerification';
+import AgentDryRunProbeVerification from '@/pages/ai-operations/runtime-controls/components/AgentDryRunProbeVerification';
 
 export default function RuntimeControlsPage() {
   const { controls, loading, error } = useRuntimeControls();
@@ -124,6 +125,9 @@ export default function RuntimeControlsPage() {
 
       {/* Controlled multi-runtime chain probe (Prompt 13 fixed n8n → Ollama diagnostic) */}
       <RuntimeChainProbeVerification />
+
+      {/* Controlled registered-agent dry-run probe (Prompt 14 fixed agent → model diagnostic) */}
+      <AgentDryRunProbeVerification />
 
       {/* Change history */}
       <ControlHistory />
