@@ -3,22 +3,30 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ============================================================================
 // runtime-bridge-control — authenticated internal-staff control endpoint for
-// the private runtime transport probe (Phase 3 Prompt 10).
+// the private runtime transport probe (Phase 3 Prompt 10) and the controlled
+// Ollama sandbox inference probe (Phase 3 Prompt 11A).
 //
-// This is TRANSPORT TESTING ONLY. It queues a safe dry-run transport probe
-// through the existing private runtime bridge and reads back its status. It
-// NEVER executes n8n, performs Ollama inference, runs an agent, creates a run,
+// This is TRANSPORT TESTING + A SINGLE FIXED DIAGNOSTIC PING only. It queues a
+// safe dry-run transport probe OR one fixed, harmless Ollama generation through
+// the existing private runtime bridge and reads back signed evidence. It NEVER
+// executes n8n, performs arbitrary inference, runs an agent, creates a run,
 // calls a tool, retrieves knowledge, sends notifications, runs schedules, or
-// mutates business data. The probe proves cloud → HAL → cloud transport only.
+// mutates business data.
+//
+// The Ollama probe is STRICTLY constrained (fail-closed):
+//   * Only ONE fixed prompt is permitted (prompt_id = dfp_ollama_ping_v1).
+//   * Only ONE fixed model is permitted (qwen2.5-coder:7b).
+//   * probe_mode is always "sandbox_diagnostic".
+//   * Prompt text and model name are generated SERVER-SIDE only. The browser
+//     can NEVER supply prompt text or a model name — those inputs are ignored.
 //
 // SECURITY:
-//   * verify_jwt = true → only authenticated users reach this.
+//   * verify_jwt = true -> only authenticated users reach this.
 //   * internal_role() gate: owner/admin may queue a probe; any internal role
 //     (including viewer) may read status only.
-//   * Only two allowlisted operations exist (queue_transport_probe,
-//     get_transport_probe_status). No generic queue-message endpoint.
-//   * The probe payload is strictly limited to safe metadata — no URLs,
-//     commands, workflow IDs, model prompts, SQL, or file paths.
+//   * Only four allowlisted operations exist. No generic queue-message endpoint.
+//   * Probe payloads are strictly limited to safe metadata — no URLs, commands,
+//     workflow IDs, arbitrary prompts, SQL, or file paths.
 // ============================================================================
 
 const CORS = {
@@ -34,18 +42,21 @@ const HEARTBEAT_FRESH_MS = 2 * 60_000; // heartbeat must be < 2 min old
 const ALLOWED_OPERATIONS = new Set([
   "queue_transport_probe",
   "get_transport_probe_status",
+  "queue_ollama_inference_probe",
+  "get_ollama_inference_probe_status",
 ]);
 
 const PROBE_MESSAGE_TYPE = "runtime_transport_probe";
 const ACK_MESSAGE_TYPE = "runtime_transport_probe_ack";
 
-const PROBE_STATUSES = new Set([
-  "pending",
-  "delivered",
-  "acknowledged",
-  "expired",
-  "rejected",
-]);
+const OLLAMA_PROBE_MESSAGE_TYPE = "ollama_inference_probe";
+const OLLAMA_PROBE_RESULT_MESSAGE_TYPE = "ollama_inference_probe_result";
+
+// The ONLY permitted Ollama diagnostic values — fixed server-side. The browser
+// can never override these.
+const OLLAMA_PROBE_PROMPT_ID = "dfp_ollama_ping_v1";
+const OLLAMA_PROBE_MODEL = "qwen2.5-coder:7b";
+const OLLAMA_PROBE_MODE = "sandbox_diagnostic";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -81,7 +92,7 @@ async function auditEvent(
     audit_key: uid("BRC"),
     occurred_at: new Date().toISOString(),
     event_type: eventType,
-    action: "runtime_transport_probe",
+    action: "runtime_bridge_control",
     outcome,
     severity,
     actor_type: "human",
@@ -107,12 +118,36 @@ async function expireProbeIfNeeded(
   if (!expired) return probe;
   if (status === "pending" || status === "delivered") {
     await admin.from("ai_runtime_bridge_messages").update({ status: "expired" }).eq("message_key", str(probe.message_key));
-    await auditEvent(admin, "runtime_transport_probe_expired", "expired", "low", actor,
-      `Transport probe ${str(probe.message_key)} expired without a signed acknowledgement. No execution occurred.`,
+    await auditEvent(admin, "runtime_probe_expired", "expired", "low", actor,
+      `Probe ${str(probe.message_key)} expired without a signed result. No execution occurred.`,
       str(probe.correlation_id) || null);
     return { ...probe, status: "expired" };
   }
   return probe;
+}
+
+// Resolve the most reachable, freshly-heartbeating bridge node. Shared by both
+// queue operations.
+async function resolveNode(
+  admin: ReturnType<typeof createClient>,
+  nodeKeyParam: string,
+): Promise<Record<string, unknown> | null> {
+  const { data: nodeRows } = await admin
+    .from("ai_runtime_bridge_nodes")
+    .select("id, node_key, name, status, last_handshake_at, last_heartbeat_at, last_seen_at")
+    .eq(nodeKeyParam ? "node_key" : "status", nodeKeyParam || "reachable")
+    .order("last_seen_at", { ascending: false })
+    .limit(1);
+
+  const node = nodeRows && nodeRows.length > 0 ? nodeRows[0] : null;
+  if (!node) return null;
+
+  if (!node.last_handshake_at) return null;
+  const lastBeat = node.last_heartbeat_at ?? node.last_seen_at;
+  const beatAge = lastBeat ? Date.now() - new Date(lastBeat as string).getTime() : Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(beatAge) || beatAge > HEARTBEAT_FRESH_MS) return null;
+
+  return node;
 }
 
 serve(async (req: Request) => {
@@ -155,25 +190,13 @@ serve(async (req: Request) => {
   if (operation === "queue_transport_probe") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to send a transport probe." }, 403);
 
-    const nodeKeyParam = str(body.node_key);
-    const { data: nodeRows } = await admin
-      .from("ai_runtime_bridge_nodes")
-      .select("id, node_key, name, status, last_handshake_at, last_heartbeat_at, last_seen_at")
-      .eq(nodeKeyParam ? "node_key" : "status", nodeKeyParam || "reachable")
-      .order("last_seen_at", { ascending: false })
-      .limit(1);
-
-    const node = nodeRows && nodeRows.length > 0 ? nodeRows[0] : null;
-    if (!node) return json({ error: "No reachable bridge node found.", detail: "queue_blocked" }, 404);
-
-    // Verify handshake is current (has ever completed) and heartbeat is fresh.
-    if (!node.last_handshake_at) {
-      return json({ error: "Bridge node has not completed a verified handshake.", detail: "handshake_missing" }, 409);
-    }
-    const lastBeat = node.last_heartbeat_at ?? node.last_seen_at;
-    const beatAge = lastBeat ? Date.now() - new Date(lastBeat as string).getTime() : Number.POSITIVE_INFINITY;
-    if (!Number.isFinite(beatAge) || beatAge > HEARTBEAT_FRESH_MS) {
-      return json({ error: "Bridge node heartbeat is stale — transport probe refused.", detail: "heartbeat_stale" }, 409);
+    const node = await resolveNode(admin, str(body.node_key));
+    if (!node) {
+      const missing = !node;
+      return json({
+        error: missing ? "No reachable bridge node found." : "Bridge node heartbeat is stale — probe refused.",
+        detail: missing ? "queue_blocked" : "heartbeat_stale",
+      }, missing ? 404 : 409);
     }
 
     const now = new Date();
@@ -243,13 +266,11 @@ serve(async (req: Request) => {
       return json({ operation: "get_transport_probe_status", found: false, probes: [], executionEnabled: false });
     }
 
-    // Lazily expire any stale probes (idempotent).
     const probes: Record<string, unknown>[] = [];
     for (const p of probeRows) {
       probes.push(await expireProbeIfNeeded(admin, p, actor));
     }
 
-    // Resolve the signed acknowledgement for each probe (inbound ack message).
     const results = await Promise.all(probes.map(async (p) => {
       const corr = str(p.correlation_id);
       const ackRows = corr
@@ -301,6 +322,164 @@ serve(async (req: Request) => {
       message: verified
         ? "Transport verified — no execution performed."
         : "Transport probe status read (no execution performed).",
+    });
+  }
+
+  // ===========================================================================
+  // QUEUE_OLLAMA_INFERENCE_PROBE — owner/admin only.
+  //   Queues ONE fixed harmless Ollama generation through the bridge. Prompt
+  //   text and model are FIXED server-side — the browser can never supply them.
+  // ===========================================================================
+  if (operation === "queue_ollama_inference_probe") {
+    if (!isPrivileged) return json({ error: "Owner or admin role required to queue an Ollama inference probe." }, 403);
+
+    const node = await resolveNode(admin, str(body.node_key));
+    if (!node) {
+      return json({
+        error: "No reachable, freshly-heartbeating bridge node found.",
+        detail: "queue_blocked",
+      }, 404);
+    }
+
+    const now = new Date();
+    const probeKey = uid("OLP");
+    const correlationId = uid("COR");
+
+    // FIXED safe payload — no prompt text, no arbitrary model. The values below
+    // are the ONLY ones the local HAL will accept.
+    const safePayload = {
+      probe_key: probeKey,
+      correlation_id: correlationId,
+      requested_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + PROBE_TTL_MS).toISOString(),
+      expected_node_key: node.node_key,
+      probe_mode: OLLAMA_PROBE_MODE,
+      prompt_id: OLLAMA_PROBE_PROMPT_ID,
+      model: OLLAMA_PROBE_MODEL,
+    };
+
+    const payloadHash = await sha256Hex(JSON.stringify(safePayload));
+
+    await admin.from("ai_runtime_bridge_messages").insert({
+      message_key: uid("BRM"),
+      message_id: probeKey,
+      nonce_hash: null,
+      node_id: node.id,
+      direction: "outbound",
+      message_type: OLLAMA_PROBE_MESSAGE_TYPE,
+      correlation_id: correlationId,
+      status: "pending",
+      payload_type: "ollama_inference_probe",
+      safe_payload: safePayload,
+      payload_hash: payloadHash,
+      created_at: now.toISOString(),
+    });
+
+    await auditEvent(admin, "ollama_inference_probe_queued", "success", "low", actor,
+      `Ollama sandbox diagnostic probe ${probeKey} queued for node ${node.node_key} ` +
+      `(prompt_id=${OLLAMA_PROBE_PROMPT_ID}, model=${OLLAMA_PROBE_MODEL}). ` +
+      `Fixed harmless ping only — no arbitrary inference, no execution.`,
+      correlationId);
+
+    return json({
+      accepted: true,
+      operation: "queue_ollama_inference_probe",
+      probeKey,
+      correlationId,
+      nodeKey: node.node_key,
+      nodeName: node.name ?? null,
+      requestedAt: now.toISOString(),
+      expiresAt: safePayload.expires_at,
+      promptId: OLLAMA_PROBE_PROMPT_ID,
+      model: OLLAMA_PROBE_MODEL,
+      probeMode: OLLAMA_PROBE_MODE,
+      status: "pending",
+      executionEnabled: false,
+      message: "Ollama sandbox diagnostic probe queued (fixed harmless ping only — no arbitrary inference, no execution).",
+    });
+  }
+
+  // ===========================================================================
+  // GET_OLLAMA_INFERENCE_PROBE_STATUS — any internal role (viewer read-only).
+  // ===========================================================================
+  if (operation === "get_ollama_inference_probe_status") {
+    const correlationIdParam = str(body.correlation_id);
+
+    let query = admin
+      .from("ai_runtime_bridge_messages")
+      .select("*")
+      .eq("direction", "outbound")
+      .eq("message_type", OLLAMA_PROBE_MESSAGE_TYPE);
+    if (correlationIdParam) query = query.eq("correlation_id", correlationIdParam);
+    query = query.order("created_at", { ascending: false }).limit(5);
+
+    const { data: probeRows } = await query;
+    if (!probeRows || probeRows.length === 0) {
+      return json({ operation: "get_ollama_inference_probe_status", found: false, probes: [], executionEnabled: false });
+    }
+
+    const probes: Record<string, unknown>[] = [];
+    for (const p of probeRows) {
+      probes.push(await expireProbeIfNeeded(admin, p, actor));
+    }
+
+    const results = await Promise.all(probes.map(async (p) => {
+      const corr = str(p.correlation_id);
+      const resRows = corr
+        ? await admin.from("ai_runtime_bridge_messages")
+          .select("message_key, status, safe_payload, acknowledged_at, created_at")
+          .eq("direction", "inbound")
+          .eq("message_type", OLLAMA_PROBE_RESULT_MESSAGE_TYPE)
+          .eq("correlation_id", corr)
+          .order("created_at", { ascending: false })
+          .limit(1)
+        : { data: [] };
+
+      const res = resRows.data && resRows.data.length > 0 ? resRows.data[0] : null;
+      const payload = (p.safe_payload as Record<string, unknown>) ?? {};
+      const resPayload = res ? ((res.safe_payload as Record<string, unknown>) ?? {}) : {};
+      const queuedAt = str(p.created_at);
+      const resultAt = res ? (str(res.acknowledged_at) || str(res.created_at)) : null;
+
+      let roundTripMs: number | null = null;
+      if (queuedAt && resultAt) {
+        const delta = new Date(resultAt).getTime() - new Date(queuedAt).getTime();
+        if (Number.isFinite(delta)) roundTripMs = Math.max(0, delta);
+      }
+
+      return {
+        probeKey: str(payload.probe_key),
+        messageKey: str(p.message_key),
+        correlationId: corr,
+        nodeId: p.node_id ?? null,
+        status: str(p.status),
+        queuedAt,
+        resultAt,
+        expiresAt: str(payload.expires_at),
+        expectedNodeKey: str(payload.expected_node_key),
+        promptId: str(payload.prompt_id),
+        model: str(payload.model),
+        probeMode: str(payload.probe_mode),
+        hasResult: res ? true : false,
+        resultStatus: res ? (str(resPayload.status) || str(res.status)) : null,
+        output: res ? (str(resPayload.output) || null) : null,
+        verified: res ? (resPayload.verified === true) : false,
+        latencyMs: res ? (resPayload.latency_ms ?? null) : null,
+        roundTripMs,
+      };
+    }));
+
+    const verified = results.some((r) => r.verified === true);
+
+    return json({
+      operation: "get_ollama_inference_probe_status",
+      found: true,
+      verified,
+      probes: results,
+      executionEnabled: false,
+      message: verified
+        ? "Ollama sandbox diagnostic verified — fixed ping returned expected output. No arbitrary inference occurred."
+        : "Ollama sandbox diagnostic probe status read (no arbitrary inference occurred).",
     });
   }
 

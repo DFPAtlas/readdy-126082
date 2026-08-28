@@ -3,17 +3,19 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ============================================================================
 // runtime-bridge — secure OUTBOUND-FIRST private-runtime bridge API for DFP AI
-// Operations (Phase 3 Prompt 08 + 09C + 10).
+// Operations (Phase 3 Prompt 08 + 09C + 10 + 11A).
 //
 // The trusted server-side endpoint that a local trusted runtime machine (the
 // `dfp-runtime-bridge` local service) calls OUTBOUND over HTTPS. The cloud never
 // requires direct inbound TCP access to n8n / Ollama / Docker / private LAN.
 // This phase is CONNECTIVITY + HEARTBEAT + SAFE HEALTH RELAY + SANITISED OLLAMA
-// CATALOGUE RELAY + DRY-RUN TRANSPORT PROBE (Prompt 10).
+// CATALOGUE RELAY + DRY-RUN TRANSPORT PROBE (Prompt 10) + CONTROLLED OLLAMA
+// SANDBOX INFERENCE PROBE (Prompt 11A).
 //
 // It NEVER:
 //   * executes an agent or n8n workflow
-//   * performs Ollama inference (no /api/generate|/chat|/embed|/pull|/delete)
+//   * performs arbitrary Ollama inference (the ONLY generation allowed is the
+//     single fixed dfp_ollama_ping_v1 sandbox diagnostic, mapped server-side)
 //   * calls a model/tool, retrieves knowledge, sends notifications
 //   * creates/updates a Run or mutates orchestration execution state
 //   * runs schedules or performs remediation
@@ -32,7 +34,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //
 // Allowlisted operations: handshake, heartbeat, report_health,
 // report_capabilities, report_ollama_catalogue, fetch_control_messages,
-// report_transport_probe_ack.
+// report_transport_probe_ack, report_ollama_inference_probe.
 // ============================================================================
 
 const CORS = {
@@ -55,6 +57,16 @@ const MAX_NAME_CHARS = 200;
 const MAX_META_CHARS = 120;
 const PROBE_TTL_MS = 2 * 60_000; // transport probe expires in 2 minutes
 
+// --- Controlled Ollama sandbox inference probe (Prompt 11A) ------------------
+const OLLAMA_PROBE_MESSAGE_TYPE = "ollama_inference_probe";
+const OLLAMA_PROBE_RESULT_MESSAGE_TYPE = "ollama_inference_probe_result";
+// The ONLY permitted probe values (must match the local HAL exactly).
+const OLLAMA_PROBE_PROMPT_ID = "dfp_ollama_ping_v1";
+const OLLAMA_PROBE_MODEL = "qwen2.5-coder:7b";
+const OLLAMA_PROBE_MODE = "sandbox_diagnostic";
+const OLLAMA_PROBE_EXPECTED_OUTPUT = "DFP_OLLAMA_SANDBOX_OK";
+const MAX_OUTPUT_CHARS = 256;
+
 const ALLOWED_OPERATIONS = new Set([
   "handshake",
   "heartbeat",
@@ -63,6 +75,7 @@ const ALLOWED_OPERATIONS = new Set([
   "report_ollama_catalogue",
   "fetch_control_messages",
   "report_transport_probe_ack",
+  "report_ollama_inference_probe",
 ]);
 
 // Allowlisted capabilities only — never shell/arbitrary_http/filesystem/docker.
@@ -88,13 +101,17 @@ const ALLOWED_CONTROL_MESSAGE_TYPES = new Set([
   "ollama_catalogue_request",
   "ollama_catalogue_response",
   "runtime_transport_probe",
+  "ollama_inference_probe",
 ]);
 
-// The transport probe is a control message that must NOT be marked
-// "acknowledged" on fetch — it has its own signed-ack lifecycle.
-const PROBE_CONTROL_TYPES = new Set(["runtime_transport_probe"]);
+// Control messages that have their own distinct signed-result lifecycle (they
+// must NOT be marked "acknowledged" on fetch — they await a signed result).
+const PROBE_CONTROL_TYPES = new Set(["runtime_transport_probe", "ollama_inference_probe"]);
 
 const ALLOWED_PROBE_ACK_STATUSES = new Set(["verified", "rejected"]);
+
+// Terminal result statuses the HAL may report for an Ollama probe.
+const ALLOWED_RESULT_STATUSES = new Set(["completed", "failed", "rejected"]);
 
 // Safe Ollama catalogue fields — never prompts / content / credentials / raw config.
 const ALLOWED_CATALOGUE_CLASSIFICATIONS = new Set(["local", "remote"]);
@@ -736,8 +753,8 @@ serve(async (req: Request) => {
     );
 
     if (messages.length > 0) {
-      // Transport probes keep a distinct "delivered" lifecycle (they await a
-      // signed ack); all other control messages are marked acknowledged here.
+      // Probe-type messages keep a distinct "delivered" lifecycle (they await a
+      // signed result); all other control messages are marked acknowledged here.
       const probeKeys = messages
         .filter((m) => PROBE_CONTROL_TYPES.has(m.message_type as string))
         .map((m) => m.message_key);
@@ -908,6 +925,165 @@ serve(async (req: Request) => {
       message: finalStatus === "acknowledged"
         ? "Transport probe acknowledged — no execution performed."
         : "Transport probe rejected — no execution performed.",
+    });
+  }
+
+  // ===========================================================================
+  // REPORT_OLLAMA_INFERENCE_PROBE — signed result for the single fixed Ollama
+  //   sandbox diagnostic (Prompt 11A). The local HAL reports the output of the
+  //   ONE fixed dfp_ollama_ping_v1 generation. The cloud validates: correct
+  //   node, original outbound probe exists, correlation matches, prompt_id/model
+  //   are the fixed values, not expired, and not already recorded. The output is
+  //   stored as signed evidence; "verified" is true ONLY when the output exactly
+  //   equals DFP_OLLAMA_SANDBOX_OK. No arbitrary prompt/model is ever accepted.
+  // ===========================================================================
+  if (operation === "report_ollama_inference_probe") {
+    const probeKey = str(body.probe_key);
+    const originalMessageKey = str(body.original_message_key);
+    const resultCorrelationId = str(body.correlation_id);
+    const promptId = str(body.prompt_id);
+    const model = str(body.model);
+    const probeMode = str(body.probe_mode);
+    const resultStatus = ALLOWED_RESULT_STATUSES.has(str(body.status)) ? str(body.status) : "failed";
+    const output = str(body.output).slice(0, MAX_OUTPUT_CHARS);
+    const latencyMs = typeof body.latency_ms === "number" && body.latency_ms >= 0 ? body.latency_ms : null;
+    const generatedAt = str(body.generated_at) || receivedAt;
+
+    if (!originalMessageKey) {
+      return json({ error: "original_message_key is required for an Ollama inference probe result." }, 400);
+    }
+
+    // Original outbound probe must exist and be the correct direction/type.
+    const { data: origRows } = await admin
+      .from("ai_runtime_bridge_messages")
+      .select("message_key, node_id, correlation_id, status, safe_payload, created_at")
+      .eq("message_key", originalMessageKey)
+      .eq("direction", "outbound")
+      .eq("message_type", OLLAMA_PROBE_MESSAGE_TYPE)
+      .limit(1);
+    const orig = origRows && origRows.length > 0 ? origRows[0] : null;
+
+    if (!orig) {
+      await auditEvent(admin, "ollama_inference_probe_rejected", "rejected", "medium",
+        `Ollama probe result rejected: no matching outbound probe for key ${originalMessageKey}. No inference occurred.`);
+      return json({ error: "Original Ollama inference probe not found." }, 404);
+    }
+
+    // Correct node + correlation must match.
+    if ((orig.node_id as string | null) !== nodeId) {
+      await auditEvent(admin, "ollama_inference_probe_rejected", "rejected", "high",
+        `Ollama probe result rejected: node mismatch for probe ${probeKey || originalMessageKey}. No inference occurred.`);
+      return json({ error: "Probe result node does not match the originating node." }, 403);
+    }
+    if (resultCorrelationId && (orig.correlation_id as string | null) !== resultCorrelationId) {
+      await auditEvent(admin, "ollama_inference_probe_rejected", "rejected", "high",
+        `Ollama probe result rejected: correlation mismatch for probe ${probeKey || originalMessageKey}. No inference occurred.`);
+      return json({ error: "Probe result correlation ID does not match." }, 409);
+    }
+
+    // Fixed constraints — the reported prompt_id/model must be the fixed values.
+    if (promptId && promptId !== OLLAMA_PROBE_PROMPT_ID) {
+      await auditEvent(admin, "ollama_inference_probe_rejected", "rejected", "high",
+        `Ollama probe result rejected: unexpected prompt_id ${promptId} for probe ${probeKey || originalMessageKey}. No inference occurred.`);
+      return json({ error: "Unexpected prompt_id — probe result rejected." }, 422);
+    }
+    if (model && model !== OLLAMA_PROBE_MODEL) {
+      await auditEvent(admin, "ollama_inference_probe_rejected", "rejected", "high",
+        `Ollama probe result rejected: unexpected model ${model} for probe ${probeKey || originalMessageKey}. No inference occurred.`);
+      return json({ error: "Unexpected model — probe result rejected." }, 422);
+    }
+
+    // Expiry check — an expired probe must never record a successful result.
+    const origPayload = (orig.safe_payload as Record<string, unknown>) ?? {};
+    const expiresAt = str(origPayload.expires_at);
+    const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
+
+    if (expired && !ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
+      await admin.from("ai_runtime_bridge_messages").update({ status: "expired" }).eq("message_key", originalMessageKey);
+      await auditEvent(admin, "ollama_inference_probe_expired", "expired", "low",
+        `Ollama probe ${probeKey || originalMessageKey} expired before a valid result. No inference recorded.`);
+      return json({
+        accepted: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_ollama_inference_probe",
+        status: "expired",
+        executionEnabled: false,
+        message: "Ollama probe expired — result not accepted.",
+      });
+    }
+
+    // Idempotency — a probe already in a terminal state returns existing state.
+    if (ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
+      return json({
+        accepted: true,
+        duplicate: true,
+        operation: "report_ollama_inference_probe",
+        status: str(orig.status),
+        executionEnabled: false,
+        message: "Ollama probe already recorded — no duplicate evidence created.",
+      });
+    }
+
+    // Determine verified: output must exactly equal the fixed expected string.
+    const verified = output.toUpperCase() === OLLAMA_PROBE_EXPECTED_OUTPUT;
+    const finalStatus = verified && resultStatus === "completed" ? "completed"
+      : resultStatus === "completed" ? "failed"
+      : resultStatus;
+
+    await admin.from("ai_runtime_bridge_messages").update({
+      status: finalStatus,
+      acknowledged_at: generatedAt,
+    }).eq("message_key", originalMessageKey);
+
+    // Persist the signed result as an inbound message (evidence).
+    await admin.from("ai_runtime_bridge_messages").insert({
+      message_key: uid("BRM"),
+      message_id: messageId,
+      nonce_hash: nonceHash,
+      node_id: nodeId,
+      direction: "inbound",
+      message_type: OLLAMA_PROBE_RESULT_MESSAGE_TYPE,
+      correlation_id: resultCorrelationId || (orig.correlation_id as string | null),
+      status: "recorded",
+      payload_type: "ollama_inference_probe_result",
+      safe_payload: {
+        probe_key: probeKey,
+        original_message_key: originalMessageKey,
+        node_key: nodeKey,
+        prompt_id: promptId || OLLAMA_PROBE_PROMPT_ID,
+        model: model || OLLAMA_PROBE_MODEL,
+        probe_mode: probeMode || OLLAMA_PROBE_MODE,
+        status: finalStatus,
+        output,
+        verified,
+        latency_ms: latencyMs,
+        generated_at: generatedAt,
+      },
+      payload_hash: payloadHash,
+      created_at: receivedAt,
+    });
+
+    if (verified) {
+      await auditEvent(admin, "ollama_inference_probe_verified", "success", "low",
+        `Ollama sandbox diagnostic probe ${probeKey || originalMessageKey} verified — fixed ping returned expected output. No arbitrary inference occurred.`);
+    } else {
+      await auditEvent(admin, "ollama_inference_probe_failed", "failed", "medium",
+        `Ollama sandbox diagnostic probe ${probeKey || originalMessageKey} did not return expected fixed output (status=${finalStatus}). No arbitrary inference occurred.`);
+    }
+
+    return json({
+      accepted: true,
+      allowed: false,
+      blocked: false,
+      operation: "report_ollama_inference_probe",
+      status: finalStatus,
+      verified,
+      duplicate: false,
+      executionEnabled: false,
+      message: verified
+        ? "Ollama sandbox diagnostic verified — fixed ping returned expected output. No arbitrary inference occurred."
+        : "Ollama sandbox diagnostic recorded — no arbitrary inference occurred.",
     });
   }
 

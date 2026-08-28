@@ -10,7 +10,7 @@
 //
 // It NEVER:
 //   * executes an n8n workflow or calls a webhook
-//   * performs Ollama inference (no prompt / generation / embeddings)
+//   * performs arbitrary Ollama inference (except the single fixed sandbox ping)
 //   * runs shell commands, arbitrary HTTP, filesystem, or Docker control
 //   * decides to execute queued work while offline (fail-closed — no offline
 //     execution mode)
@@ -73,6 +73,17 @@ async function hmacSha256Hex(secret: string, message: string): Promise<string> {
 }
 
 // --- Outbound signed request -------------------------------------------------
+// Canonicalise the request path so the HMAC signature is stable regardless of a
+// trailing slash (or repeated trailing slashes) in DFP_BRIDGE_ENDPOINT. The
+// cloud verifies against `new URL(req.url).pathname`, which never includes a
+// trailing slash, so we sign the same canonical form here to avoid 401
+// invalid_signature on every subsequent request.
+function canonicalPath(pathname: string): string {
+  const stripped = pathname.replace(/^\/functions\/v1/, "");
+  const trimmed = stripped.replace(/\/+$/, "");
+  return trimmed || "/";
+}
+
 async function sendRequest(operation: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
   const timestamp = String(Date.now());
   const nonce = crypto.randomUUID();
@@ -83,14 +94,16 @@ async function sendRequest(operation: string, body: Record<string, unknown>): Pr
   const payloadHash = await sha256Hex(rawBody);
 
   const url = new URL(config.endpoint);
-
-  let path = url.pathname.replace(/^\/functions\/v1/, "");
-  path = path.replace(/\/+$/, "") || "/";
+  // Normalise the path we actually dial so the path the cloud observes equals
+  // the canonical path we sign (prevents a 308 redirect from silently changing
+  // the pathname between signature and verification).
+  const path = canonicalPath(url.pathname);
+  url.pathname = path;
   const canonical = `${config.identity}\n${timestamp}\n${nonce}\nPOST\n${path}\n${payloadHash}`;
   const signature = await hmacSha256Hex(config.signingSecret, canonical);
 
   try {
-    const res = await fetch(config.endpoint, {
+    const res = await fetch(url.toString(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -237,6 +250,18 @@ interface ControlMessage {
   safePayload?: Record<string, unknown>;
 }
 
+// --- Controlled Ollama sandbox inference probe (Prompt 11A) --------------------
+// The ONLY permitted Ollama generation is a single fixed, harmless diagnostic
+// ping. Prompt text and model are hard-coded here and can NEVER be supplied by
+// the cloud or the browser. Unknown prompt IDs fail closed.
+const OLLAMA_PROBE_PROMPT_ID = "dfp_ollama_ping_v1";
+const OLLAMA_PROBE_MODEL = "qwen2.5-coder:7b";
+const OLLAMA_PROBE_MODE = "sandbox_diagnostic";
+const OLLAMA_PROBE_PROMPT = "Reply with exactly DFP_OLLAMA_SANDBOX_OK and no other text.";
+const OLLAMA_PROBE_MAX_TOKENS = 16;
+const OLLAMA_PROBE_TIMEOUT_MS = 30000;
+const OLLAMA_PROBE_EXPECTED = "DFP_OLLAMA_SANDBOX_OK";
+
 async function handleTransportProbe(m: ControlMessage): Promise<void> {
   // Reject any unrecognised message type explicitly (fail-closed).
   if (m.messageType !== "runtime_transport_probe") {
@@ -253,7 +278,7 @@ async function handleTransportProbe(m: ControlMessage): Promise<void> {
   // 2. Expected node key must match this node.
   if (expectedNodeKey && expectedNodeKey !== config.nodeKey) {
     log(`transport probe ${probeKey || m.messageKey} rejected: expected node ${expectedNodeKey} != ${config.nodeKey}.`);
-    await sendRequest("report_transport_probe_ack", {
+    const rejectResult = await sendRequest("report_transport_probe_ack", {
       node_key: config.nodeKey,
       probe_key: probeKey,
       original_message_key: m.messageKey ?? "",
@@ -263,6 +288,7 @@ async function handleTransportProbe(m: ControlMessage): Promise<void> {
       status: "rejected",
       summary: "Transport probe rejected: expected node key mismatch.",
     });
+    log(`transport probe ${probeKey || m.messageKey} rejection acknowledgement ${rejectResult ? (rejectResult.status ?? "sent") : "FAILED"} (transport only — no execution).`);
     return;
   }
 
@@ -276,7 +302,7 @@ async function handleTransportProbe(m: ControlMessage): Promise<void> {
   log(`transport probe ${probeKey || m.messageKey} received and validated (transport only — no execution).`);
 
   // 5. Send signed non-executing acknowledgement.
-  await sendRequest("report_transport_probe_ack", {
+  const ackResult = await sendRequest("report_transport_probe_ack", {
     node_key: config.nodeKey,
     probe_key: probeKey,
     original_message_key: m.messageKey ?? "",
@@ -286,6 +312,138 @@ async function handleTransportProbe(m: ControlMessage): Promise<void> {
     status: "verified",
     summary: "Transport probe acknowledged. Transport verification only — no execution performed.",
   });
+  log(`transport probe ${probeKey || m.messageKey} signed acknowledgement ${ackResult ? (ackResult.status ?? "sent") : "FAILED"} (transport only — no execution).`);
+}
+
+// --- Controlled Ollama sandbox inference probe (Prompt 11A) ---------------------
+// On receiving a valid `ollama_inference_probe` control message, HAL ONLY runs
+// the SINGLE fixed dfp_ollama_ping_v1 generation after validating ALL of:
+//   1. message type exactly `ollama_inference_probe`
+//   2. expected node is atlas-hal-runtime-01 (== config.nodeKey)
+//   3. probe not expired
+//   4. probe_mode exactly `sandbox_diagnostic`
+//   5. prompt_id exactly `dfp_ollama_ping_v1`
+//   6. model exactly `qwen2.5-coder:7b`
+// It NEVER accepts arbitrary prompts, arbitrary models, or arbitrary URLs. The
+// fixed prompt text is mapped locally from the prompt_id — the cloud only ever
+// references the identifier.
+async function handleOllamaInferenceProbe(m: ControlMessage): Promise<void> {
+  if (m.messageType !== "ollama_inference_probe") {
+    log(`rejected unrecognised control message type: ${m.messageType ?? "(none)"} (ignored, no inference).`);
+    return;
+  }
+
+  const payload = m.safePayload ?? {};
+  const probeKey = typeof payload.probe_key === "string" ? payload.probe_key : "";
+  const expectedNodeKey = typeof payload.expected_node_key === "string" ? payload.expected_node_key : "";
+  const expiresAt = typeof payload.expires_at === "string" ? payload.expires_at : "";
+  const probeMode = typeof payload.probe_mode === "string" ? payload.probe_mode : "";
+  const promptId = typeof payload.prompt_id === "string" ? payload.prompt_id : "";
+  const model = typeof payload.model === "string" ? payload.model : "";
+  const correlationId = m.correlationId ?? (typeof payload.correlation_id === "string" ? payload.correlation_id : "");
+  const nowIso = new Date().toISOString();
+
+  const report = async (status: string, output: string, latencyMs: number | null) => {
+    const res = await sendRequest("report_ollama_inference_probe", {
+      node_key: config.nodeKey,
+      probe_key: probeKey,
+      original_message_key: m.messageKey ?? "",
+      correlation_id: correlationId,
+      prompt_id: OLLAMA_PROBE_PROMPT_ID,
+      model: OLLAMA_PROBE_MODEL,
+      probe_mode: OLLAMA_PROBE_MODE,
+      status,
+      output,
+      latency_ms: latencyMs,
+      generated_at: nowIso,
+    });
+    log(`ollama probe ${probeKey || m.messageKey} result report ${res ? (res.status ?? "sent") : "FAILED"} (status=${status}).`);
+  };
+
+  // 1. Expected node key must match this node.
+  if (expectedNodeKey && expectedNodeKey !== config.nodeKey) {
+    log(`ollama probe ${probeKey || m.messageKey} rejected: expected node ${expectedNodeKey} != ${config.nodeKey}.`);
+    await report("rejected", "", null);
+    return;
+  }
+
+  // 2. Stale/expired probes must never run inference.
+  if (expiresAt && Date.now() > new Date(expiresAt).getTime()) {
+    log(`ollama probe ${probeKey || m.messageKey} ignored: probe expired (no inference).`);
+    return;
+  }
+
+  // 3. probe_mode must be exactly sandbox_diagnostic.
+  if (probeMode !== OLLAMA_PROBE_MODE) {
+    log(`ollama probe ${probeKey || m.messageKey} rejected: unexpected probe_mode ${probeMode || "(none)"} (fail closed, no inference).`);
+    await report("rejected", "", null);
+    return;
+  }
+
+  // 4. prompt_id must be exactly dfp_ollama_ping_v1 (unknown IDs fail closed).
+  if (promptId !== OLLAMA_PROBE_PROMPT_ID) {
+    log(`ollama probe ${probeKey || m.messageKey} rejected: unknown prompt_id ${promptId || "(none)"} (fail closed, no inference).`);
+    await report("rejected", "", null);
+    return;
+  }
+
+  // 5. model must be exactly qwen2.5-coder:7b.
+  if (model !== OLLAMA_PROBE_MODEL) {
+    log(`ollama probe ${probeKey || m.messageKey} rejected: unexpected model ${model || "(none)"} (fail closed, no inference).`);
+    await report("rejected", "", null);
+    return;
+  }
+
+  // 6. Local Ollama must be configured.
+  if (!config.ollamaUrl) {
+    log(`ollama probe ${probeKey || m.messageKey} failed: OLLAMA_LOCAL_URL not configured.`);
+    await report("failed", "", null);
+    return;
+  }
+
+  // All validation passed — run the SINGLE fixed generation.
+  log(`ollama probe ${probeKey || m.messageKey} validated — running fixed sandbox ping (prompt_id=${OLLAMA_PROBE_PROMPT_ID}, model=${OLLAMA_PROBE_MODEL}).`);
+
+  let output = "";
+  let status = "failed";
+  let latencyMs: number | null = null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OLLAMA_PROBE_TIMEOUT_MS);
+  try {
+    const started = Date.now();
+    const res = await fetch(config.ollamaUrl.replace(/\/+$/, "") + "/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: OLLAMA_PROBE_MODEL,
+        prompt: OLLAMA_PROBE_PROMPT,
+        stream: false,
+        options: { temperature: 0, num_predict: OLLAMA_PROBE_MAX_TOKENS },
+      }),
+    });
+    latencyMs = Date.now() - started;
+    if (!res.ok) {
+      log(`ollama probe ${probeKey || m.messageKey} generation failed (${res.status}).`);
+    } else {
+      const data = await res.json();
+      output = typeof (data as { response?: unknown })?.response === "string"
+        ? ((data as { response: string }).response)
+        : "";
+      status = "completed";
+      const matchedExpected = output.toUpperCase() === OLLAMA_PROBE_EXPECTED;
+      log(`ollama probe ${probeKey || m.messageKey} generation returned ${matchedExpected ? "expected" : "unexpected"} output (local sentinel ${matchedExpected ? "matched" : "not matched"}).`);
+    }
+  } catch (err) {
+    const aborted = (err as Error)?.name === "AbortError";
+    log(`ollama probe ${probeKey || m.messageKey} generation ${aborted ? "timed out" : "network error"}: ${(err as Error)?.message ?? "unknown"}.`);
+    status = "failed";
+    latencyMs = null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  await report(status, output, latencyMs);
 }
 
 // --- Operations --------------------------------------------------------------
@@ -342,13 +500,19 @@ async function pollControlMessages(): Promise<void> {
   if (result && Array.isArray((result as { messages?: unknown[] }).messages)) {
     const messages = (result as { messages: unknown[] }).messages as ControlMessage[];
     if (messages.length > 0) {
-      log(`received ${messages.length} control message(s) (allowlisted health/capability/transport-probe only).`);
+      log(`received ${messages.length} control message(s) (allowlisted health/capability/transport-probe/ollama-probe only).`);
     }
 
     // Dry-run transport probes (non-executing) — validate + signed ack.
     const probes = messages.filter((m) => m.messageType === "runtime_transport_probe");
     for (const p of probes) {
       await handleTransportProbe(p);
+    }
+
+    // Controlled Ollama inference probes (Prompt 11A) — single fixed sandbox ping.
+    const inferenceProbes = messages.filter((m) => m.messageType === "ollama_inference_probe");
+    for (const p of inferenceProbes) {
+      await handleOllamaInferenceProbe(p);
     }
 
     const wantsCatalogue = messages.some(
