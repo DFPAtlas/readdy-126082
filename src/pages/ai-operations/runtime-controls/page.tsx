@@ -16,6 +16,9 @@ import OllamaInferenceProbeVerification from '@/pages/ai-operations/runtime-cont
 import N8nSandboxProbeVerification from '@/pages/ai-operations/runtime-controls/components/N8nSandboxProbeVerification';
 import RuntimeChainProbeVerification from '@/pages/ai-operations/runtime-controls/components/RuntimeChainProbeVerification';
 import AgentDryRunProbeVerification from '@/pages/ai-operations/runtime-controls/components/AgentDryRunProbeVerification';
+import ToolAccessDenialProbeVerification from '@/pages/ai-operations/runtime-controls/components/ToolAccessDenialProbeVerification';
+import ToolAccessGrantProbeVerification from '@/pages/ai-operations/runtime-controls/components/ToolAccessGrantProbeVerification';
+import ReadonlyToolProbeVerification from '@/pages/ai-operations/runtime-controls/components/ReadonlyToolProbeVerification';
 
 export default function RuntimeControlsPage() {
   const { controls, loading, error } = useRuntimeControls();
@@ -128,6 +131,15 @@ export default function RuntimeControlsPage() {
 
       {/* Controlled registered-agent dry-run probe (Prompt 14 fixed agent → model diagnostic) */}
       <AgentDryRunProbeVerification />
+
+      {/* Controlled tool access denial probe (Prompt 15 cloud-side authorization check) */}
+      <ToolAccessDenialProbeVerification />
+
+      {/* Controlled tool access grant probe (Prompt 16 cloud-side authorization check) */}
+      <ToolAccessGrantProbeVerification />
+
+      {/* Controlled read-only tool probe (Prompt 17 first callable read-only tool) */}
+      <ReadonlyToolProbeVerification />
 
       {/* Change history */}
       <ControlHistory />

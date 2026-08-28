@@ -891,6 +891,23 @@ const AGENT_DRY_RUN_EXPECTED = "DFP_AGENT_DRY_RUN_OK";
 const AGENT_DRY_RUN_MAX_TOKENS = 16;
 const AGENT_DRY_RUN_TIMEOUT_MS = 30000;
 
+// --- Controlled read-only tool probe (Prompt 17) -------------------------------
+// The ONLY callable tool in DFP AI Operations. A dedicated execution identity
+// (dfp-runtime-readonly-tool-agent) with an isolated execute grant invokes ONE
+// fixed built-in read-only tool (dfp-runtime-health-read-tool) that reads a safe
+// local runtime health snapshot (n8n /healthz + Ollama /api/tags, GET only).
+// No mutation, no business data, no arbitrary URL, no shell/filesystem, no
+// inference. Returns a sanitised { status, n8n, ollama, ollama_model_count }.
+const READONLY_TOOL_PROBE_MESSAGE_TYPE = "readonly_tool_probe";
+const READONLY_TOOL_PROBE_ID = "dfp_readonly_tool_v1";
+const READONLY_TOOL_PROBE_MODE = "sandbox_diagnostic";
+const READONLY_TOOL_PROBE_AGENT_KEY = "dfp-runtime-readonly-tool-agent";
+const READONLY_TOOL_PROBE_TOOL_KEY = "dfp-runtime-health-read-tool";
+const READONLY_TOOL_PROBE_TOOL_OPERATION = "read_runtime_health_snapshot";
+const READONLY_TOOL_PROBE_EXPECTED_STATUS = "DFP_RUNTIME_HEALTH_READ_OK";
+const READONLY_TOOL_READ_TIMEOUT_MS = 10000; // 10s per local health read
+const READONLY_TOOL_ALLOWED_SERVICE_STATES = ["healthy", "degraded", "unavailable"];
+
 async function handleAgentDryRunProbe(m: ControlMessage): Promise<void> {
   if (m.messageType !== AGENT_DRY_RUN_PROBE_MESSAGE_TYPE) {
     log(`rejected unrecognised control message type: ${m.messageType ?? "(none)"} (ignored, no agent dry-run).`);
@@ -1033,6 +1050,189 @@ async function handleAgentDryRunProbe(m: ControlMessage): Promise<void> {
   await report(status, verified, safeOutput, latencyMs, errorCategory);
 }
 
+// --- Built-in read-only tool (Prompt 17) ----------------------------------------
+// Fixed local function — accepts NO URL/target argument. Reads ONLY config.n8nUrl
+// `/healthz` and config.ollamaUrl `/api/tags` (GET only, one request each, 10s
+// timeout, no retry). Returns a sanitised snapshot only — never raw responses,
+// URLs, credentials, headers, model names or environment variables.
+async function executeRuntimeHealthReadTool(): Promise<{
+  status: string;
+  n8n: string;
+  ollama: string;
+  ollama_model_count: number | null;
+}> {
+  let n8nStatus = "unavailable";
+  if (config.n8nUrl) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), READONLY_TOOL_READ_TIMEOUT_MS);
+    try {
+      const res = await fetch(config.n8nUrl.replace(/\/+$/, "") + "/healthz", { method: "GET", signal: controller.signal });
+      n8nStatus = res.ok ? "healthy" : "degraded";
+    } catch {
+      n8nStatus = "unavailable";
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  let ollamaStatus = "unavailable";
+  let ollamaModelCount: number | null = null;
+  if (config.ollamaUrl) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), READONLY_TOOL_READ_TIMEOUT_MS);
+    try {
+      const res = await fetch(config.ollamaUrl.replace(/\/+$/, "") + "/api/tags", { method: "GET", signal: controller.signal });
+      if (!res.ok) {
+        ollamaStatus = "degraded";
+      } else {
+        const data = await res.json();
+        ollamaStatus = "healthy";
+        const models = Array.isArray((data as { models?: unknown[] })?.models)
+          ? ((data as { models: unknown[] }).models).length
+          : null;
+        ollamaModelCount = models;
+      }
+    } catch {
+      ollamaStatus = "unavailable";
+      ollamaModelCount = null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  return {
+    status: READONLY_TOOL_PROBE_EXPECTED_STATUS,
+    n8n: n8nStatus,
+    ollama: ollamaStatus,
+    ollama_model_count: ollamaModelCount,
+  };
+}
+
+// --- Read-only tool probe handler (Prompt 17) -----------------------------------
+// Strictly validates the fixed probe envelope, then runs the SINGLE fixed read-
+// only tool. Any mismatch fails closed with a signed rejection. Never accepts a
+// URL, arbitrary path, POST, retry, or cloud-supplied target.
+async function handleReadonlyToolProbe(m: ControlMessage): Promise<void> {
+  if (m.messageType !== READONLY_TOOL_PROBE_MESSAGE_TYPE) {
+    log(`rejected unrecognised control message type: ${m.messageType ?? "(none)"} (ignored, no tool execution).`);
+    return;
+  }
+
+  const payload = m.safePayload ?? {};
+  const probeKey = typeof payload.probe_key === "string" ? payload.probe_key : "";
+  const expectedNodeKey = typeof payload.expected_node_key === "string" ? payload.expected_node_key : "";
+  const expiresAt = typeof payload.expires_at === "string" ? payload.expires_at : "";
+  const probeId = typeof payload.probe_id === "string" ? payload.probe_id : "";
+  const probeMode = typeof payload.probe_mode === "string" ? payload.probe_mode : "";
+  const agentKey = typeof payload.agent_key === "string" ? payload.agent_key : "";
+  const toolKey = typeof payload.tool_key === "string" ? payload.tool_key : "";
+  const toolOperation = typeof payload.tool_operation === "string" ? payload.tool_operation : "";
+  const correlationId = m.correlationId ?? (typeof payload.correlation_id === "string" ? payload.correlation_id : "");
+  const startedAtIso = new Date().toISOString();
+
+  const report = async (
+    status: string,
+    verified: boolean,
+    n8nStatus: string,
+    ollamaStatus: string,
+    ollamaModelCount: number | null,
+    latencyMs: number | null,
+    errorCategory: string | null,
+  ) => {
+    const res = await sendRequest("report_readonly_tool_probe", {
+      node_key: config.nodeKey,
+      probe_key: probeKey,
+      original_message_key: m.messageKey ?? "",
+      correlation_id: correlationId,
+      probe_id: READONLY_TOOL_PROBE_ID,
+      probe_mode: READONLY_TOOL_PROBE_MODE,
+      agent_key: READONLY_TOOL_PROBE_AGENT_KEY,
+      tool_key: READONLY_TOOL_PROBE_TOOL_KEY,
+      tool_operation: READONLY_TOOL_PROBE_TOOL_OPERATION,
+      status,
+      verified,
+      n8n_status: n8nStatus,
+      ollama_status: ollamaStatus,
+      ollama_model_count: ollamaModelCount,
+      latency_ms: latencyMs,
+      error_category: errorCategory,
+      started_at: startedAtIso,
+      completed_at: new Date().toISOString(),
+    });
+    log(`read-only tool probe ${probeKey || m.messageKey} result report ${res ? (res.status ?? "sent") : "FAILED"} (status=${status}, verified=${verified}).`);
+  };
+
+  // 1. Expected node key must match this node.
+  if (expectedNodeKey && expectedNodeKey !== config.nodeKey) {
+    log(`read-only tool probe ${probeKey || m.messageKey} rejected: expected node ${expectedNodeKey} != ${config.nodeKey}.`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "node_mismatch");
+    return;
+  }
+
+  // 2. Stale/expired probes must never run the tool.
+  if (expiresAt && Date.now() > new Date(expiresAt).getTime()) {
+    log(`read-only tool probe ${probeKey || m.messageKey} ignored: probe expired (no tool execution).`);
+    return;
+  }
+
+  // 3. probe_mode must be exactly sandbox_diagnostic.
+  if (probeMode !== READONLY_TOOL_PROBE_MODE) {
+    log(`read-only tool probe ${probeKey || m.messageKey} rejected: unexpected probe_mode ${probeMode || "(none)"} (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "invalid_mode");
+    return;
+  }
+
+  // 4. probe_id must be exactly dfp_readonly_tool_v1.
+  if (probeId !== READONLY_TOOL_PROBE_ID) {
+    log(`read-only tool probe ${probeKey || m.messageKey} rejected: unknown probe_id ${probeId || "(none)"} (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "invalid_probe_id");
+    return;
+  }
+
+  // 5. agent_key must be exactly dfp-runtime-readonly-tool-agent.
+  if (agentKey !== READONLY_TOOL_PROBE_AGENT_KEY) {
+    log(`read-only tool probe ${probeKey || m.messageKey} rejected: unexpected agent_key ${agentKey || "(none)"} (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "invalid_agent_key");
+    return;
+  }
+
+  // 6. tool_key must be exactly dfp-runtime-health-read-tool.
+  if (toolKey !== READONLY_TOOL_PROBE_TOOL_KEY) {
+    log(`read-only tool probe ${probeKey || m.messageKey} rejected: unexpected tool_key ${toolKey || "(none)"} (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "invalid_tool_key");
+    return;
+  }
+
+  // 7. tool_operation must be exactly read_runtime_health_snapshot.
+  if (toolOperation !== READONLY_TOOL_PROBE_TOOL_OPERATION) {
+    log(`read-only tool probe ${probeKey || m.messageKey} rejected: unexpected tool_operation ${toolOperation || "(none)"} (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "invalid_tool_operation");
+    return;
+  }
+
+  // All validation passed — run the SINGLE fixed read-only tool.
+  log(`read-only tool probe ${probeKey || m.messageKey} validated — running fixed local runtime health read.`);
+
+  const started = Date.now();
+  const result = await executeRuntimeHealthReadTool();
+  const latencyMs = Date.now() - started;
+
+  const sentinelOk = result.status === READONLY_TOOL_PROBE_EXPECTED_STATUS;
+  const n8nOk = READONLY_TOOL_ALLOWED_SERVICE_STATES.includes(result.n8n);
+  const ollamaOk = READONLY_TOOL_ALLOWED_SERVICE_STATES.includes(result.ollama);
+  const countOk = result.ollama_model_count === null
+    || (typeof result.ollama_model_count === "number" && result.ollama_model_count >= 0);
+  const verified = sentinelOk && n8nOk && ollamaOk && countOk;
+
+  const status = verified ? "completed" : "failed";
+  const errorCategory = verified ? null
+    : (!sentinelOk ? "output_mismatch"
+      : (!n8nOk || !ollamaOk) ? "invalid_service_state"
+      : "invalid_model_count");
+
+  await report(status, verified, result.n8n, result.ollama, result.ollama_model_count, latencyMs, errorCategory);
+}
+
 // --- Operations --------------------------------------------------------------
 async function handshake(): Promise<boolean> {
   const result = await sendRequest("handshake", {
@@ -1121,6 +1321,13 @@ async function pollControlMessages(): Promise<void> {
     const agentDryRunProbes = messages.filter((m) => m.messageType === "agent_dry_run_probe");
     for (const p of agentDryRunProbes) {
       await handleAgentDryRunProbe(p);
+    }
+
+    // Controlled read-only tool probes (Prompt 17) — fixed local runtime health
+    // read via the built-in HAL tool, fail-closed, no arbitrary HTTP, no mutation.
+    const readonlyToolProbes = messages.filter((m) => m.messageType === "readonly_tool_probe");
+    for (const p of readonlyToolProbes) {
+      await handleReadonlyToolProbe(p);
     }
 
     const wantsCatalogue = messages.some(

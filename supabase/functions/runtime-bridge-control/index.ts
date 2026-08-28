@@ -6,17 +6,25 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // the private runtime transport probe (Phase 3 Prompt 10), the controlled
 // Ollama sandbox inference probe (Phase 3 Prompt 11A), the controlled n8n
 // sandbox workflow probe (Phase 3 Prompt 12), the controlled multi-runtime
-// chain probe (Phase 3 Prompt 13), and the controlled registered-agent dry-run
-// probe (Phase 3 Prompt 14).
+// chain probe (Phase 3 Prompt 13), the controlled registered-agent dry-run
+// probe (Phase 3 Prompt 14), the controlled tool access denial probe
+// (Phase 3 Prompt 15), the controlled tool access grant probe (Phase 3
+// Prompt 16), and the controlled read-only tool probe (Phase 3 Prompt 17).
 //
-// This is TRANSPORT TESTING + FOUR SINGLE FIXED DIAGNOSTIC PINGS only. It queues
+// This is TRANSPORT TESTING + SINGLE FIXED DIAGNOSTIC PINGS + cloud-side
+// authorization checks + ONE allowlisted read-only tool invocation. It queues
 // a safe dry-run transport probe, OR one fixed harmless Ollama generation, OR
 // one fixed harmless n8n diagnostic workflow, OR one fixed n8n → Ollama
-// diagnostic chain, OR one fixed registered-agent → model dry-run, through the
-// existing private runtime bridge, and reads back signed evidence. It NEVER
-// executes an arbitrary n8n workflow, performs arbitrary inference, runs an
-// agent, creates a run, calls a tool, retrieves knowledge, sends notifications,
-// runs schedules, or mutates business data.
+// diagnostic chain, OR one fixed registered-agent → model dry-run, OR one fixed
+// built-in read-only runtime health tool (n8n /healthz + Ollama /api/tags, GET
+// only), through the existing private runtime bridge, and reads back signed
+// evidence. It also verifies (cloud-side only, never contacting HAL) that the
+// fixed diagnostic agent is denied access to a registry-only diagnostic tool
+// (denial probe) and, separately, that an explicit read-only grant for that
+// same diagnostic tool is resolved as AUTHORIZED without any tool execution
+// (grant probe). It NEVER executes an arbitrary n8n workflow, performs arbitrary
+// inference, runs an agent, creates a run, calls a tool, retrieves knowledge,
+// sends notifications, runs schedules, reads business data, or mutates data.
 //
 // The probes are STRICTLY constrained (fail-closed):
 //   * Ollama: only prompt_id = dfp_ollama_ping_v1, model = qwen2.5-coder:7b.
@@ -24,16 +32,29 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //   * chain:  only probe_id = dfp_runtime_chain_v1 (n8n then Ollama, fixed).
 //   * agent:  only probe_id = dfp_agent_dry_run_v1, diagnostic agent
 //             dfp-runtime-diagnostic-agent → qwen2.5-coder:7b (fixed, zero tools).
-//   * probe_mode is always "sandbox_diagnostic".
-//   * Prompt text, model name, workflow reference, agent identity and payload
-//     are generated SERVER-SIDE only. The browser can NEVER supply them — those
-//     inputs are ignored.
+//   * denial: only probe_id = dfp_tool_access_denial_v1, fixed diagnostic agent
+//             + registry-only diagnostic tool, expected DENIED
+//             (tool_permission_missing). Cloud-side only — no HAL/n8n/Ollama.
+//   * grant:  only probe_id = dfp_tool_access_grant_v1, fixed diagnostic agent
+//             + registry-only diagnostic tool, expected AUTHORIZED
+//             (explicit_tool_permission_present), read-only, scope-isolated.
+//             Cloud-side only — no HAL/n8n/Ollama, no tool execution.
+//   * readonly tool: only probe_id = dfp_readonly_tool_v1, dedicated agent
+//             dfp-runtime-readonly-tool-agent → built-in dfp-runtime-health-read-
+//             tool (execute grant), operation read_runtime_health_snapshot.
+//             Fixed local read-only health read only — no business data, no
+//             mutation, no arbitrary HTTP.
+//   * probe_mode is always "sandbox_diagnostic" (or "authorization_diagnostic"
+//     for the denial and grant probes).
+//   * Prompt text, model name, workflow reference, agent identity, tool identity,
+//     operation and payload are generated SERVER-SIDE only. The browser can
+//     NEVER supply them — those inputs are ignored.
 //
 // SECURITY:
 //   * verify_jwt = true -> only authenticated users reach this.
-//   * internal_role() gate: owner/admin may queue a probe; any internal role
+//   * internal_role() gate: owner/admin may queue/run; any internal role
 //     (including viewer) may read status only.
-//   * Only ten allowlisted operations exist. No generic queue-message endpoint.
+//   * Only sixteen allowlisted operations exist. No generic queue-message endpoint.
 //   * Probe payloads are strictly limited to safe metadata — no URLs, commands,
 //     workflow IDs, arbitrary prompts, SQL, or file paths.
 // ============================================================================
@@ -59,6 +80,12 @@ const ALLOWED_OPERATIONS = new Set([
   "get_runtime_chain_probe_status",
   "queue_agent_dry_run_probe",
   "get_agent_dry_run_probe_status",
+  "run_tool_access_denial_probe",
+  "get_tool_access_denial_probe_status",
+  "run_tool_access_grant_probe",
+  "get_tool_access_grant_probe_status",
+  "queue_readonly_tool_probe",
+  "get_readonly_tool_probe_status",
 ]);
 
 const PROBE_MESSAGE_TYPE = "runtime_transport_probe";
@@ -101,6 +128,39 @@ const AGENT_DRY_RUN_PROBE_ID = "dfp_agent_dry_run_v1";
 const AGENT_DRY_RUN_PROBE_MODE = "sandbox_diagnostic";
 const AGENT_DRY_RUN_AGENT_KEY = "dfp-runtime-diagnostic-agent";
 const AGENT_DRY_RUN_MODEL = "qwen2.5-coder:7b";
+
+// --- Controlled tool access denial probe (Prompt 15) --------------------------
+const TOOL_ACCESS_DENIAL_PROBE_ID = "dfp_tool_access_denial_v1";
+const TOOL_ACCESS_DENIAL_PROBE_MODE = "authorization_diagnostic";
+const TOOL_ACCESS_DENIAL_AGENT_KEY = "dfp-runtime-diagnostic-agent";
+const TOOL_ACCESS_DENIAL_TOOL_KEY = "dfp-runtime-diagnostic-tool";
+const TOOL_ACCESS_DENIAL_EXPECTED_DECISION = "denied";
+const TOOL_ACCESS_DENIAL_EXPECTED_REASON = "tool_permission_missing";
+
+// --- Controlled tool access grant probe (Prompt 16) ----------------------------
+const TOOL_ACCESS_GRANT_PROBE_ID = "dfp_tool_access_grant_v1";
+const TOOL_ACCESS_GRANT_PROBE_MODE = "authorization_diagnostic";
+const TOOL_ACCESS_GRANT_AGENT_KEY = "dfp-runtime-diagnostic-agent";
+const TOOL_ACCESS_GRANT_TOOL_KEY = "dfp-runtime-diagnostic-tool";
+const TOOL_ACCESS_GRANT_EXPECTED_DECISION = "authorized";
+const TOOL_ACCESS_GRANT_EXPECTED_REASON = "explicit_tool_permission_present";
+// Narrow / read-only-equivalent access levels (non-executing) vs broad/executing.
+// Prompt 16B — EXACT read only. Any non-read level (restricted/write/execute/
+// read_write) is blocked with reason permission_too_broad.
+const TOOL_ACCESS_GRANT_NARROW_LEVELS = ["read"];
+const TOOL_ACCESS_GRANT_EXECUTING_LEVELS = ["write", "execute", "read_write"];
+
+// --- Controlled read-only tool probe (Prompt 17) -------------------------------
+const READONLY_TOOL_PROBE_MESSAGE_TYPE = "readonly_tool_probe";
+const READONLY_TOOL_PROBE_RESULT_MESSAGE_TYPE = "readonly_tool_probe_result";
+const READONLY_TOOL_PROBE_ID = "dfp_readonly_tool_v1";
+const READONLY_TOOL_PROBE_MODE = "sandbox_diagnostic";
+const READONLY_TOOL_PROBE_AGENT_KEY = "dfp-runtime-readonly-tool-agent";
+const READONLY_TOOL_PROBE_TOOL_KEY = "dfp-runtime-health-read-tool";
+const READONLY_TOOL_PROBE_TOOL_OPERATION = "read_runtime_health_snapshot";
+// Invocation requires the execute access level (read is non-invoking per Prompt
+// 16). This dedicated agent holds exactly one isolated execute grant.
+const READONLY_TOOL_PROBE_PERMISSION = "execute";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -239,6 +299,198 @@ async function resolveDiagnosticModelAssignment(
   if (reference !== AGENT_DRY_RUN_MODEL) return { ok: false, modelReference: null, detail: "model_reference_mismatch" };
 
   return { ok: true, modelReference: AGENT_DRY_RUN_MODEL, detail: null };
+}
+
+// Resolve the fixed registry-only diagnostic tool (fail closed).
+async function resolveDiagnosticTool(
+  admin: ReturnType<typeof createClient>,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await admin
+    .from("ai_tool_connections")
+    .select("id, connection_key, name, status, is_active, credential_reference, endpoint_reference, configuration_state")
+    .eq("connection_key", TOOL_ACCESS_DENIAL_TOOL_KEY)
+    .eq("is_active", true)
+    .limit(1);
+  return data && data.length > 0 ? data[0] : null;
+}
+
+// Resolve any ACTIVE agent→tool access grant between the diagnostic agent and
+// the diagnostic tool. Returns the grant row if present, else null.
+async function resolveDiagnosticToolAccess(
+  admin: ReturnType<typeof createClient>,
+  agentId: string,
+  toolId: string,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await admin
+    .from("ai_tool_agent_access")
+    .select("id")
+    .eq("agent_id", agentId)
+    .eq("connection_id", toolId)
+    .eq("is_active", true)
+    .limit(1);
+  return data && data.length > 0 ? data[0] : null;
+}
+
+// Resolve the master kill switch control (must remain ON with execution blocked).
+async function resolveMasterKillSwitch(
+  admin: ReturnType<typeof createClient>,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await admin
+    .from("ai_runtime_controls")
+    .select("control_key, enabled, execution_allowed")
+    .eq("control_type", "master_kill_switch")
+    .limit(1);
+  return data && data.length > 0 ? data[0] : null;
+}
+
+// Record safe denial-probe audit evidence. Only safe identifiers — no secrets,
+// no endpoints, no credentials, no prompt/business data.
+async function recordDenialProbeEvent(
+  admin: ReturnType<typeof createClient>,
+  e: {
+    eventType: string;
+    outcome: string;
+    severity: string;
+    actor: string;
+    correlationId: string;
+    agentId: string | null;
+    decision: string | null;
+    reason: string | null;
+    permissionState: string | null;
+    probeKey: string;
+  },
+): Promise<void> {
+  await admin.from("ai_audit_events").insert({
+    audit_key: uid("TAPA"),
+    occurred_at: new Date().toISOString(),
+    event_type: e.eventType,
+    action: "runtime_bridge_control",
+    outcome: e.outcome,
+    severity: e.severity,
+    agent_id: e.agentId,
+    actor_type: "human",
+    actor_reference: e.actor,
+    trigger_source: "manual",
+    environment: "production",
+    correlation_id: e.correlationId,
+    decision_reason: e.reason,
+    notes: JSON.stringify({
+      probe_key: e.probeKey,
+      probe_id: TOOL_ACCESS_DENIAL_PROBE_ID,
+      agent_key: TOOL_ACCESS_DENIAL_AGENT_KEY,
+      tool_key: TOOL_ACCESS_DENIAL_TOOL_KEY,
+      decision: e.decision,
+      reason: e.reason,
+      allowed: false,
+      permission_state: e.permissionState,
+    }),
+  });
+}
+
+// Record safe grant-probe audit evidence. Only safe identifiers — no secrets,
+// no endpoints, no credentials, no prompt/business data.
+async function recordGrantProbeEvent(
+  admin: ReturnType<typeof createClient>,
+  e: {
+    eventType: string;
+    outcome: string;
+    severity: string;
+    actor: string;
+    correlationId: string;
+    agentId: string | null;
+    decision: string | null;
+    reason: string | null;
+    permissionState: string | null;
+    permissionType: string | null;
+    scopeIsolated: boolean | null;
+    probeKey: string;
+  },
+): Promise<void> {
+  await admin.from("ai_audit_events").insert({
+    audit_key: uid("TAGP"),
+    occurred_at: new Date().toISOString(),
+    event_type: e.eventType,
+    action: "runtime_bridge_control",
+    outcome: e.outcome,
+    severity: e.severity,
+    agent_id: e.agentId,
+    actor_type: "human",
+    actor_reference: e.actor,
+    trigger_source: "manual",
+    environment: "production",
+    correlation_id: e.correlationId,
+    decision_reason: e.reason,
+    notes: JSON.stringify({
+      probe_key: e.probeKey,
+      probe_id: TOOL_ACCESS_GRANT_PROBE_ID,
+      agent_key: TOOL_ACCESS_GRANT_AGENT_KEY,
+      tool_key: TOOL_ACCESS_GRANT_TOOL_KEY,
+      decision: e.decision,
+      reason: e.reason,
+      allowed: e.decision === "authorized",
+      permission_state: e.permissionState,
+      permission_type: e.permissionType,
+      scope_isolated: e.scopeIsolated,
+      tool_executed: false,
+      execution_enabled: false,
+    }),
+  });
+}
+
+// Resolve the active agent→tool access grants (full rows with access_level).
+async function resolveDiagnosticToolAccessDetail(
+  admin: ReturnType<typeof createClient>,
+  agentId: string,
+  toolId: string,
+): Promise<Record<string, unknown>[]> {
+  const { data } = await admin
+    .from("ai_tool_agent_access")
+    .select("id, connection_id, agent_id, access_level, is_active, approval_required, environment, risk_limit")
+    .eq("agent_id", agentId)
+    .eq("connection_id", toolId)
+    .eq("is_active", true);
+  return data ?? [];
+}
+
+// Resolve ALL active tool grants for an agent (for the negative isolation check).
+async function resolveAgentActiveGrants(
+  admin: ReturnType<typeof createClient>,
+  agentId: string,
+): Promise<Record<string, unknown>[]> {
+  const { data } = await admin
+    .from("ai_tool_agent_access")
+    .select("id, connection_id, access_level")
+    .eq("agent_id", agentId)
+    .eq("is_active", true);
+  return data ?? [];
+}
+
+// Resolve the dedicated read-only tool execution agent (Prompt 17). Fail closed.
+async function resolveReadonlyToolAgent(
+  admin: ReturnType<typeof createClient>,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await admin
+    .from("ai_operations_agents")
+    .select("id, agent_key, name, status, is_active, autonomy_level")
+    .eq("agent_key", READONLY_TOOL_PROBE_AGENT_KEY)
+    .eq("is_active", true)
+    .in("status", ["active", "registered"])
+    .limit(1);
+  return data && data.length > 0 ? data[0] : null;
+}
+
+// Resolve the fixed callable read-only diagnostic tool (Prompt 17). It must have
+// no credential and no endpoint (built-in HAL tool only).
+async function resolveReadonlyTool(
+  admin: ReturnType<typeof createClient>,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await admin
+    .from("ai_tool_connections")
+    .select("id, connection_key, name, status, is_active, credential_reference, endpoint_reference, configuration_state")
+    .eq("connection_key", READONLY_TOOL_PROBE_TOOL_KEY)
+    .eq("is_active", true)
+    .limit(1);
+  return data && data.length > 0 ? data[0] : null;
 }
 
 serve(async (req: Request) => {
@@ -727,9 +979,6 @@ serve(async (req: Request) => {
 
   // ===========================================================================
   // QUEUE_RUNTIME_CHAIN_PROBE — owner/admin only.
-  //   Queues ONE fixed n8n → Ollama diagnostic chain through the bridge. The
-  //   probe_id, mode, workflow reference, model and prompt are FIXED server-side
-  //   — the browser can never supply a workflow, URL, model, prompt or payload.
   // ===========================================================================
   if (operation === "queue_runtime_chain_probe") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to queue a runtime chain probe." }, 403);
@@ -746,8 +995,6 @@ serve(async (req: Request) => {
     const probeKey = uid("RCP");
     const correlationId = uid("COR");
 
-    // FIXED safe payload — no workflow ID, no URL, no model, no prompt. The values
-    // below are the ONLY ones the local HAL will accept.
     const safePayload = {
       probe_key: probeKey,
       correlation_id: correlationId,
@@ -888,22 +1135,6 @@ serve(async (req: Request) => {
 
   // ===========================================================================
   // QUEUE_AGENT_DRY_RUN_PROBE — owner/admin only.
-  //   Queues ONE fixed registered-agent → model dry-run through the bridge. The
-  //   agent identity, model reference, prompt and payload are FIXED server-side
-  //   — the browser can never supply an agent, model, prompt, workflow, URL,
-  //   tool, payload, temperature or token limit.
-  //
-  //   Before queueing, the server verifies (fail closed):
-  //     1. owner/admin
-  //     2. fresh reachable HAL bridge exists
-  //     3. diagnostic agent exists
-  //     4. diagnostic agent is active/registered
-  //     5. diagnostic agent is the exact allowed agent
-  //     6. model assignment exists
-  //     7. assigned model resolves to qwen2.5-coder:7b
-  //     8. assigned model is active/enabled in registry
-  //     9. runtime execution remains disabled (execution_enabled always false)
-  //    10. no tool permissions are required (zero tool access for the agent)
   // ===========================================================================
   if (operation === "queue_agent_dry_run_probe") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to queue an agent dry-run probe." }, 403);
@@ -916,8 +1147,6 @@ serve(async (req: Request) => {
       }, 404);
     }
 
-    // 3–5. Diagnostic agent must exist, be active/registered, and be the exact
-    // allowed agent (resolved server-side by fixed agent_key — never from browser).
     const agent = await resolveDiagnosticAgent(admin);
     if (!agent) {
       await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
@@ -925,7 +1154,6 @@ serve(async (req: Request) => {
       return json({ error: "Diagnostic agent is not registered or not active.", detail: "agent_not_registered" }, 409);
     }
 
-    // 6–8. Model assignment must exist and resolve to the fixed local model.
     const modelRes = await resolveDiagnosticModelAssignment(admin, agent.id as string);
     if (!modelRes.ok) {
       await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
@@ -933,25 +1161,69 @@ serve(async (req: Request) => {
       return json({ error: "Diagnostic agent model assignment is invalid.", detail: modelRes.detail ?? "model_assignment_invalid" }, 409);
     }
 
-    // 10. Zero tool permissions required for the diagnostic agent.
-    const { data: toolRows } = await admin
-      .from("ai_tool_agent_access")
-      .select("id")
-      .eq("agent_id", agent.id as string)
-      .eq("is_active", true)
-      .limit(1);
-    if (toolRows && toolRows.length > 0) {
+    // Prompt 16A — strict tool-grant isolation gate for Prompt 14.
+    // Prompt 14 may proceed only when the diagnostic agent has either:
+    //   A. ZERO active tool grants, OR
+    //   B. EXACTLY ONE active grant matching the exact Prompt 16 diagnostic grant
+    //      (dfp-runtime-diagnostic-agent → dfp-runtime-diagnostic-tool, access_level="read").
+    // Anything else fails closed. No tool is executed; no HAL/n8n/Ollama is contacted.
+
+    // 1) Resolve the fixed diagnostic tool and confirm it remains non-executable.
+    const diagTool = await resolveDiagnosticTool(admin);
+    if (!diagTool) {
       await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
-        `Agent dry-run queue rejected: diagnostic agent has tool permissions. No agent dry-run queued.`);
-      return json({ error: "Diagnostic agent must have zero tool permissions.", detail: "tool_access_present" }, 409);
+        `Agent dry-run queue rejected: diagnostic tool ${TOOL_ACCESS_DENIAL_TOOL_KEY} not registered. No agent dry-run queued.`);
+      return json({ error: "Diagnostic tool is not registered.", detail: "diagnostic_tool_missing" }, 409);
+    }
+    if (str(diagTool.credential_reference) || str(diagTool.endpoint_reference)) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
+        `Agent dry-run queue rejected: diagnostic tool unexpectedly has an executable configuration. No agent dry-run queued.`);
+      return json({ error: "Diagnostic tool unexpectedly has an executable configuration.", detail: "diagnostic_tool_not_safe" }, 409);
+    }
+
+    // 2) Query ALL active tool grants for the diagnostic agent (fail-closed).
+    const { data: agentGrantRows } = await admin
+      .from("ai_tool_agent_access")
+      .select("id, connection_id, access_level")
+      .eq("agent_id", agent.id as string)
+      .eq("is_active", true);
+    const agentGrants = agentGrantRows ?? [];
+
+    // Multiple or duplicate active grants → reject.
+    if (agentGrants.length > 1) {
+      await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
+        `Agent dry-run queue rejected: diagnostic agent holds multiple active tool grants. No agent dry-run queued.`);
+      return json({ error: "Diagnostic agent must hold at most one active tool grant.", detail: "tool_access_scope_invalid" }, 409);
+    }
+
+    // Exactly one active grant → allow ONLY the exact Prompt 16 read grant.
+    if (agentGrants.length === 1) {
+      const grant = agentGrants[0];
+      const isExactDiagGrant =
+        grant.connection_id === diagTool.id && str(grant.access_level) === "read";
+
+      if (!isExactDiagGrant) {
+        // Unrelated tool grant → scope invalid; matching tool but broader level → executing/broad.
+        const detail =
+          grant.connection_id !== diagTool.id
+            ? "tool_access_scope_invalid"
+            : "tool_access_present";
+        await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
+          `Agent dry-run queue rejected: diagnostic agent holds a non-exact tool grant ` +
+          `(connection=${str(grant.connection_id) === str(diagTool.id) ? "diagnostic" : "unrelated"}, access_level=${str(grant.access_level)}). No agent dry-run queued.`);
+        return json({
+          error: detail === "tool_access_scope_invalid"
+            ? "Diagnostic agent has an active grant to an unrelated tool."
+            : "Diagnostic agent has a non-read tool grant (executing or broader than exact read).",
+          detail,
+        }, 409);
+      }
     }
 
     const now = new Date();
     const probeKey = uid("ADP");
     const correlationId = uid("COR");
 
-    // FIXED safe payload — no agent ID, model override, prompt, URL, workflow or
-    // payload. Only safe identifiers; the local HAL binds the fixed prompt text.
     const safePayload = {
       probe_key: probeKey,
       correlation_id: correlationId,
@@ -1089,6 +1361,725 @@ serve(async (req: Request) => {
       message: verified
         ? "Registered agent dry-run verified — the diagnostic agent resolved its approved local model and returned the expected sandbox result. No agent, tool or business workflow was executed."
         : "Registered agent dry-run probe status read (controlled agent → model dry-run only — no agent, tool, model or business workflow executed).",
+    });
+  }
+
+  // ===========================================================================
+  // RUN_TOOL_ACCESS_DENIAL_PROBE — owner/admin only. CLOUD-SIDE ONLY.
+  // ===========================================================================
+  if (operation === "run_tool_access_denial_probe") {
+    if (!isPrivileged) return json({ error: "Owner or admin role required to run a tool access denial probe." }, 403);
+
+    const probeKey = uid("TAP");
+    const correlationId = uid("COR");
+
+    await recordDenialProbeEvent(admin, {
+      eventType: "tool_access_denial_probe_started",
+      outcome: "started",
+      severity: "low",
+      actor,
+      correlationId,
+      agentId: null,
+      decision: null,
+      reason: null,
+      permissionState: null,
+      probeKey,
+    });
+
+    const agent = await resolveDiagnosticAgent(admin);
+    if (!agent) {
+      await recordDenialProbeEvent(admin, {
+        eventType: "tool_access_denial_probe_failed",
+        outcome: "failed",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: null,
+        decision: "failed",
+        reason: "agent_not_registered",
+        permissionState: null,
+        probeKey,
+      });
+      return json({ error: "Diagnostic agent is not registered or not active.", detail: "agent_not_registered" }, 409);
+    }
+
+    const tool = await resolveDiagnosticTool(admin);
+    if (!tool) {
+      await recordDenialProbeEvent(admin, {
+        eventType: "tool_access_denial_probe_failed",
+        outcome: "failed",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: agent.id as string,
+        decision: "failed",
+        reason: "diagnostic_tool_missing",
+        permissionState: null,
+        probeKey,
+      });
+      return json({ error: "Diagnostic tool is not registered.", detail: "diagnostic_tool_missing" }, 409);
+    }
+
+    if (str(tool.credential_reference) || str(tool.endpoint_reference)) {
+      await recordDenialProbeEvent(admin, {
+        eventType: "tool_access_denial_probe_failed",
+        outcome: "failed",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: agent.id as string,
+        decision: "failed",
+        reason: "tool_has_executable_config",
+        permissionState: null,
+        probeKey,
+      });
+      return json({ error: "Diagnostic tool unexpectedly has an executable configuration.", detail: "tool_has_executable_config" }, 409);
+    }
+
+    const access = await resolveDiagnosticToolAccess(admin, agent.id as string, tool.id as string);
+    if (access) {
+      await recordDenialProbeEvent(admin, {
+        eventType: "tool_access_denial_probe_blocked",
+        outcome: "blocked",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: agent.id as string,
+        decision: "blocked",
+        reason: "unexpected_tool_permission_present",
+        permissionState: "present",
+        probeKey,
+      });
+      return json({
+        error: "Unexpected active tool permission present for the diagnostic agent and diagnostic tool.",
+        detail: "unexpected_tool_permission_present",
+        probeKey,
+        correlationId,
+        probeId: TOOL_ACCESS_DENIAL_PROBE_ID,
+        agentKey: TOOL_ACCESS_DENIAL_AGENT_KEY,
+        toolKey: TOOL_ACCESS_DENIAL_TOOL_KEY,
+        allowed: false,
+        decision: "blocked",
+        reason: "unexpected_tool_permission_present",
+        permissionState: "present",
+        status: "blocked",
+        executionEnabled: false,
+      }, 409);
+    }
+
+    const master = await resolveMasterKillSwitch(admin);
+    if (!master || master.enabled !== true || master.execution_allowed !== false) {
+      await recordDenialProbeEvent(admin, {
+        eventType: "tool_access_denial_probe_failed",
+        outcome: "failed",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: agent.id as string,
+        decision: "failed",
+        reason: "kill_switch_state_invalid",
+        permissionState: null,
+        probeKey,
+      });
+      return json({ error: "Master kill switch is not in the required ON / execution-blocked state.", detail: "kill_switch_state_invalid" }, 409);
+    }
+
+    await recordDenialProbeEvent(admin, {
+      eventType: "tool_access_denial_probe_verified",
+      outcome: "success",
+      severity: "low",
+      actor,
+      correlationId,
+      agentId: agent.id as string,
+      decision: "denied",
+      reason: "tool_permission_missing",
+      permissionState: "none",
+      probeKey,
+    });
+
+    return json({
+      accepted: true,
+      operation: "run_tool_access_denial_probe",
+      probeKey,
+      correlationId,
+      probeId: TOOL_ACCESS_DENIAL_PROBE_ID,
+      probeMode: TOOL_ACCESS_DENIAL_PROBE_MODE,
+      agentKey: TOOL_ACCESS_DENIAL_AGENT_KEY,
+      toolKey: TOOL_ACCESS_DENIAL_TOOL_KEY,
+      allowed: false,
+      decision: "denied",
+      reason: "tool_permission_missing",
+      permissionState: "none",
+      status: "verified",
+      executionEnabled: false,
+      message: "Tool access denial verified — no explicit tool permission exists, so tool execution is denied. No tool or runtime action was executed.",
+    });
+  }
+
+  // ===========================================================================
+  // GET_TOOL_ACCESS_DENIAL_PROBE_STATUS — any internal role (viewer read-only).
+  // ===========================================================================
+  if (operation === "get_tool_access_denial_probe_status") {
+    const correlationIdParam = str(body.correlation_id);
+
+    let query = admin
+      .from("ai_audit_events")
+      .select("audit_key, occurred_at, event_type, outcome, agent_id, correlation_id, decision_reason, notes")
+      .in("event_type", [
+        "tool_access_denial_probe_verified",
+        "tool_access_denial_probe_failed",
+        "tool_access_denial_probe_blocked",
+      ]);
+    if (correlationIdParam) query = query.eq("correlation_id", correlationIdParam);
+    query = query.order("occurred_at", { ascending: false }).limit(5);
+
+    const { data: eventRows } = await query;
+    if (!eventRows || eventRows.length === 0) {
+      return json({ operation: "get_tool_access_denial_probe_status", found: false, probes: [], executionEnabled: false });
+    }
+
+    const probes = eventRows.map((e) => {
+      let parsed: Record<string, unknown> = {};
+      try { parsed = e.notes ? JSON.parse(String(e.notes)) : {}; } catch { parsed = {}; }
+      return {
+        probeKey: str(parsed.probe_key),
+        correlationId: str(e.correlation_id),
+        probeId: str(parsed.probe_id) || TOOL_ACCESS_DENIAL_PROBE_ID,
+        agentKey: str(parsed.agent_key) || TOOL_ACCESS_DENIAL_AGENT_KEY,
+        toolKey: str(parsed.tool_key) || TOOL_ACCESS_DENIAL_TOOL_KEY,
+        decision: str(parsed.decision) || str(e.outcome),
+        reason: str(parsed.reason) || str(e.decision_reason),
+        allowed: false,
+        permissionState: str(parsed.permission_state) || null,
+        outcome: str(e.outcome),
+        occurredAt: str(e.occurred_at),
+        agentId: e.agent_id ?? null,
+      };
+    });
+
+    const verified = probes.some((p) => p.outcome === "success" && p.decision === "denied");
+
+    return json({
+      operation: "get_tool_access_denial_probe_status",
+      found: true,
+      verified,
+      probes,
+      executionEnabled: false,
+      message: verified
+        ? "Tool access denial verified — the diagnostic agent was denied access to the diagnostic tool because no explicit tool permission exists. No tool or runtime action was executed."
+        : "Tool access denial probe status read (no tool or runtime action was executed).",
+    });
+  }
+
+  // ===========================================================================
+  // RUN_TOOL_ACCESS_GRANT_PROBE — owner/admin only. CLOUD-SIDE ONLY.
+  // ===========================================================================
+  if (operation === "run_tool_access_grant_probe") {
+    if (!isPrivileged) return json({ error: "Owner or admin role required to run a tool access grant probe." }, 403);
+
+    const probeKey = uid("TGP");
+    const correlationId = uid("COR");
+
+    await recordGrantProbeEvent(admin, {
+      eventType: "tool_access_grant_probe_started",
+      outcome: "started",
+      severity: "low",
+      actor,
+      correlationId,
+      agentId: null,
+      decision: null,
+      reason: null,
+      permissionState: null,
+      permissionType: null,
+      scopeIsolated: null,
+      probeKey,
+    });
+
+    const agent = await resolveDiagnosticAgent(admin);
+    if (!agent) {
+      await recordGrantProbeEvent(admin, {
+        eventType: "tool_access_grant_probe_failed",
+        outcome: "failed",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: null,
+        decision: "failed",
+        reason: "agent_not_registered",
+        permissionState: null,
+        permissionType: null,
+        scopeIsolated: null,
+        probeKey,
+      });
+      return json({ error: "Diagnostic agent is not registered or not active.", detail: "agent_not_registered" }, 409);
+    }
+
+    const tool = await resolveDiagnosticTool(admin);
+    if (!tool) {
+      await recordGrantProbeEvent(admin, {
+        eventType: "tool_access_grant_probe_failed",
+        outcome: "failed",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: agent.id as string,
+        decision: "failed",
+        reason: "diagnostic_tool_missing",
+        permissionState: null,
+        permissionType: null,
+        scopeIsolated: null,
+        probeKey,
+      });
+      return json({ error: "Diagnostic tool is not registered.", detail: "diagnostic_tool_missing" }, 409);
+    }
+
+    if (str(tool.credential_reference) || str(tool.endpoint_reference)) {
+      await recordGrantProbeEvent(admin, {
+        eventType: "tool_access_grant_probe_failed",
+        outcome: "failed",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: agent.id as string,
+        decision: "failed",
+        reason: "tool_has_executable_config",
+        permissionState: null,
+        permissionType: null,
+        scopeIsolated: null,
+        probeKey,
+      });
+      return json({ error: "Diagnostic tool unexpectedly has an executable configuration.", detail: "tool_has_executable_config" }, 409);
+    }
+
+    const grants = await resolveDiagnosticToolAccessDetail(admin, agent.id as string, tool.id as string);
+    if (grants.length !== 1) {
+      await recordGrantProbeEvent(admin, {
+        eventType: "tool_access_grant_probe_failed",
+        outcome: "failed",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: agent.id as string,
+        decision: "failed",
+        reason: grants.length === 0 ? "explicit_grant_missing" : "multiple_grants_present",
+        permissionState: grants.length === 0 ? "none" : "multiple",
+        permissionType: null,
+        scopeIsolated: null,
+        probeKey,
+      });
+      return json({
+        error: "Exactly one active explicit permission is required for the diagnostic agent and diagnostic tool.",
+        detail: grants.length === 0 ? "explicit_grant_missing" : "multiple_grants_present",
+      }, 409);
+    }
+
+    const grant = grants[0];
+    const accessLevel = str(grant.access_level);
+
+    if (accessLevel !== "read") {
+      await recordGrantProbeEvent(admin, {
+        eventType: "tool_access_grant_probe_blocked",
+        outcome: "blocked",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: agent.id as string,
+        decision: "blocked",
+        reason: "permission_too_broad",
+        permissionState: "explicit_grant",
+        permissionType: accessLevel,
+        scopeIsolated: null,
+        probeKey,
+      });
+      return json({
+        error: "The diagnostic tool permission is not exact read-only (read).",
+        detail: "permission_too_broad",
+        probeKey,
+        correlationId,
+        probeId: TOOL_ACCESS_GRANT_PROBE_ID,
+        agentKey: TOOL_ACCESS_GRANT_AGENT_KEY,
+        toolKey: TOOL_ACCESS_GRANT_TOOL_KEY,
+        permissionType: accessLevel,
+        permissionState: "explicit_grant",
+        decision: "blocked",
+        reason: "permission_too_broad",
+        scopeIsolated: false,
+        toolExecuted: false,
+        status: "blocked",
+        executionEnabled: false,
+      }, 409);
+    }
+
+    // Negative isolation check — the agent must hold no OTHER active grant, and
+    // no broad/wildcard grant. Registry inspection only (no tool calls).
+    const allGrants = await resolveAgentActiveGrants(admin, agent.id as string);
+    const unrelatedGrants = allGrants.filter((g) => g.connection_id !== tool.id);
+    if (unrelatedGrants.length > 0) {
+      await recordGrantProbeEvent(admin, {
+        eventType: "tool_access_grant_probe_blocked",
+        outcome: "blocked",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: agent.id as string,
+        decision: "blocked",
+        reason: "permission_scope_too_broad",
+        permissionState: "explicit_grant",
+        permissionType: accessLevel,
+        scopeIsolated: false,
+        probeKey,
+      });
+      return json({
+        error: "The diagnostic agent has unrelated active tool grants — permission scope is not isolated to the diagnostic tool.",
+        detail: "permission_scope_too_broad",
+        probeKey,
+        correlationId,
+        probeId: TOOL_ACCESS_GRANT_PROBE_ID,
+        agentKey: TOOL_ACCESS_GRANT_AGENT_KEY,
+        toolKey: TOOL_ACCESS_GRANT_TOOL_KEY,
+        permissionType: accessLevel,
+        permissionState: "explicit_grant",
+        decision: "blocked",
+        reason: "permission_scope_too_broad",
+        scopeIsolated: false,
+        toolExecuted: false,
+        status: "blocked",
+        executionEnabled: false,
+      }, 409);
+    }
+
+    const master = await resolveMasterKillSwitch(admin);
+    if (!master || master.enabled !== true || master.execution_allowed !== false) {
+      await recordGrantProbeEvent(admin, {
+        eventType: "tool_access_grant_probe_failed",
+        outcome: "failed",
+        severity: "high",
+        actor,
+        correlationId,
+        agentId: agent.id as string,
+        decision: "failed",
+        reason: "kill_switch_state_invalid",
+        permissionState: "explicit_grant",
+        permissionType: accessLevel,
+        scopeIsolated: true,
+        probeKey,
+      });
+      return json({ error: "Master kill switch is not in the required ON / execution-blocked state.", detail: "kill_switch_state_invalid" }, 409);
+    }
+
+    await recordGrantProbeEvent(admin, {
+      eventType: "tool_access_grant_probe_verified",
+      outcome: "success",
+      severity: "low",
+      actor,
+      correlationId,
+      agentId: agent.id as string,
+      decision: "authorized",
+      reason: "explicit_tool_permission_present",
+      permissionState: "explicit_grant",
+      permissionType: accessLevel,
+      scopeIsolated: true,
+      probeKey,
+    });
+
+    return json({
+      accepted: true,
+      operation: "run_tool_access_grant_probe",
+      probeKey,
+      correlationId,
+      probeId: TOOL_ACCESS_GRANT_PROBE_ID,
+      probeMode: TOOL_ACCESS_GRANT_PROBE_MODE,
+      agentKey: TOOL_ACCESS_GRANT_AGENT_KEY,
+      toolKey: TOOL_ACCESS_GRANT_TOOL_KEY,
+      permissionType: accessLevel,
+      permissionState: "explicit_grant",
+      decision: "authorized",
+      reason: "explicit_tool_permission_present",
+      scopeIsolated: true,
+      toolExecuted: false,
+      status: "verified",
+      executionEnabled: false,
+      message: "Explicit tool permission verified — one isolated read-only grant exists for the diagnostic agent and diagnostic tool only. No tool or runtime action was executed.",
+    });
+  }
+
+  // ===========================================================================
+  // GET_TOOL_ACCESS_GRANT_PROBE_STATUS — any internal role (viewer read-only).
+  // ===========================================================================
+  if (operation === "get_tool_access_grant_probe_status") {
+    const correlationIdParam = str(body.correlation_id);
+
+    let query = admin
+      .from("ai_audit_events")
+      .select("audit_key, occurred_at, event_type, outcome, agent_id, correlation_id, decision_reason, notes")
+      .in("event_type", [
+        "tool_access_grant_probe_verified",
+        "tool_access_grant_probe_failed",
+        "tool_access_grant_probe_blocked",
+      ]);
+    if (correlationIdParam) query = query.eq("correlation_id", correlationIdParam);
+    query = query.order("occurred_at", { ascending: false }).limit(5);
+
+    const { data: eventRows } = await query;
+    if (!eventRows || eventRows.length === 0) {
+      return json({ operation: "get_tool_access_grant_probe_status", found: false, probes: [], executionEnabled: false });
+    }
+
+    const probes = eventRows.map((e) => {
+      let parsed: Record<string, unknown> = {};
+      try { parsed = e.notes ? JSON.parse(String(e.notes)) : {}; } catch { parsed = {}; }
+      return {
+        probeKey: str(parsed.probe_key),
+        correlationId: str(e.correlation_id),
+        probeId: str(parsed.probe_id) || TOOL_ACCESS_GRANT_PROBE_ID,
+        agentKey: str(parsed.agent_key) || TOOL_ACCESS_GRANT_AGENT_KEY,
+        toolKey: str(parsed.tool_key) || TOOL_ACCESS_GRANT_TOOL_KEY,
+        decision: str(parsed.decision) || str(e.outcome),
+        reason: str(parsed.reason) || str(e.decision_reason),
+        permissionState: str(parsed.permission_state) || null,
+        permissionType: str(parsed.permission_type) || null,
+        scopeIsolated: parsed.scope_isolated === true,
+        toolExecuted: parsed.tool_executed === true,
+        outcome: str(e.outcome),
+        occurredAt: str(e.occurred_at),
+        agentId: e.agent_id ?? null,
+      };
+    });
+
+    const verified = probes.some((p) => p.outcome === "success" && p.decision === "authorized" && p.scopeIsolated === true);
+
+    return json({
+      operation: "get_tool_access_grant_probe_status",
+      found: true,
+      verified,
+      probes,
+      executionEnabled: false,
+      message: verified
+        ? "Explicit tool permission verified — one isolated read-only grant exists for the diagnostic agent and diagnostic tool only. No tool or runtime action was executed."
+        : "Tool access grant probe status read (no tool or runtime action was executed).",
+    });
+  }
+
+  // ===========================================================================
+  // QUEUE_READONLY_TOOL_PROBE — owner/admin only.
+  //   Queues the FIRST callable read-only diagnostic tool. Strict isolation
+  //   validation before queueing: dedicated agent (active, autonomy none), fixed
+  //   callable tool (no credential/endpoint), exactly one active grant pointing to
+  //   this tool only with the exact invocation permission (execute), fresh HAL
+  //   heartbeat, and master kill switch ON / execution blocked. No tool is invoked
+  //   here — the outbound message instructs HAL to run the fixed read-only tool.
+  // ===========================================================================
+  if (operation === "queue_readonly_tool_probe") {
+    if (!isPrivileged) return json({ error: "Owner or admin role required to queue a read-only tool probe." }, 403);
+
+    const node = await resolveNode(admin, str(body.node_key));
+    if (!node) {
+      return json({
+        error: "No reachable, freshly-heartbeating bridge node found.",
+        detail: "queue_blocked",
+      }, 404);
+    }
+
+    // 1) Dedicated agent must exist, be active, and have autonomy none.
+    const agent = await resolveReadonlyToolAgent(admin);
+    if (!agent) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high", actor,
+        `Read-only tool probe queue rejected: dedicated agent ${READONLY_TOOL_PROBE_AGENT_KEY} not registered/active.`);
+      return json({ error: "Dedicated read-only tool agent is not registered or not active.", detail: "agent_not_registered" }, 409);
+    }
+    if (str(agent.autonomy_level) !== "none") {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high", actor,
+        `Read-only tool probe queue rejected: dedicated agent ${READONLY_TOOL_PROBE_AGENT_KEY} autonomy is not none.`);
+      return json({ error: "Dedicated read-only tool agent autonomy is not none.", detail: "agent_autonomy_invalid" }, 409);
+    }
+
+    // 2) Fixed callable tool must exist with no credential and no endpoint.
+    const tool = await resolveReadonlyTool(admin);
+    if (!tool) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high", actor,
+        `Read-only tool probe queue rejected: callable tool ${READONLY_TOOL_PROBE_TOOL_KEY} not registered.`);
+      return json({ error: "Callable read-only tool is not registered.", detail: "tool_missing" }, 409);
+    }
+    if (str(tool.credential_reference) || str(tool.endpoint_reference)) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high", actor,
+        `Read-only tool probe queue rejected: callable tool ${READONLY_TOOL_PROBE_TOOL_KEY} unexpectedly has a credential/endpoint.`);
+      return json({ error: "Callable tool unexpectedly has an executable credential/endpoint configuration.", detail: "tool_not_safe" }, 409);
+    }
+
+    // 3) Exactly one active grant for this agent, pointing to this tool only, with
+    //    the exact invocation permission (execute). No unrelated grants allowed.
+    const { data: agentGrantRows } = await admin
+      .from("ai_tool_agent_access")
+      .select("id, connection_id, access_level")
+      .eq("agent_id", agent.id as string)
+      .eq("is_active", true);
+    const agentGrants = agentGrantRows ?? [];
+
+    if (agentGrants.length !== 1) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high", actor,
+        `Read-only tool probe queue rejected: dedicated agent holds ${agentGrants.length} active tool grant(s) (expected exactly one).`);
+      return json({ error: "Dedicated agent must hold exactly one active tool grant.", detail: "tool_access_scope_invalid" }, 409);
+    }
+
+    const grant = agentGrants[0];
+    if (grant.connection_id !== tool.id || str(grant.access_level) !== READONLY_TOOL_PROBE_PERMISSION) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high", actor,
+        `Read-only tool probe queue rejected: dedicated agent grant is not the exact isolated execute grant for the callable tool ` +
+        `(connection=${str(grant.connection_id) === str(tool.id) ? "callable" : "unrelated"}, access_level=${str(grant.access_level)}).`);
+      return json({ error: "Dedicated agent grant is not the exact isolated execute permission for the callable tool.", detail: "tool_access_scope_invalid" }, 409);
+    }
+
+    // 4) Master kill switch must remain ON with execution blocked.
+    const master = await resolveMasterKillSwitch(admin);
+    if (!master || master.enabled !== true || master.execution_allowed !== false) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high", actor,
+        `Read-only tool probe queue rejected: master kill switch not in required ON / execution-blocked state.`);
+      return json({ error: "Master kill switch is not in the required ON / execution-blocked state.", detail: "kill_switch_state_invalid" }, 409);
+    }
+
+    const now = new Date();
+    const probeKey = uid("RTP");
+    const correlationId = uid("COR");
+
+    const safePayload = {
+      probe_key: probeKey,
+      correlation_id: correlationId,
+      requested_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + PROBE_TTL_MS).toISOString(),
+      expected_node_key: node.node_key,
+      probe_id: READONLY_TOOL_PROBE_ID,
+      probe_mode: READONLY_TOOL_PROBE_MODE,
+      agent_key: READONLY_TOOL_PROBE_AGENT_KEY,
+      tool_key: READONLY_TOOL_PROBE_TOOL_KEY,
+      tool_operation: READONLY_TOOL_PROBE_TOOL_OPERATION,
+    };
+
+    const payloadHash = await sha256Hex(JSON.stringify(safePayload));
+
+    await admin.from("ai_runtime_bridge_messages").insert({
+      message_key: uid("BRM"),
+      message_id: probeKey,
+      nonce_hash: null,
+      node_id: node.id,
+      direction: "outbound",
+      message_type: READONLY_TOOL_PROBE_MESSAGE_TYPE,
+      correlation_id: correlationId,
+      status: "pending",
+      payload_type: "readonly_tool_probe",
+      safe_payload: safePayload,
+      payload_hash: payloadHash,
+      created_at: now.toISOString(),
+    });
+
+    await auditEvent(admin, "readonly_tool_probe_queued", "success", "low", actor,
+      `Read-only tool probe ${probeKey} queued for node ${node.node_key} ` +
+      `(probe_id=${READONLY_TOOL_PROBE_ID}, agent=${READONLY_TOOL_PROBE_AGENT_KEY}, tool=${READONLY_TOOL_PROBE_TOOL_KEY}, operation=${READONLY_TOOL_PROBE_TOOL_OPERATION}). ` +
+      `Fixed read-only local health snapshot only — no business data, no mutation.`,
+      correlationId);
+
+    return json({
+      accepted: true,
+      operation: "queue_readonly_tool_probe",
+      probeKey,
+      correlationId,
+      nodeKey: node.node_key,
+      nodeName: node.name ?? null,
+      requestedAt: now.toISOString(),
+      expiresAt: safePayload.expires_at,
+      probeId: READONLY_TOOL_PROBE_ID,
+      probeMode: READONLY_TOOL_PROBE_MODE,
+      agentKey: READONLY_TOOL_PROBE_AGENT_KEY,
+      toolKey: READONLY_TOOL_PROBE_TOOL_KEY,
+      toolOperation: READONLY_TOOL_PROBE_TOOL_OPERATION,
+      permission: READONLY_TOOL_PROBE_PERMISSION,
+      status: "pending",
+      executionEnabled: false,
+      message: "Read-only tool probe queued (fixed local runtime health read only — no business data, no mutation, no arbitrary HTTP).",
+    });
+  }
+
+  // ===========================================================================
+  // GET_READONLY_TOOL_PROBE_STATUS — any internal role (viewer read-only).
+  // ===========================================================================
+  if (operation === "get_readonly_tool_probe_status") {
+    const correlationIdParam = str(body.correlation_id);
+
+    let query = admin
+      .from("ai_runtime_bridge_messages")
+      .select("*")
+      .eq("direction", "outbound")
+      .eq("message_type", READONLY_TOOL_PROBE_MESSAGE_TYPE);
+    if (correlationIdParam) query = query.eq("correlation_id", correlationIdParam);
+    query = query.order("created_at", { ascending: false }).limit(5);
+
+    const { data: probeRows } = await query;
+    if (!probeRows || probeRows.length === 0) {
+      return json({ operation: "get_readonly_tool_probe_status", found: false, probes: [], executionEnabled: false });
+    }
+
+    const probes: Record<string, unknown>[] = [];
+    for (const p of probeRows) {
+      probes.push(await expireProbeIfNeeded(admin, p, actor));
+    }
+
+    const results = await Promise.all(probes.map(async (p) => {
+      const corr = str(p.correlation_id);
+      const resRows = corr
+        ? await admin.from("ai_runtime_bridge_messages")
+          .select("message_key, status, safe_payload, acknowledged_at, created_at")
+          .eq("direction", "inbound")
+          .eq("message_type", READONLY_TOOL_PROBE_RESULT_MESSAGE_TYPE)
+          .eq("correlation_id", corr)
+          .order("created_at", { ascending: false })
+          .limit(1)
+        : { data: [] };
+
+      const res = resRows.data && resRows.data.length > 0 ? resRows.data[0] : null;
+      const payload = (p.safe_payload as Record<string, unknown>) ?? {};
+      const resPayload = res ? ((res.safe_payload as Record<string, unknown>) ?? {}) : {};
+      const queuedAt = str(p.created_at);
+      const resultAt = res ? (str(res.acknowledged_at) || str(res.created_at)) : null;
+
+      return {
+        probeKey: str(payload.probe_key),
+        messageKey: str(p.message_key),
+        correlationId: corr,
+        nodeId: p.node_id ?? null,
+        status: str(p.status),
+        queuedAt,
+        resultAt,
+        expiresAt: str(payload.expires_at),
+        expectedNodeKey: str(payload.expected_node_key),
+        probeId: str(payload.probe_id),
+        probeMode: str(payload.probe_mode),
+        agentKey: str(payload.agent_key),
+        toolKey: str(payload.tool_key),
+        toolOperation: str(payload.tool_operation),
+        hasResult: res ? true : false,
+        resultStatus: res ? (str(resPayload.status) || str(res.status)) : null,
+        verified: res ? (resPayload.verified === true) : false,
+        n8nStatus: res ? (str(resPayload.n8n_status) || null) : null,
+        ollamaStatus: res ? (str(resPayload.ollama_status) || null) : null,
+        ollamaModelCount: res ? (resPayload.ollama_model_count ?? null) : null,
+        latencyMs: res ? (resPayload.latency_ms ?? null) : null,
+        errorCategory: res ? (str(resPayload.error_category) || null) : null,
+        signedResult: res ? true : false,
+        toolMutation: "NONE",
+        businessData: "NONE",
+      };
+    }));
+
+    const verified = results.some((r) => r.verified === true);
+
+    return json({
+      operation: "get_readonly_tool_probe_status",
+      found: true,
+      verified,
+      probes: results,
+      executionEnabled: false,
+      message: verified
+        ? "Read-only tool verified — the dedicated agent executed the fixed local runtime health read through HAL. No business data, no mutation."
+        : "Read-only tool probe status read (no business data, no mutation).",
     });
   }
 

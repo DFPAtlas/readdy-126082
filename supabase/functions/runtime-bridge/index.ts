@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ============================================================================
 // runtime-bridge — secure OUTBOUND-FIRST private-runtime bridge API for DFP AI
-// Operations (Phase 3 Prompt 08 + 09C + 10 + 11A + 12 + 13 + 14).
+// Operations (Phase 3 Prompt 08 + 09C + 10 + 11A + 12 + 13 + 14 + 17).
 //
 // The trusted server-side endpoint that a local trusted runtime machine (the
 // `dfp-runtime-bridge` local service) calls OUTBOUND over HTTPS. The cloud never
@@ -12,7 +12,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // CATALOGUE RELAY + DRY-RUN TRANSPORT PROBE (Prompt 10) + CONTROLLED OLLAMA
 // SANDBOX INFERENCE PROBE (Prompt 11A) + CONTROLLED N8N SANDBOX WORKFLOW PROBE
 // (Prompt 12) + CONTROLLED MULTI-RUNTIME CHAIN PROBE (Prompt 13) + CONTROLLED
-// REGISTERED-AGENT DRY-RUN PROBE (Prompt 14).
+// REGISTERED-AGENT DRY-RUN PROBE (Prompt 14) + CONTROLLED READ-ONLY TOOL PROBE
+// (Prompt 17).
 //
 // It NEVER:
 //   * executes an agent or a business n8n workflow (the ONLY n8n execution is
@@ -25,6 +26,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //   * runs schedules or performs remediation
 //   * proxies arbitrary URLs/IPs/ports/files/shell commands
 //   * mutates the ai_operations_models registry automatically
+//   * reads business/customer data or mutates anything (the ONLY callable tool
+//     is the fixed read-only runtime health snapshot, Prompt 17)
 //
 // Machine authentication (fail-closed, no internal-staff JWT):
 //   * Signed headers: X-DFP-Identity, X-DFP-Timestamp, X-DFP-Nonce,
@@ -40,7 +43,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // report_capabilities, report_ollama_catalogue, fetch_control_messages,
 // report_transport_probe_ack, report_ollama_inference_probe,
 // report_n8n_sandbox_probe, report_runtime_chain_probe,
-// report_agent_dry_run_probe.
+// report_agent_dry_run_probe, report_readonly_tool_probe.
 // ============================================================================
 
 const CORS = {
@@ -102,6 +105,17 @@ const AGENT_DRY_RUN_MODEL = "qwen2.5-coder:7b";
 const AGENT_DRY_RUN_EXPECTED_OUTPUT = "DFP_AGENT_DRY_RUN_OK";
 const MAX_AGENT_OUTPUT_CHARS = 100;
 
+// --- Controlled read-only tool probe (Prompt 17) ------------------------------
+const READONLY_TOOL_PROBE_MESSAGE_TYPE = "readonly_tool_probe";
+const READONLY_TOOL_PROBE_RESULT_MESSAGE_TYPE = "readonly_tool_probe_result";
+const READONLY_TOOL_PROBE_ID = "dfp_readonly_tool_v1";
+const READONLY_TOOL_PROBE_MODE = "sandbox_diagnostic";
+const READONLY_TOOL_PROBE_AGENT_KEY = "dfp-runtime-readonly-tool-agent";
+const READONLY_TOOL_PROBE_TOOL_KEY = "dfp-runtime-health-read-tool";
+const READONLY_TOOL_PROBE_TOOL_OPERATION = "read_runtime_health_snapshot";
+const READONLY_TOOL_PROBE_PERMISSION = "execute";
+const READONLY_TOOL_ALLOWED_SERVICE_STATES = new Set(["healthy", "degraded", "unavailable"]);
+
 const ALLOWED_OPERATIONS = new Set([
   "handshake",
   "heartbeat",
@@ -114,6 +128,7 @@ const ALLOWED_OPERATIONS = new Set([
   "report_n8n_sandbox_probe",
   "report_runtime_chain_probe",
   "report_agent_dry_run_probe",
+  "report_readonly_tool_probe",
 ]);
 
 // Allowlisted capabilities only — never shell/arbitrary_http/filesystem/docker.
@@ -143,6 +158,7 @@ const ALLOWED_CONTROL_MESSAGE_TYPES = new Set([
   "n8n_sandbox_probe",
   "runtime_chain_probe",
   "agent_dry_run_probe",
+  "readonly_tool_probe",
 ]);
 
 // Control messages that have their own distinct signed-result lifecycle (they
@@ -153,11 +169,12 @@ const PROBE_CONTROL_TYPES = new Set([
   "n8n_sandbox_probe",
   "runtime_chain_probe",
   "agent_dry_run_probe",
+  "readonly_tool_probe",
 ]);
 
 const ALLOWED_PROBE_ACK_STATUSES = new Set(["verified", "rejected"]);
 
-// Terminal result statuses the HAL may report for an Ollama/n8n/chain/agent probe.
+// Terminal result statuses the HAL may report for an Ollama/n8n/chain/agent/readonly probe.
 const ALLOWED_RESULT_STATUSES = new Set(["completed", "failed", "rejected"]);
 
 // Safe Ollama catalogue fields — never prompts / content / credentials / raw config.
@@ -354,6 +371,48 @@ async function validateDiagnosticAgentAndModel(
     ? model.model_reference
     : model.name)?.trim();
   if (reference !== AGENT_DRY_RUN_MODEL) return { ok: false, detail: "model_reference_mismatch" };
+
+  return { ok: true, detail: null };
+}
+
+// Cloud-side revalidation of the dedicated read-only tool agent + tool + exact
+// isolated execute permission (Prompt 17). The bridge never trusts HAL-supplied
+// values alone — it re-queries the registries before marking the result verified.
+async function validateReadonlyToolGrant(
+  admin: ReturnType<typeof createClient>,
+): Promise<{ ok: boolean; detail: string | null }> {
+  const { data: agentRows } = await admin
+    .from("ai_operations_agents")
+    .select("id, agent_key, status, is_active, autonomy_level")
+    .eq("agent_key", READONLY_TOOL_PROBE_AGENT_KEY)
+    .eq("is_active", true)
+    .in("status", ["active", "registered"])
+    .limit(1);
+  const agent = agentRows && agentRows.length > 0 ? agentRows[0] : null;
+  if (!agent) return { ok: false, detail: "readonly_tool_agent_invalid" };
+  if (str(agent.autonomy_level) !== "none") return { ok: false, detail: "agent_autonomy_invalid" };
+
+  const { data: toolRows } = await admin
+    .from("ai_tool_connections")
+    .select("id, connection_key, status, is_active, credential_reference, endpoint_reference")
+    .eq("connection_key", READONLY_TOOL_PROBE_TOOL_KEY)
+    .eq("is_active", true)
+    .limit(1);
+  const tool = toolRows && toolRows.length > 0 ? toolRows[0] : null;
+  if (!tool) return { ok: false, detail: "readonly_tool_missing" };
+  if (str(tool.credential_reference) || str(tool.endpoint_reference)) return { ok: false, detail: "tool_not_safe" };
+
+  const { data: grantRows } = await admin
+    .from("ai_tool_agent_access")
+    .select("id, connection_id, access_level")
+    .eq("agent_id", agent.id)
+    .eq("is_active", true);
+  const grants = grantRows ?? [];
+  if (grants.length !== 1) return { ok: false, detail: "tool_access_scope_invalid" };
+  const grant = grants[0];
+  if (grant.connection_id !== tool.id || str(grant.access_level) !== READONLY_TOOL_PROBE_PERMISSION) {
+    return { ok: false, detail: "tool_access_scope_invalid" };
+  }
 
   return { ok: true, detail: null };
 }
@@ -1299,12 +1358,7 @@ serve(async (req: Request) => {
 
   // ===========================================================================
   // REPORT_RUNTIME_CHAIN_PROBE — signed combined result for the fixed multi-
-  //   runtime diagnostic chain (Prompt 13). The local HAL reports the outcome of
-  //   the n8n → Ollama chain. The cloud validates: correct node, original outbound
-  //   probe exists, correlation matches, probe_id/mode are the fixed values, not
-  //   expired, not already recorded. "verified" is true ONLY when BOTH n8n_verified
-  //   and ollama_verified are true. No raw Ollama response, prompt, credential or
-  //   arbitrary n8n payload is ever stored.
+  //   runtime diagnostic chain (Prompt 13).
   // ===========================================================================
   if (operation === "report_runtime_chain_probe") {
     const probeKey = str(body.probe_key);
@@ -1463,15 +1517,7 @@ serve(async (req: Request) => {
 
   // ===========================================================================
   // REPORT_AGENT_DRY_RUN_PROBE — signed result for the fixed registered-agent
-  //   dry-run (Prompt 14). The local HAL reports the outcome of the single fixed
-  //   agent→model diagnostic inference. The cloud validates: correct node, original
-  //   outbound probe exists, correlation matches, probe_id/mode are the fixed
-  //   values, diagnostic agent key + resolved model reference match, not expired,
-  //   not already recorded. The cloud INDEPENDENTLY re-checks the registered
-  //   diagnostic agent + model assignment before marking the result verified.
-  //   "verified" is true ONLY when the safe output exactly equals the sentinel AND
-  //   the cloud-side registry revalidation passes AND status is completed. No raw
-  //   Ollama response, prompt, credential or hidden reasoning is ever stored.
+  //   dry-run (Prompt 14).
   // ===========================================================================
   if (operation === "report_agent_dry_run_probe") {
     const probeKey = str(body.probe_key);
@@ -1638,6 +1684,192 @@ serve(async (req: Request) => {
       message: verified
         ? "Registered agent dry-run verified — the diagnostic agent resolved its approved local model and returned the expected sandbox result. No agent, tool or business workflow was executed."
         : "Registered agent dry-run recorded — controlled agent → model dry-run only, no agent/tool/model/business workflow executed.",
+    });
+  }
+
+  // ===========================================================================
+  // REPORT_READONLY_TOOL_PROBE — signed result for the first callable read-only
+  //   tool (Prompt 17). The local HAL reports the sanitised local runtime health
+  //   snapshot (n8n /healthz + Ollama /api/tags, GET only). The cloud validates:
+  //   correct node, original outbound probe exists, correlation matches, probe_id/
+  //   mode/agent_key/tool_key/tool_operation are the fixed values, not expired,
+  //   not already recorded. The cloud INDEPENDENTLY re-checks the dedicated agent,
+  //   tool, and exact isolated execute permission before marking verified. It
+  //   stores ONLY the sanitised snapshot — never raw responses, model names, URLs,
+  //   credentials or business data.
+  // ===========================================================================
+  if (operation === "report_readonly_tool_probe") {
+    const probeKey = str(body.probe_key);
+    const originalMessageKey = str(body.original_message_key);
+    const resultCorrelationId = str(body.correlation_id);
+    const probeId = str(body.probe_id);
+    const probeMode = str(body.probe_mode);
+    const agentKey = str(body.agent_key);
+    const toolKey = str(body.tool_key);
+    const toolOperation = str(body.tool_operation);
+    const resultStatus = ALLOWED_RESULT_STATUSES.has(str(body.status)) ? str(body.status) : "failed";
+    const n8nStatus = READONLY_TOOL_ALLOWED_SERVICE_STATES.has(str(body.n8n_status)) ? str(body.n8n_status) : "unavailable";
+    const ollamaStatus = READONLY_TOOL_ALLOWED_SERVICE_STATES.has(str(body.ollama_status)) ? str(body.ollama_status) : "unavailable";
+    const ollamaModelCount = typeof body.ollama_model_count === "number" && body.ollama_model_count >= 0 ? body.ollama_model_count : null;
+    const latencyMs = typeof body.latency_ms === "number" && body.latency_ms >= 0 ? body.latency_ms : null;
+    const errorCategory = str(body.error_category).slice(0, MAX_META_CHARS) || null;
+    const startedAt = str(body.started_at) || receivedAt;
+    const completedAt = str(body.completed_at) || receivedAt;
+
+    if (!originalMessageKey) {
+      return json({ error: "original_message_key is required for a read-only tool probe result." }, 400);
+    }
+
+    const { data: origRows } = await admin
+      .from("ai_runtime_bridge_messages")
+      .select("message_key, node_id, correlation_id, status, safe_payload, created_at")
+      .eq("message_key", originalMessageKey)
+      .eq("direction", "outbound")
+      .eq("message_type", READONLY_TOOL_PROBE_MESSAGE_TYPE)
+      .limit(1);
+    const orig = origRows && origRows.length > 0 ? origRows[0] : null;
+
+    if (!orig) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "medium",
+        `Read-only tool probe result rejected: no matching outbound probe for key ${originalMessageKey}. No tool executed.`);
+      return json({ error: "Original read-only tool probe not found." }, 404);
+    }
+
+    if ((orig.node_id as string | null) !== nodeId) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high",
+        `Read-only tool probe result rejected: node mismatch for probe ${probeKey || originalMessageKey}. No tool executed.`);
+      return json({ error: "Probe result node does not match the originating node." }, 403);
+    }
+    if (resultCorrelationId && (orig.correlation_id as string | null) !== resultCorrelationId) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high",
+        `Read-only tool probe result rejected: correlation mismatch for probe ${probeKey || originalMessageKey}. No tool executed.`);
+      return json({ error: "Probe result correlation ID does not match." }, 409);
+    }
+
+    if (probeId && probeId !== READONLY_TOOL_PROBE_ID) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high",
+        `Read-only tool probe result rejected: unexpected probe_id ${probeId}. No tool executed.`);
+      return json({ error: "Unexpected probe_id — probe result rejected." }, 422);
+    }
+    if (probeMode && probeMode !== READONLY_TOOL_PROBE_MODE) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high",
+        `Read-only tool probe result rejected: unexpected probe_mode ${probeMode}. No tool executed.`);
+      return json({ error: "Unexpected probe_mode — probe result rejected." }, 422);
+    }
+    if (agentKey && agentKey !== READONLY_TOOL_PROBE_AGENT_KEY) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high",
+        `Read-only tool probe result rejected: unexpected agent_key ${agentKey}. No tool executed.`);
+      return json({ error: "Unexpected agent_key — probe result rejected." }, 422);
+    }
+    if (toolKey && toolKey !== READONLY_TOOL_PROBE_TOOL_KEY) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high",
+        `Read-only tool probe result rejected: unexpected tool_key ${toolKey}. No tool executed.`);
+      return json({ error: "Unexpected tool_key — probe result rejected." }, 422);
+    }
+    if (toolOperation && toolOperation !== READONLY_TOOL_PROBE_TOOL_OPERATION) {
+      await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high",
+        `Read-only tool probe result rejected: unexpected tool_operation ${toolOperation}. No tool executed.`);
+      return json({ error: "Unexpected tool_operation — probe result rejected." }, 422);
+    }
+
+    const origPayload = (orig.safe_payload as Record<string, unknown>) ?? {};
+    const expiresAt = str(origPayload.expires_at);
+    const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
+
+    if (expired && !ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
+      await admin.from("ai_runtime_bridge_messages").update({ status: "expired" }).eq("message_key", originalMessageKey);
+      await auditEvent(admin, "readonly_tool_probe_expired", "expired", "low",
+        `Read-only tool probe ${probeKey || originalMessageKey} expired before a valid result. No tool executed.`);
+      return json({
+        accepted: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_readonly_tool_probe",
+        status: "expired",
+        executionEnabled: false,
+        message: "Read-only tool probe expired — result not accepted.",
+      });
+    }
+
+    if (ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
+      return json({
+        accepted: true,
+        duplicate: true,
+        operation: "report_readonly_tool_probe",
+        status: str(orig.status),
+        executionEnabled: false,
+        message: "Read-only tool probe already recorded — no duplicate evidence created.",
+      });
+    }
+
+    // Cloud independently re-validates the dedicated agent + tool + exact isolated
+    // execute permission before marking the result verified. Never trust HAL alone.
+    const recheck = await validateReadonlyToolGrant(admin);
+
+    const verified = resultStatus === "completed" && recheck.ok;
+    const finalStatus = verified ? "completed"
+      : resultStatus === "completed" ? "failed"
+      : resultStatus;
+    const finalErrorCategory = !recheck.ok ? (recheck.detail ?? "cloud_revalidation_failed") : errorCategory;
+
+    await admin.from("ai_runtime_bridge_messages").update({
+      status: finalStatus,
+      acknowledged_at: completedAt,
+    }).eq("message_key", originalMessageKey);
+
+    await admin.from("ai_runtime_bridge_messages").insert({
+      message_key: uid("BRM"),
+      message_id: messageId,
+      nonce_hash: nonceHash,
+      node_id: nodeId,
+      direction: "inbound",
+      message_type: READONLY_TOOL_PROBE_RESULT_MESSAGE_TYPE,
+      correlation_id: resultCorrelationId || (orig.correlation_id as string | null),
+      status: "recorded",
+      payload_type: "readonly_tool_probe_result",
+      safe_payload: {
+        probe_key: probeKey,
+        original_message_key: originalMessageKey,
+        node_key: nodeKey,
+        probe_id: probeId || READONLY_TOOL_PROBE_ID,
+        probe_mode: probeMode || READONLY_TOOL_PROBE_MODE,
+        agent_key: agentKey || READONLY_TOOL_PROBE_AGENT_KEY,
+        tool_key: toolKey || READONLY_TOOL_PROBE_TOOL_KEY,
+        tool_operation: toolOperation || READONLY_TOOL_PROBE_TOOL_OPERATION,
+        status: finalStatus,
+        verified,
+        n8n_status: n8nStatus,
+        ollama_status: ollamaStatus,
+        ollama_model_count: ollamaModelCount,
+        latency_ms: latencyMs,
+        error_category: finalErrorCategory,
+        started_at: startedAt,
+        completed_at: completedAt,
+      },
+      payload_hash: payloadHash,
+      created_at: receivedAt,
+    });
+
+    if (verified) {
+      await auditEvent(admin, "readonly_tool_probe_verified", "success", "low",
+        `Read-only tool probe ${probeKey || originalMessageKey} verified — dedicated agent executed the fixed local runtime health read (n8n=${n8nStatus}, ollama=${ollamaStatus}, models=${ollamaModelCount ?? "null"}). No business data, no mutation.`);
+    } else {
+      await auditEvent(admin, "readonly_tool_probe_failed", "failed", "medium",
+        `Read-only tool probe ${probeKey || originalMessageKey} did not verify (status=${finalStatus}, error=${finalErrorCategory ?? "none"}). No business data, no mutation.`);
+    }
+
+    return json({
+      accepted: true,
+      allowed: false,
+      blocked: false,
+      operation: "report_readonly_tool_probe",
+      status: finalStatus,
+      verified,
+      duplicate: false,
+      executionEnabled: false,
+      message: verified
+        ? "Read-only tool verified — fixed local runtime health read executed safely. No business data, no mutation."
+        : "Read-only tool recorded — fixed local runtime health read only, no business data, no mutation.",
     });
   }
 
