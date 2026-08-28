@@ -643,6 +643,233 @@ async function handleN8nSandboxProbe(m: ControlMessage): Promise<void> {
   await report(status, verified, safeOutput, latencyMs, errorCategory);
 }
 
+// --- Controlled multi-runtime chain probe (Prompt 13) ----------------------------
+// The ONLY combined diagnostic permitted: run the fixed n8n sandbox ping, then
+// (ONLY if n8n succeeded) run the fixed Ollama sandbox ping, then report ONE
+// signed combined result. Strictly fixed, fail-closed, no arbitrary values, no
+// retry, exactly one request per service, 30s timeout per step. It never runs an
+// agent, business workflow, tool, DB action, notification, payment, filesystem or
+// shell command. The fixed n8n + Ollama configurations are reused from Prompt 12
+// and Prompt 11A respectively — no new URL, workflow, model or prompt is introduced.
+const CHAIN_PROBE_MESSAGE_TYPE = "runtime_chain_probe";
+const CHAIN_PROBE_ID = "dfp_runtime_chain_v1";
+const CHAIN_PROBE_MODE = "sandbox_diagnostic";
+const CHAIN_PROBE_TIMEOUT_MS = 30000;
+
+async function handleRuntimeChainProbe(m: ControlMessage): Promise<void> {
+  if (m.messageType !== CHAIN_PROBE_MESSAGE_TYPE) {
+    log(`rejected unrecognised control message type: ${m.messageType ?? "(none)"} (ignored, no chain execution).`);
+    return;
+  }
+
+  const payload = m.safePayload ?? {};
+  const probeKey = typeof payload.probe_key === "string" ? payload.probe_key : "";
+  const expectedNodeKey = typeof payload.expected_node_key === "string" ? payload.expected_node_key : "";
+  const expiresAt = typeof payload.expires_at === "string" ? payload.expires_at : "";
+  const probeMode = typeof payload.probe_mode === "string" ? payload.probe_mode : "";
+  const probeId = typeof payload.probe_id === "string" ? payload.probe_id : "";
+  const correlationId = m.correlationId ?? (typeof payload.correlation_id === "string" ? payload.correlation_id : "");
+  const startedAtIso = new Date().toISOString();
+
+  const report = async (r: {
+    status: string;
+    verified: boolean;
+    n8nVerified: boolean;
+    ollamaVerified: boolean;
+    n8nLatencyMs: number | null;
+    ollamaLatencyMs: number | null;
+    totalLatencyMs: number | null;
+    completedSteps: number;
+    errorStep: string | null;
+    errorCategory: string | null;
+  }) => {
+    const res = await sendRequest("report_runtime_chain_probe", {
+      node_key: config.nodeKey,
+      probe_key: probeKey,
+      original_message_key: m.messageKey ?? "",
+      correlation_id: correlationId,
+      probe_id: CHAIN_PROBE_ID,
+      probe_mode: CHAIN_PROBE_MODE,
+      status: r.status,
+      verified: r.verified,
+      n8n_verified: r.n8nVerified,
+      ollama_verified: r.ollamaVerified,
+      n8n_latency_ms: r.n8nLatencyMs,
+      ollama_latency_ms: r.ollamaLatencyMs,
+      total_latency_ms: r.totalLatencyMs,
+      completed_steps: r.completedSteps,
+      error_step: r.errorStep,
+      error_category: r.errorCategory,
+      started_at: startedAtIso,
+      completed_at: new Date().toISOString(),
+    });
+    log(`chain probe ${probeKey || m.messageKey} result report ${res ? (res.status ?? "sent") : "FAILED"} (status=${r.status}, verified=${r.verified}).`);
+  };
+
+  // 1. Expected node key must match this node.
+  if (expectedNodeKey && expectedNodeKey !== config.nodeKey) {
+    log(`chain probe ${probeKey || m.messageKey} rejected: expected node ${expectedNodeKey} != ${config.nodeKey}.`);
+    await report({
+      status: "rejected", verified: false, n8nVerified: false, ollamaVerified: false,
+      n8nLatencyMs: null, ollamaLatencyMs: null, totalLatencyMs: null,
+      completedSteps: 0, errorStep: null, errorCategory: "node_mismatch",
+    });
+    return;
+  }
+
+  // 2. Stale/expired probes must never run the chain.
+  if (expiresAt && Date.now() > new Date(expiresAt).getTime()) {
+    log(`chain probe ${probeKey || m.messageKey} ignored: probe expired (no chain execution).`);
+    return;
+  }
+
+  // 3. probe_mode must be exactly sandbox_diagnostic.
+  if (probeMode !== CHAIN_PROBE_MODE) {
+    log(`chain probe ${probeKey || m.messageKey} rejected: unexpected probe_mode ${probeMode || "(none)"} (fail closed, no chain execution).`);
+    await report({
+      status: "rejected", verified: false, n8nVerified: false, ollamaVerified: false,
+      n8nLatencyMs: null, ollamaLatencyMs: null, totalLatencyMs: null,
+      completedSteps: 0, errorStep: null, errorCategory: "invalid_mode",
+    });
+    return;
+  }
+
+  // 4. probe_id must be exactly dfp_runtime_chain_v1 (unknown IDs fail closed).
+  if (probeId !== CHAIN_PROBE_ID) {
+    log(`chain probe ${probeKey || m.messageKey} rejected: unknown probe_id ${probeId || "(none)"} (fail closed, no chain execution).`);
+    await report({
+      status: "rejected", verified: false, n8nVerified: false, ollamaVerified: false,
+      n8nLatencyMs: null, ollamaLatencyMs: null, totalLatencyMs: null,
+      completedSteps: 0, errorStep: null, errorCategory: "invalid_probe_id",
+    });
+    return;
+  }
+
+  log(`chain probe ${probeKey || m.messageKey} validated — starting fixed n8n → Ollama diagnostic chain.`);
+
+  // ---------------------------------------------------------------------------
+  // STEP 1 — n8n (fixed sandbox ping, exact output). Any failure STOPS the chain
+  // and never proceeds to Ollama.
+  // ---------------------------------------------------------------------------
+  let n8nVerified = false;
+  let n8nLatencyMs: number | null = null;
+  let n8nError: string | null = null;
+
+  if (!isValidSandboxWebhookPath(config.n8nSandboxWebhookPath)) {
+    n8nError = "workflow_not_configured";
+  } else if (!config.n8nUrl) {
+    n8nError = "n8n_not_configured";
+  } else {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), CHAIN_PROBE_TIMEOUT_MS);
+    try {
+      const started = Date.now();
+      const executeUrl = config.n8nUrl.replace(/\/+$/, "") + config.n8nSandboxWebhookPath;
+      const res = await fetch(executeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({ probe: N8N_SANDBOX_PROBE_ID, mode: N8N_SANDBOX_PROBE_MODE }),
+      });
+      n8nLatencyMs = Date.now() - started;
+      if (!res.ok) {
+        n8nError = "workflow_http_" + res.status;
+      } else {
+        const data = await res.json();
+        const found = findSandboxResult(data, 0);
+        const out = JSON.stringify({ status: found?.status ?? "", probe: found?.probe ?? "" });
+        if (out === N8N_SANDBOX_PROBE_EXPECTED_OUTPUT) {
+          n8nVerified = true;
+        } else {
+          n8nError = "output_mismatch";
+        }
+      }
+    } catch (err) {
+      const aborted = (err as Error)?.name === "AbortError";
+      n8nError = aborted ? "timeout" : "network_error";
+      n8nLatencyMs = null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  if (!n8nVerified) {
+    log(`chain probe ${probeKey || m.messageKey} chain STOPPED at n8n step (${n8nError ?? "not_verified"}). No Ollama call performed.`);
+    await report({
+      status: "failed", verified: false, n8nVerified: false, ollamaVerified: false,
+      n8nLatencyMs, ollamaLatencyMs: null, totalLatencyMs: n8nLatencyMs,
+      completedSteps: 0, errorStep: "n8n", errorCategory: n8nError,
+    });
+    return;
+  }
+
+  // ---------------------------------------------------------------------------
+  // STEP 2 — Ollama (ONLY after n8n success). Fixed dfp_ollama_ping_v1 config,
+  // exact sentinel output, no arbitrary inference.
+  // ---------------------------------------------------------------------------
+  let ollamaVerified = false;
+  let ollamaLatencyMs: number | null = null;
+  let ollamaError: string | null = null;
+
+  if (!config.ollamaUrl) {
+    ollamaError = "ollama_not_configured";
+  } else {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), CHAIN_PROBE_TIMEOUT_MS);
+    try {
+      const started = Date.now();
+      const res = await fetch(config.ollamaUrl.replace(/\/+$/, "") + "/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: OLLAMA_PROBE_MODEL,
+          prompt: OLLAMA_PROBE_PROMPT,
+          stream: false,
+          options: { temperature: 0, num_predict: OLLAMA_PROBE_MAX_TOKENS },
+        }),
+      });
+      ollamaLatencyMs = Date.now() - started;
+      if (!res.ok) {
+        ollamaError = "ollama_http_" + res.status;
+      } else {
+        const data = await res.json();
+        const out = typeof (data as { response?: unknown })?.response === "string"
+          ? ((data as { response: string }).response).trim()
+          : "";
+        if (out === OLLAMA_PROBE_EXPECTED) {
+          ollamaVerified = true;
+        } else {
+          ollamaError = "output_mismatch";
+        }
+      }
+    } catch (err) {
+      const aborted = (err as Error)?.name === "AbortError";
+      ollamaError = aborted ? "timeout" : "network_error";
+      ollamaLatencyMs = null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  const totalLatencyMs = ((n8nLatencyMs ?? 0) + (ollamaLatencyMs ?? 0)) || null;
+  const completedSteps = ollamaVerified ? 2 : 1;
+  const verified = n8nVerified && ollamaVerified;
+
+  await report({
+    status: verified ? "completed" : "failed",
+    verified,
+    n8nVerified,
+    ollamaVerified,
+    n8nLatencyMs,
+    ollamaLatencyMs,
+    totalLatencyMs,
+    completedSteps,
+    errorStep: ollamaVerified ? null : "ollama",
+    errorCategory: ollamaVerified ? null : ollamaError,
+  });
+}
+
 // --- Operations --------------------------------------------------------------
 async function handshake(): Promise<boolean> {
   const result = await sendRequest("handshake", {
@@ -717,6 +944,13 @@ async function pollControlMessages(): Promise<void> {
     const n8nProbes = messages.filter((m) => m.messageType === "n8n_sandbox_probe");
     for (const p of n8nProbes) {
       await handleN8nSandboxProbe(p);
+    }
+
+    // Controlled multi-runtime chain probes (Prompt 13) — fixed n8n → Ollama
+    // diagnostic chain, fail-closed, one invocation per queued probe, no retry.
+    const chainProbes = messages.filter((m) => m.messageType === "runtime_chain_probe");
+    for (const p of chainProbes) {
+      await handleRuntimeChainProbe(p);
     }
 
     const wantsCatalogue = messages.some(

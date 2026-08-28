@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ============================================================================
 // runtime-bridge — secure OUTBOUND-FIRST private-runtime bridge API for DFP AI
-// Operations (Phase 3 Prompt 08 + 09C + 10 + 11A + 12).
+// Operations (Phase 3 Prompt 08 + 09C + 10 + 11A + 12 + 13).
 //
 // The trusted server-side endpoint that a local trusted runtime machine (the
 // `dfp-runtime-bridge` local service) calls OUTBOUND over HTTPS. The cloud never
@@ -11,11 +11,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // This phase is CONNECTIVITY + HEARTBEAT + SAFE HEALTH RELAY + SANITISED OLLAMA
 // CATALOGUE RELAY + DRY-RUN TRANSPORT PROBE (Prompt 10) + CONTROLLED OLLAMA
 // SANDBOX INFERENCE PROBE (Prompt 11A) + CONTROLLED N8N SANDBOX WORKFLOW PROBE
-// (Prompt 12).
+// (Prompt 12) + CONTROLLED MULTI-RUNTIME CHAIN PROBE (Prompt 13).
 //
 // It NEVER:
 //   * executes an agent or a business n8n workflow (the ONLY n8n execution is
-//     the single fixed `DFP Runtime Sandbox Ping` diagnostic, Prompt 12)
+//     the single fixed `DFP Runtime Sandbox Ping` diagnostic, Prompt 12/13)
 //   * performs arbitrary Ollama inference (the ONLY generation allowed is the
 //     single fixed dfp_ollama_ping_v1 sandbox diagnostic, mapped server-side)
 //   * calls a model/tool, retrieves knowledge, sends notifications
@@ -37,7 +37,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // Allowlisted operations: handshake, heartbeat, report_health,
 // report_capabilities, report_ollama_catalogue, fetch_control_messages,
 // report_transport_probe_ack, report_ollama_inference_probe,
-// report_n8n_sandbox_probe.
+// report_n8n_sandbox_probe, report_runtime_chain_probe.
 // ============================================================================
 
 const CORS = {
@@ -83,6 +83,12 @@ const N8N_SANDBOX_PROBE_EXPECTED_OUTPUT = JSON.stringify({
 });
 const MAX_N8N_OUTPUT_CHARS = 200;
 
+// --- Controlled multi-runtime chain probe (Prompt 13) -------------------------
+const CHAIN_PROBE_MESSAGE_TYPE = "runtime_chain_probe";
+const CHAIN_PROBE_RESULT_MESSAGE_TYPE = "runtime_chain_probe_result";
+const CHAIN_PROBE_ID = "dfp_runtime_chain_v1";
+const CHAIN_PROBE_MODE = "sandbox_diagnostic";
+
 const ALLOWED_OPERATIONS = new Set([
   "handshake",
   "heartbeat",
@@ -93,6 +99,7 @@ const ALLOWED_OPERATIONS = new Set([
   "report_transport_probe_ack",
   "report_ollama_inference_probe",
   "report_n8n_sandbox_probe",
+  "report_runtime_chain_probe",
 ]);
 
 // Allowlisted capabilities only — never shell/arbitrary_http/filesystem/docker.
@@ -120,15 +127,21 @@ const ALLOWED_CONTROL_MESSAGE_TYPES = new Set([
   "runtime_transport_probe",
   "ollama_inference_probe",
   "n8n_sandbox_probe",
+  "runtime_chain_probe",
 ]);
 
 // Control messages that have their own distinct signed-result lifecycle (they
 // must NOT be marked "acknowledged" on fetch — they await a signed result).
-const PROBE_CONTROL_TYPES = new Set(["runtime_transport_probe", "ollama_inference_probe", "n8n_sandbox_probe"]);
+const PROBE_CONTROL_TYPES = new Set([
+  "runtime_transport_probe",
+  "ollama_inference_probe",
+  "n8n_sandbox_probe",
+  "runtime_chain_probe",
+]);
 
 const ALLOWED_PROBE_ACK_STATUSES = new Set(["verified", "rejected"]);
 
-// Terminal result statuses the HAL may report for an Ollama/n8n probe.
+// Terminal result statuses the HAL may report for an Ollama/n8n/chain probe.
 const ALLOWED_RESULT_STATUSES = new Set(["completed", "failed", "rejected"]);
 
 // Safe Ollama catalogue fields — never prompts / content / credentials / raw config.
@@ -695,10 +708,6 @@ serve(async (req: Request) => {
 
   // ===========================================================================
   // REPORT_OLLAMA_CATALOGUE — relay sanitised local Ollama /api/tags catalogue.
-  //   Persisted as an inbound ollama_catalogue_response message with
-  //   source=local_bridge. Compared against ai_operations_models (deterministic,
-  //   audit-only — the registry is NEVER mutated). NO inference, NO prompts,
-  //   NO embeddings, NO pull/delete.
   // ===========================================================================
   if (operation === "report_ollama_catalogue") {
     const rawModels = Array.isArray(body.models) ? (body.models as unknown[]) : [];
@@ -724,7 +733,6 @@ serve(async (req: Request) => {
 
     await insertMessage("ollama_catalogue_response", "ollama_catalogue", safePayload);
 
-    // Deterministic registry comparison for audit only — never mutate registry.
     const comparison = await compareCatalogueToRegistry(admin, models);
 
     await auditEvent(admin, "ollama_catalogue_verified", "success", "low",
@@ -771,8 +779,6 @@ serve(async (req: Request) => {
     );
 
     if (messages.length > 0) {
-      // Probe-type messages keep a distinct "delivered" lifecycle (they await a
-      // signed result); all other control messages are marked acknowledged here.
       const probeKeys = messages
         .filter((m) => PROBE_CONTROL_TYPES.has(m.message_type as string))
         .map((m) => m.message_key);
@@ -814,11 +820,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_TRANSPORT_PROBE_ACK — signed acknowledgement for a dry-run transport
-  //   probe (Prompt 10). The bridge replies with a NON-EXECUTING ack. The cloud
-  //   validates: authenticated identity (already done), correct node, original
-  //   outbound probe exists, correlation matches, not expired, and not already
-  //   acknowledged. Never trusts caller-provided status blindly.
+  // REPORT_TRANSPORT_PROBE_ACK
   // ===========================================================================
   if (operation === "report_transport_probe_ack") {
     const probeKey = str(body.probe_key);
@@ -833,7 +835,6 @@ serve(async (req: Request) => {
       return json({ error: "original_message_key is required for a transport probe ack." }, 400);
     }
 
-    // Original outbound probe must exist and be the correct direction/type.
     const { data: origRows } = await admin
       .from("ai_runtime_bridge_messages")
       .select("message_key, node_id, correlation_id, status, safe_payload, created_at")
@@ -849,7 +850,6 @@ serve(async (req: Request) => {
       return json({ error: "Original transport probe not found." }, 404);
     }
 
-    // Correct node + correlation must match.
     if ((orig.node_id as string | null) !== nodeId) {
       await auditEvent(admin, "runtime_transport_probe_rejected", "rejected", "high",
         `Transport probe ack rejected: node mismatch for probe ${probeKey || originalMessageKey}. No execution occurred.`);
@@ -861,7 +861,6 @@ serve(async (req: Request) => {
       return json({ error: "Probe ack correlation ID does not match." }, 409);
     }
 
-    // Expiry check — an expired probe must never be acknowledged as successful.
     const origPayload = (orig.safe_payload as Record<string, unknown>) ?? {};
     const expiresAt = str(origPayload.expires_at);
     const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
@@ -881,7 +880,6 @@ serve(async (req: Request) => {
       });
     }
 
-    // Idempotency — a probe already acknowledged returns its existing state.
     if (orig.status === "acknowledged") {
       return json({
         accepted: true,
@@ -893,7 +891,6 @@ serve(async (req: Request) => {
       });
     }
 
-    // Deterministic status transition (never running/executing/completed_workflow).
     const finalStatus = ackStatus === "verified" ? "acknowledged" : "rejected";
 
     await admin.from("ai_runtime_bridge_messages").update({
@@ -901,7 +898,6 @@ serve(async (req: Request) => {
       acknowledged_at: acknowledgedAtLocal,
     }).eq("message_key", originalMessageKey);
 
-    // Persist the signed ack as an inbound message (transport evidence).
     await admin.from("ai_runtime_bridge_messages").insert({
       message_key: uid("BRM"),
       message_id: messageId,
@@ -947,13 +943,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_OLLAMA_INFERENCE_PROBE — signed result for the single fixed Ollama
-  //   sandbox diagnostic (Prompt 11A). The local HAL reports the output of the
-  //   ONE fixed dfp_ollama_ping_v1 generation. The cloud validates: correct
-  //   node, original outbound probe exists, correlation matches, prompt_id/model
-  //   are the fixed values, not expired, and not already recorded. The output is
-  //   stored as signed evidence; "verified" is true ONLY when the output exactly
-  //   equals DFP_OLLAMA_SANDBOX_OK. No arbitrary prompt/model is ever accepted.
+  // REPORT_OLLAMA_INFERENCE_PROBE
   // ===========================================================================
   if (operation === "report_ollama_inference_probe") {
     const probeKey = str(body.probe_key);
@@ -971,7 +961,6 @@ serve(async (req: Request) => {
       return json({ error: "original_message_key is required for an Ollama inference probe result." }, 400);
     }
 
-    // Original outbound probe must exist and be the correct direction/type.
     const { data: origRows } = await admin
       .from("ai_runtime_bridge_messages")
       .select("message_key, node_id, correlation_id, status, safe_payload, created_at")
@@ -987,7 +976,6 @@ serve(async (req: Request) => {
       return json({ error: "Original Ollama inference probe not found." }, 404);
     }
 
-    // Correct node + correlation must match.
     if ((orig.node_id as string | null) !== nodeId) {
       await auditEvent(admin, "ollama_inference_probe_rejected", "rejected", "high",
         `Ollama probe result rejected: node mismatch for probe ${probeKey || originalMessageKey}. No inference occurred.`);
@@ -999,7 +987,6 @@ serve(async (req: Request) => {
       return json({ error: "Probe result correlation ID does not match." }, 409);
     }
 
-    // Fixed constraints — the reported prompt_id/model must be the fixed values.
     if (promptId && promptId !== OLLAMA_PROBE_PROMPT_ID) {
       await auditEvent(admin, "ollama_inference_probe_rejected", "rejected", "high",
         `Ollama probe result rejected: unexpected prompt_id ${promptId} for probe ${probeKey || originalMessageKey}. No inference occurred.`);
@@ -1011,7 +998,6 @@ serve(async (req: Request) => {
       return json({ error: "Unexpected model — probe result rejected." }, 422);
     }
 
-    // Expiry check — an expired probe must never record a successful result.
     const origPayload = (orig.safe_payload as Record<string, unknown>) ?? {};
     const expiresAt = str(origPayload.expires_at);
     const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
@@ -1031,7 +1017,6 @@ serve(async (req: Request) => {
       });
     }
 
-    // Idempotency — a probe already in a terminal state returns existing state.
     if (ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
       return json({
         accepted: true,
@@ -1043,7 +1028,6 @@ serve(async (req: Request) => {
       });
     }
 
-    // Determine verified: output must exactly equal the fixed expected string.
     const verified = output.trim() === OLLAMA_PROBE_EXPECTED_OUTPUT;
     const finalStatus = verified && resultStatus === "completed" ? "completed"
       : resultStatus === "completed" ? "failed"
@@ -1054,7 +1038,6 @@ serve(async (req: Request) => {
       acknowledged_at: generatedAt,
     }).eq("message_key", originalMessageKey);
 
-    // Persist the signed result as an inbound message (evidence).
     await admin.from("ai_runtime_bridge_messages").insert({
       message_key: uid("BRM"),
       message_id: messageId,
@@ -1106,13 +1089,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_N8N_SANDBOX_PROBE — signed result for the single fixed n8n sandbox
-  //   diagnostic workflow (Prompt 12). The local HAL reports the deterministic
-  //   output of the ONE fixed "DFP Runtime Sandbox Ping" workflow. The cloud
-  //   validates: correct node, original outbound probe exists, correlation
-  //   matches, probe_id/mode are the fixed values, not expired, not already
-  //   recorded. "verified" is true ONLY when the output exactly equals the
-  //   canonical expected JSON. No arbitrary workflow/payload is ever accepted.
+  // REPORT_N8N_SANDBOX_PROBE
   // ===========================================================================
   if (operation === "report_n8n_sandbox_probe") {
     const probeKey = str(body.probe_key);
@@ -1132,7 +1109,6 @@ serve(async (req: Request) => {
       return json({ error: "original_message_key is required for an n8n sandbox probe result." }, 400);
     }
 
-    // Original outbound probe must exist and be the correct direction/type.
     const { data: origRows } = await admin
       .from("ai_runtime_bridge_messages")
       .select("message_key, node_id, correlation_id, status, safe_payload, created_at")
@@ -1148,7 +1124,6 @@ serve(async (req: Request) => {
       return json({ error: "Original n8n sandbox probe not found." }, 404);
     }
 
-    // Correct node + correlation must match.
     if ((orig.node_id as string | null) !== nodeId) {
       await auditEvent(admin, "n8n_sandbox_probe_rejected", "rejected", "high",
         `n8n sandbox probe result rejected: node mismatch for probe ${probeKey || originalMessageKey}. Controlled n8n diagnostic workflow only — no agent, tool, model or business workflow executed.`);
@@ -1160,7 +1135,6 @@ serve(async (req: Request) => {
       return json({ error: "Probe result correlation ID does not match." }, 409);
     }
 
-    // Fixed constraints — probe_id/probe_mode must be the fixed values.
     if (probeId && probeId !== N8N_SANDBOX_PROBE_ID) {
       await auditEvent(admin, "n8n_sandbox_probe_rejected", "rejected", "high",
         `n8n sandbox probe result rejected: unexpected probe_id ${probeId} for probe ${probeKey || originalMessageKey}. Controlled n8n diagnostic workflow only — no agent, tool, model or business workflow executed.`);
@@ -1172,7 +1146,6 @@ serve(async (req: Request) => {
       return json({ error: "Unexpected probe_mode — probe result rejected." }, 422);
     }
 
-    // Expiry check — an expired probe must never record a successful result.
     const origPayload = (orig.safe_payload as Record<string, unknown>) ?? {};
     const expiresAt = str(origPayload.expires_at);
     const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
@@ -1192,7 +1165,6 @@ serve(async (req: Request) => {
       });
     }
 
-    // Idempotency — a probe already in a terminal state returns existing state.
     if (ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
       return json({
         accepted: true,
@@ -1204,8 +1176,6 @@ serve(async (req: Request) => {
       });
     }
 
-    // Determine verified: output must exactly equal the fixed expected JSON.
-    // HTTP 200 alone is NOT treated as verified; no case-insensitive matching.
     const verified = safeOutput === N8N_SANDBOX_PROBE_EXPECTED_OUTPUT;
     const finalStatus = verified && resultStatus === "completed" ? "completed"
       : resultStatus === "completed" ? "failed"
@@ -1216,7 +1186,6 @@ serve(async (req: Request) => {
       acknowledged_at: completedAt,
     }).eq("message_key", originalMessageKey);
 
-    // Persist the signed result as an inbound message (evidence).
     await admin.from("ai_runtime_bridge_messages").insert({
       message_key: uid("BRM"),
       message_id: messageId,
@@ -1266,6 +1235,170 @@ serve(async (req: Request) => {
       message: verified
         ? "n8n sandbox diagnostic verified — fixed workflow returned expected deterministic output. Controlled n8n diagnostic workflow only — no agent, tool, model or business workflow executed."
         : "n8n sandbox diagnostic recorded — controlled diagnostic workflow only, no agent/tool/model/business workflow executed.",
+    });
+  }
+
+  // ===========================================================================
+  // REPORT_RUNTIME_CHAIN_PROBE — signed combined result for the fixed multi-
+  //   runtime diagnostic chain (Prompt 13). The local HAL reports the outcome of
+  //   the n8n → Ollama chain. The cloud validates: correct node, original outbound
+  //   probe exists, correlation matches, probe_id/mode are the fixed values, not
+  //   expired, not already recorded. "verified" is true ONLY when BOTH n8n_verified
+  //   and ollama_verified are true. No raw Ollama response, prompt, credential or
+  //   arbitrary n8n payload is ever stored.
+  // ===========================================================================
+  if (operation === "report_runtime_chain_probe") {
+    const probeKey = str(body.probe_key);
+    const originalMessageKey = str(body.original_message_key);
+    const resultCorrelationId = str(body.correlation_id);
+    const probeId = str(body.probe_id);
+    const probeMode = str(body.probe_mode);
+    const resultStatus = ALLOWED_RESULT_STATUSES.has(str(body.status)) ? str(body.status) : "failed";
+    const n8nVerified = body.n8n_verified === true;
+    const ollamaVerified = body.ollama_verified === true;
+    const verified = body.verified === true && n8nVerified && ollamaVerified;
+    const n8nLatencyMs = typeof body.n8n_latency_ms === "number" && body.n8n_latency_ms >= 0 ? body.n8n_latency_ms : null;
+    const ollamaLatencyMs = typeof body.ollama_latency_ms === "number" && body.ollama_latency_ms >= 0 ? body.ollama_latency_ms : null;
+    const totalLatencyMs = typeof body.total_latency_ms === "number" && body.total_latency_ms >= 0 ? body.total_latency_ms : null;
+    const completedSteps = typeof body.completed_steps === "number" && body.completed_steps >= 0 ? body.completed_steps : 0;
+    const errorStep = str(body.error_step).slice(0, MAX_META_CHARS) || null;
+    const errorCategory = str(body.error_category).slice(0, MAX_META_CHARS) || null;
+    const startedAt = str(body.started_at) || receivedAt;
+    const completedAt = str(body.completed_at) || receivedAt;
+
+    if (!originalMessageKey) {
+      return json({ error: "original_message_key is required for a runtime chain probe result." }, 400);
+    }
+
+    const { data: origRows } = await admin
+      .from("ai_runtime_bridge_messages")
+      .select("message_key, node_id, correlation_id, status, safe_payload, created_at")
+      .eq("message_key", originalMessageKey)
+      .eq("direction", "outbound")
+      .eq("message_type", CHAIN_PROBE_MESSAGE_TYPE)
+      .limit(1);
+    const orig = origRows && origRows.length > 0 ? origRows[0] : null;
+
+    if (!orig) {
+      await auditEvent(admin, "runtime_chain_probe_rejected", "rejected", "medium",
+        `Runtime chain probe result rejected: no matching outbound probe for key ${originalMessageKey}. Controlled n8n → Ollama diagnostic chain only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Original runtime chain probe not found." }, 404);
+    }
+
+    if ((orig.node_id as string | null) !== nodeId) {
+      await auditEvent(admin, "runtime_chain_probe_rejected", "rejected", "high",
+        `Runtime chain probe result rejected: node mismatch for probe ${probeKey || originalMessageKey}. Controlled n8n → Ollama diagnostic chain only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Probe result node does not match the originating node." }, 403);
+    }
+    if (resultCorrelationId && (orig.correlation_id as string | null) !== resultCorrelationId) {
+      await auditEvent(admin, "runtime_chain_probe_rejected", "rejected", "high",
+        `Runtime chain probe result rejected: correlation mismatch for probe ${probeKey || originalMessageKey}. Controlled n8n → Ollama diagnostic chain only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Probe result correlation ID does not match." }, 409);
+    }
+
+    if (probeId && probeId !== CHAIN_PROBE_ID) {
+      await auditEvent(admin, "runtime_chain_probe_rejected", "rejected", "high",
+        `Runtime chain probe result rejected: unexpected probe_id ${probeId} for probe ${probeKey || originalMessageKey}. Controlled n8n → Ollama diagnostic chain only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Unexpected probe_id — probe result rejected." }, 422);
+    }
+    if (probeMode && probeMode !== CHAIN_PROBE_MODE) {
+      await auditEvent(admin, "runtime_chain_probe_rejected", "rejected", "high",
+        `Runtime chain probe result rejected: unexpected probe_mode ${probeMode} for probe ${probeKey || originalMessageKey}. Controlled n8n → Ollama diagnostic chain only — no agent, tool, model or business workflow executed.`);
+      return json({ error: "Unexpected probe_mode — probe result rejected." }, 422);
+    }
+
+    const origPayload = (orig.safe_payload as Record<string, unknown>) ?? {};
+    const expiresAt = str(origPayload.expires_at);
+    const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
+
+    if (expired && !ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
+      await admin.from("ai_runtime_bridge_messages").update({ status: "expired" }).eq("message_key", originalMessageKey);
+      await auditEvent(admin, "runtime_chain_probe_expired", "expired", "low",
+        `Runtime chain probe ${probeKey || originalMessageKey} expired before a valid result. Controlled n8n → Ollama diagnostic chain only — no agent, tool, model or business workflow executed.`);
+      return json({
+        accepted: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_runtime_chain_probe",
+        status: "expired",
+        executionEnabled: false,
+        message: "Runtime chain probe expired — result not accepted.",
+      });
+    }
+
+    if (ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
+      return json({
+        accepted: true,
+        duplicate: true,
+        operation: "report_runtime_chain_probe",
+        status: str(orig.status),
+        executionEnabled: false,
+        message: "Runtime chain probe already recorded — no duplicate evidence created.",
+      });
+    }
+
+    const finalStatus = verified && resultStatus === "completed" ? "completed"
+      : resultStatus === "completed" ? "failed"
+      : resultStatus;
+
+    await admin.from("ai_runtime_bridge_messages").update({
+      status: finalStatus,
+      acknowledged_at: completedAt,
+    }).eq("message_key", originalMessageKey);
+
+    await admin.from("ai_runtime_bridge_messages").insert({
+      message_key: uid("BRM"),
+      message_id: messageId,
+      nonce_hash: nonceHash,
+      node_id: nodeId,
+      direction: "inbound",
+      message_type: CHAIN_PROBE_RESULT_MESSAGE_TYPE,
+      correlation_id: resultCorrelationId || (orig.correlation_id as string | null),
+      status: "recorded",
+      payload_type: "runtime_chain_probe_result",
+      safe_payload: {
+        probe_key: probeKey,
+        original_message_key: originalMessageKey,
+        node_key: nodeKey,
+        probe_id: probeId || CHAIN_PROBE_ID,
+        probe_mode: probeMode || CHAIN_PROBE_MODE,
+        status: finalStatus,
+        verified,
+        n8n_verified: n8nVerified,
+        ollama_verified: ollamaVerified,
+        n8n_latency_ms: n8nLatencyMs,
+        ollama_latency_ms: ollamaLatencyMs,
+        total_latency_ms: totalLatencyMs,
+        completed_steps: completedSteps,
+        error_step: errorStep,
+        error_category: errorCategory,
+        started_at: startedAt,
+        completed_at: completedAt,
+      },
+      payload_hash: payloadHash,
+      created_at: receivedAt,
+    });
+
+    if (verified) {
+      await auditEvent(admin, "runtime_chain_probe_verified", "success", "low",
+        `Runtime chain probe ${probeKey || originalMessageKey} verified — fixed n8n → Ollama diagnostic chain completed successfully. Controlled n8n diagnostic workflow + Ollama sandbox inference only — no agent, tool, model or business workflow executed.`);
+    } else {
+      await auditEvent(admin, "runtime_chain_probe_failed", "failed", "medium",
+        `Runtime chain probe ${probeKey || originalMessageKey} did not fully verify (n8n_verified=${n8nVerified}, ollama_verified=${ollamaVerified}, status=${finalStatus}, error_step=${errorStep ?? "none"}). Controlled n8n → Ollama diagnostic chain only — no agent, tool, model or business workflow executed.`);
+    }
+
+    return json({
+      accepted: true,
+      allowed: false,
+      blocked: false,
+      operation: "report_runtime_chain_probe",
+      status: finalStatus,
+      verified,
+      duplicate: false,
+      executionEnabled: false,
+      message: verified
+        ? "Runtime chain verified — n8n and Ollama completed the fixed diagnostic chain successfully. No agent, tool or business workflow was executed."
+        : "Runtime chain recorded — controlled n8n → Ollama diagnostic chain only, no agent/tool/model/business workflow executed.",
     });
   }
 
