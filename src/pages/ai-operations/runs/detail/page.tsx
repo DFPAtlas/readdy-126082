@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { useRuns } from '@/pages/ai-operations/runs/RunsContext';
 import { getAlertByRun } from '@/pages/ai-operations/alerts/selectors';
+import { DIAGNOSTIC_RUN_TASK_KEY, DIAGNOSTIC_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeDiagnosticRun';
 import OpenIncident from '@/pages/ai-operations/alerts/components/OpenIncident';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import RunHeader from '@/pages/ai-operations/runs/detail/components/RunHeader';
@@ -37,6 +38,8 @@ export default function RunDetailPage() {
 
   const run = runId ? getRun(runId) : undefined;
   const liveMode = mode === 'live';
+  const isDiagnosticRun =
+    !!run && (run.id?.startsWith(DIAGNOSTIC_RUN_KEY_PREFIX) || run.parentTaskId === DIAGNOSTIC_RUN_TASK_KEY);
 
   if (loading) {
     return (
@@ -116,6 +119,20 @@ export default function RunDetailPage() {
             Live Run Record
           </span>
           <span className="text-[11px] font-label text-foreground-600">Sections below the divider are demo supporting metadata.</span>
+        </div>
+      )}
+
+      {isDiagnosticRun && (
+        <div className="flex items-start gap-2.5 bg-emerald-500/10 border border-emerald-500/25 rounded-lg px-4 py-3">
+          <i className="ri-shield-check-line text-emerald-400 text-lg w-5 h-5 flex items-center justify-center shrink-0"></i>
+          <div className="min-w-0">
+            <p className="text-xs font-label font-semibold text-emerald-300/90">Runtime Verified Diagnostic</p>
+            <p className="text-[11px] text-emerald-400/70 mt-1">
+              This run was completed through the fixed read-only HAL tool. Its six step records and signed evidence are live persisted records.{' '}
+              {run.resultSummary ? `Signed result: ${run.resultSummary}` : 'No signed evidence summary recorded.'}
+            </p>
+            <p className="text-[10px] font-label text-emerald-400/60 mt-1.5 uppercase tracking-wide">Business data: NONE · Mutation: NONE · Normal execution: BLOCKED</p>
+          </div>
         </div>
       )}
 

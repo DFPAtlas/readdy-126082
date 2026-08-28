@@ -908,6 +908,18 @@ const READONLY_TOOL_PROBE_EXPECTED_STATUS = "DFP_RUNTIME_HEALTH_READ_OK";
 const READONLY_TOOL_READ_TIMEOUT_MS = 10000; // 10s per local health read
 const READONLY_TOOL_ALLOWED_SERVICE_STATES = ["healthy", "degraded", "unavailable"];
 
+// --- Runtime-backed diagnostic run tool probe (Prompt 18) -----------------------
+// The first REAL AI Operations task/run lifecycle. A dedicated fixed diagnostic
+// task (dfp-runtime-health-diagnostic-task) → run → 6 deterministic steps → this
+// fixed read-only tool probe → signed result → run verification → audit close.
+// REUSES the Prompt 17 built-in tool (executeRuntimeHealthReadTool) with EXACTLY
+// ONE invocation — no second implementation, no broadened behaviour. The message
+// envelope carries only safe fixed references (probe id/mode, agent/tool/operation
+// keys, task/run references) — never a URL, payload, prompt, model or command.
+const DIAGNOSTIC_RUN_PROBE_MESSAGE_TYPE = "diagnostic_run_tool_probe";
+const DIAGNOSTIC_RUN_PROBE_ID = "dfp_diagnostic_run_v1";
+const DIAGNOSTIC_RUN_PROBE_MODE = "sandbox_diagnostic";
+
 async function handleAgentDryRunProbe(m: ControlMessage): Promise<void> {
   if (m.messageType !== AGENT_DRY_RUN_PROBE_MESSAGE_TYPE) {
     log(`rejected unrecognised control message type: ${m.messageType ?? "(none)"} (ignored, no agent dry-run).`);
@@ -1233,6 +1245,145 @@ async function handleReadonlyToolProbe(m: ControlMessage): Promise<void> {
   await report(status, verified, result.n8n, result.ollama, result.ollama_model_count, latencyMs, errorCategory);
 }
 
+// --- Runtime-backed diagnostic run tool probe handler (Prompt 18) --------------
+// Strictly validates the fixed diagnostic-run probe envelope (message type, node,
+// expiry, probe id/mode, agent/tool/operation keys, task/run references present),
+// then runs the SINGLE fixed read-only tool (reused from Prompt 17) exactly once.
+// Any mismatch fails closed with a signed rejection. Never accepts a URL,
+// arbitrary payload, prompt, model, command, POST, or retry.
+async function handleDiagnosticRunToolProbe(m: ControlMessage): Promise<void> {
+  if (m.messageType !== DIAGNOSTIC_RUN_PROBE_MESSAGE_TYPE) {
+    log(`rejected unrecognised control message type: ${m.messageType ?? "(none)"} (ignored, no tool execution).`);
+    return;
+  }
+
+  const payload = m.safePayload ?? {};
+  const probeKey = typeof payload.probe_key === "string" ? payload.probe_key : "";
+  const expectedNodeKey = typeof payload.expected_node_key === "string" ? payload.expected_node_key : "";
+  const expiresAt = typeof payload.expires_at === "string" ? payload.expires_at : "";
+  const probeId = typeof payload.probe_id === "string" ? payload.probe_id : "";
+  const probeMode = typeof payload.probe_mode === "string" ? payload.probe_mode : "";
+  const agentKey = typeof payload.agent_key === "string" ? payload.agent_key : "";
+  const toolKey = typeof payload.tool_key === "string" ? payload.tool_key : "";
+  const toolOperation = typeof payload.tool_operation === "string" ? payload.tool_operation : "";
+  const taskReference = typeof payload.task_reference === "string" ? payload.task_reference : "";
+  const runReference = typeof payload.run_reference === "string" ? payload.run_reference : "";
+  const correlationId = m.correlationId ?? (typeof payload.correlation_id === "string" ? payload.correlation_id : "");
+  const startedAtIso = new Date().toISOString();
+
+  const report = async (
+    status: string,
+    verified: boolean,
+    n8nStatus: string,
+    ollamaStatus: string,
+    ollamaModelCount: number | null,
+    latencyMs: number | null,
+    errorCategory: string | null,
+  ) => {
+    const res = await sendRequest("report_diagnostic_run_tool_probe", {
+      node_key: config.nodeKey,
+      probe_key: probeKey,
+      original_message_key: m.messageKey ?? "",
+      correlation_id: correlationId,
+      probe_id: DIAGNOSTIC_RUN_PROBE_ID,
+      probe_mode: DIAGNOSTIC_RUN_PROBE_MODE,
+      agent_key: READONLY_TOOL_PROBE_AGENT_KEY,
+      tool_key: READONLY_TOOL_PROBE_TOOL_KEY,
+      tool_operation: READONLY_TOOL_PROBE_TOOL_OPERATION,
+      task_reference: taskReference,
+      run_reference: runReference,
+      status,
+      verified,
+      n8n_status: n8nStatus,
+      ollama_status: ollamaStatus,
+      ollama_model_count: ollamaModelCount,
+      latency_ms: latencyMs,
+      error_category: errorCategory,
+      started_at: startedAtIso,
+      completed_at: new Date().toISOString(),
+    });
+    log(`diagnostic run tool probe ${probeKey || m.messageKey} result report ${res ? (res.status ?? "sent") : "FAILED"} (status=${status}, verified=${verified}).`);
+  };
+
+  // 1. Expected node key must match this node.
+  if (expectedNodeKey && expectedNodeKey !== config.nodeKey) {
+    log(`diagnostic run probe ${probeKey || m.messageKey} rejected: expected node ${expectedNodeKey} != ${config.nodeKey}.`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "node_mismatch");
+    return;
+  }
+
+  // 2. Stale/expired probes must never run the tool.
+  if (expiresAt && Date.now() > new Date(expiresAt).getTime()) {
+    log(`diagnostic run probe ${probeKey || m.messageKey} ignored: probe expired (no tool execution).`);
+    return;
+  }
+
+  // 3. probe_mode must be exactly sandbox_diagnostic.
+  if (probeMode !== DIAGNOSTIC_RUN_PROBE_MODE) {
+    log(`diagnostic run probe ${probeKey || m.messageKey} rejected: unexpected probe_mode ${probeMode || "(none)"} (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "invalid_mode");
+    return;
+  }
+
+  // 4. probe_id must be exactly dfp_diagnostic_run_v1.
+  if (probeId !== DIAGNOSTIC_RUN_PROBE_ID) {
+    log(`diagnostic run probe ${probeKey || m.messageKey} rejected: unknown probe_id ${probeId || "(none)"} (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "invalid_probe_id");
+    return;
+  }
+
+  // 5. agent_key must be exactly dfp-runtime-readonly-tool-agent.
+  if (agentKey !== READONLY_TOOL_PROBE_AGENT_KEY) {
+    log(`diagnostic run probe ${probeKey || m.messageKey} rejected: unexpected agent_key ${agentKey || "(none)"} (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "invalid_agent_key");
+    return;
+  }
+
+  // 6. tool_key must be exactly dfp-runtime-health-read-tool.
+  if (toolKey !== READONLY_TOOL_PROBE_TOOL_KEY) {
+    log(`diagnostic run probe ${probeKey || m.messageKey} rejected: unexpected tool_key ${toolKey || "(none)"} (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "invalid_tool_key");
+    return;
+  }
+
+  // 7. tool_operation must be exactly read_runtime_health_snapshot.
+  if (toolOperation !== READONLY_TOOL_PROBE_TOOL_OPERATION) {
+    log(`diagnostic run probe ${probeKey || m.messageKey} rejected: unexpected tool_operation ${toolOperation || "(none)"} (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "invalid_tool_operation");
+    return;
+  }
+
+  // 8. task + run references must be present (safe identifiers only).
+  if (!taskReference || !runReference) {
+    log(`diagnostic run probe ${probeKey || m.messageKey} rejected: missing task/run reference (fail closed).`);
+    await report("rejected", false, "unavailable", "unavailable", null, null, "missing_run_reference");
+    return;
+  }
+
+  // All validation passed — run the SINGLE fixed read-only tool (reused from
+  // Prompt 17; exactly one invocation, no broadened behaviour).
+  log(`diagnostic run probe ${probeKey || m.messageKey} validated — running fixed local runtime health read (reused Prompt 17 tool).`);
+
+  const started = Date.now();
+  const result = await executeRuntimeHealthReadTool();
+  const latencyMs = Date.now() - started;
+
+  const sentinelOk = result.status === READONLY_TOOL_PROBE_EXPECTED_STATUS;
+  const n8nOk = READONLY_TOOL_ALLOWED_SERVICE_STATES.includes(result.n8n);
+  const ollamaOk = READONLY_TOOL_ALLOWED_SERVICE_STATES.includes(result.ollama);
+  const countOk = result.ollama_model_count === null
+    || (typeof result.ollama_model_count === "number" && result.ollama_model_count >= 0);
+  const verified = sentinelOk && n8nOk && ollamaOk && countOk;
+
+  const status = verified ? "completed" : "failed";
+  const errorCategory = verified ? null
+    : (!sentinelOk ? "output_mismatch"
+      : (!n8nOk || !ollamaOk) ? "invalid_service_state"
+      : "invalid_model_count");
+
+  await report(status, verified, result.n8n, result.ollama, result.ollama_model_count, latencyMs, errorCategory);
+}
+
 // --- Operations --------------------------------------------------------------
 async function handshake(): Promise<boolean> {
   const result = await sendRequest("handshake", {
@@ -1328,6 +1479,13 @@ async function pollControlMessages(): Promise<void> {
     const readonlyToolProbes = messages.filter((m) => m.messageType === "readonly_tool_probe");
     for (const p of readonlyToolProbes) {
       await handleReadonlyToolProbe(p);
+    }
+
+    // Controlled runtime-backed diagnostic run tool probes (Prompt 18) — fixed
+    // read-only tool reused from Prompt 17, exactly one invocation, fail-closed.
+    const diagnosticRunProbes = messages.filter((m) => m.messageType === "diagnostic_run_tool_probe");
+    for (const p of diagnosticRunProbes) {
+      await handleDiagnosticRunToolProbe(p);
     }
 
     const wantsCatalogue = messages.some(

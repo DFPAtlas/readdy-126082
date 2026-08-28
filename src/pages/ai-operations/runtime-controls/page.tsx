@@ -19,6 +19,7 @@ import AgentDryRunProbeVerification from '@/pages/ai-operations/runtime-controls
 import ToolAccessDenialProbeVerification from '@/pages/ai-operations/runtime-controls/components/ToolAccessDenialProbeVerification';
 import ToolAccessGrantProbeVerification from '@/pages/ai-operations/runtime-controls/components/ToolAccessGrantProbeVerification';
 import ReadonlyToolProbeVerification from '@/pages/ai-operations/runtime-controls/components/ReadonlyToolProbeVerification';
+import DiagnosticRunVerification from '@/pages/ai-operations/runtime-controls/components/DiagnosticRunVerification';
 
 export default function RuntimeControlsPage() {
   const { controls, loading, error } = useRuntimeControls();
@@ -140,6 +141,9 @@ export default function RuntimeControlsPage() {
 
       {/* Controlled read-only tool probe (Prompt 17 first callable read-only tool) */}
       <ReadonlyToolProbeVerification />
+
+      {/* Runtime-backed diagnostic run (Prompt 18 first persisted task/run lifecycle) */}
+      <DiagnosticRunVerification />
 
       {/* Change history */}
       <ControlHistory />

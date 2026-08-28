@@ -15,6 +15,7 @@ import { mapRunRowToRecord, type RunResolutionContext } from '@/pages/ai-operati
 import { mapAuditEventRowToRecord, type AuditResolutionContext } from '@/pages/ai-operations/audit/auditMapper';
 import { buildTaskLookup, toAiTaskInput, type TaskCreateInput } from '@/pages/ai-operations/runs/taskMapper';
 import type { DataSourceMode } from '@/pages/ai-operations/sites/components/DataSourceBadge';
+import { DIAGNOSTIC_RUN_TASK_KEY, DIAGNOSTIC_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeDiagnosticRun';
 
 // Data-source state for the Tasks & Runs module. Mirrors the proven Sites and
 // Agents pattern so the page never pretends demo data is live:
@@ -166,12 +167,18 @@ export function RunsProvider({ children }: { children: ReactNode }) {
       agentNameById.set(row.id, row.name);
     }
 
-    // Build task lookup (TEST/SANDBOX excluded).
-    const taskRows = (tasksRes.data ?? []).filter((r) => r.environment !== 'sandbox');
+    // Build task lookup (TEST/SANDBOX excluded, except the fixed Prompt 18
+    // diagnostic task which is a legitimately persisted sandbox diagnostic run).
+    const taskRows = (tasksRes.data ?? []).filter(
+      (r) => r.environment !== 'sandbox' || r.task_key === DIAGNOSTIC_RUN_TASK_KEY,
+    );
     const taskLookup = buildTaskLookup(taskRows, siteKeyById);
 
-    // Build run-key lookup from live runs for parent/root resolution.
-    const runRows = (runsRes.data ?? []).filter((r) => r.environment !== 'sandbox');
+    // Build run-key lookup from live runs for parent/root resolution (sandbox
+    // excluded except the fixed Prompt 18 diagnostic run).
+    const runRows = (runsRes.data ?? []).filter(
+      (r) => r.environment !== 'sandbox' || String(r.run_key).startsWith(DIAGNOSTIC_RUN_KEY_PREFIX),
+    );
     const runKeyById = new Map<string, string>();
     for (const row of runRows) runKeyById.set(row.id, row.run_key);
 

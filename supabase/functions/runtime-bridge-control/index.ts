@@ -9,22 +9,26 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // chain probe (Phase 3 Prompt 13), the controlled registered-agent dry-run
 // probe (Phase 3 Prompt 14), the controlled tool access denial probe
 // (Phase 3 Prompt 15), the controlled tool access grant probe (Phase 3
-// Prompt 16), and the controlled read-only tool probe (Phase 3 Prompt 17).
+// Prompt 16), the controlled read-only tool probe (Phase 3 Prompt 17), and the
+// controlled runtime-backed diagnostic run (Phase 3 Prompt 18).
 //
 // This is TRANSPORT TESTING + SINGLE FIXED DIAGNOSTIC PINGS + cloud-side
-// authorization checks + ONE allowlisted read-only tool invocation. It queues
-// a safe dry-run transport probe, OR one fixed harmless Ollama generation, OR
-// one fixed harmless n8n diagnostic workflow, OR one fixed n8n → Ollama
-// diagnostic chain, OR one fixed registered-agent → model dry-run, OR one fixed
-// built-in read-only runtime health tool (n8n /healthz + Ollama /api/tags, GET
-// only), through the existing private runtime bridge, and reads back signed
-// evidence. It also verifies (cloud-side only, never contacting HAL) that the
-// fixed diagnostic agent is denied access to a registry-only diagnostic tool
-// (denial probe) and, separately, that an explicit read-only grant for that
-// same diagnostic tool is resolved as AUTHORIZED without any tool execution
-// (grant probe). It NEVER executes an arbitrary n8n workflow, performs arbitrary
-// inference, runs an agent, creates a run, calls a tool, retrieves knowledge,
-// sends notifications, runs schedules, reads business data, or mutates data.
+// authorization checks + ONE allowlisted read-only tool invocation + ONE fixed
+// persisted diagnostic task/run lifecycle. It queues a safe dry-run transport
+// probe, OR one fixed harmless Ollama generation, OR one fixed harmless n8n
+// diagnostic workflow, OR one fixed n8n → Ollama diagnostic chain, OR one fixed
+// registered-agent → model dry-run, OR one fixed built-in read-only runtime
+// health tool (n8n /healthz + Ollama /api/tags, GET only), OR creates one fixed
+// diagnostic task + run + six steps that dispatch that same read-only tool,
+// through the existing private runtime bridge, and reads back signed evidence.
+// It also verifies (cloud-side only, never contacting HAL) that the fixed
+// diagnostic agent is denied access to a registry-only diagnostic tool (denial
+// probe) and, separately, that an explicit read-only grant for that same
+// diagnostic tool is resolved as AUTHORIZED without any tool execution (grant
+// probe). It NEVER executes an arbitrary n8n workflow, performs arbitrary
+// inference, runs an arbitrary agent, creates an arbitrary run/task, calls a
+// tool, retrieves knowledge, sends notifications, runs schedules, reads
+// business data, or mutates data.
 //
 // The probes are STRICTLY constrained (fail-closed):
 //   * Ollama: only prompt_id = dfp_ollama_ping_v1, model = qwen2.5-coder:7b.
@@ -44,17 +48,21 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //             tool (execute grant), operation read_runtime_health_snapshot.
 //             Fixed local read-only health read only — no business data, no
 //             mutation, no arbitrary HTTP.
+//   * diagnostic run: only probe_id = dfp_diagnostic_run_v1, fixed task
+//             dfp-runtime-health-diagnostic-task → run → six steps → the same
+//             read-only tool dispatch. Sandbox diagnostic only — no arbitrary
+//             task/agent/tool/payload, no business data, no mutation.
 //   * probe_mode is always "sandbox_diagnostic" (or "authorization_diagnostic"
 //     for the denial and grant probes).
 //   * Prompt text, model name, workflow reference, agent identity, tool identity,
-//     operation and payload are generated SERVER-SIDE only. The browser can
-//     NEVER supply them — those inputs are ignored.
+//     task identity, operation and payload are generated SERVER-SIDE only. The
+//     browser can NEVER supply them — those inputs are ignored.
 //
 // SECURITY:
 //   * verify_jwt = true -> only authenticated users reach this.
 //   * internal_role() gate: owner/admin may queue/run; any internal role
 //     (including viewer) may read status only.
-//   * Only sixteen allowlisted operations exist. No generic queue-message endpoint.
+//   * Only eighteen allowlisted operations exist. No generic queue-message endpoint.
 //   * Probe payloads are strictly limited to safe metadata — no URLs, commands,
 //     workflow IDs, arbitrary prompts, SQL, or file paths.
 // ============================================================================
@@ -86,6 +94,8 @@ const ALLOWED_OPERATIONS = new Set([
   "get_tool_access_grant_probe_status",
   "queue_readonly_tool_probe",
   "get_readonly_tool_probe_status",
+  "queue_diagnostic_run",
+  "get_diagnostic_run_status",
 ]);
 
 const PROBE_MESSAGE_TYPE = "runtime_transport_probe";
@@ -161,6 +171,35 @@ const READONLY_TOOL_PROBE_TOOL_OPERATION = "read_runtime_health_snapshot";
 // Invocation requires the execute access level (read is non-invoking per Prompt
 // 16). This dedicated agent holds exactly one isolated execute grant.
 const READONLY_TOOL_PROBE_PERMISSION = "execute";
+
+// --- Controlled runtime-backed diagnostic run (Prompt 18) ----------------------
+// The FIRST real AI Operations task/run lifecycle. A fixed diagnostic task
+// (dfp-runtime-health-diagnostic-task) → run → six deterministic steps → one
+// fixed read-only tool dispatch through HAL → signed result → run verification →
+// audit close. Reuses the Prompt 17 dedicated identity and callable tool. No
+// arbitrary task/agent/tool/payload, no business data, no mutation, no model
+// inference. Normal execution stays BLOCKED.
+const DIAGNOSTIC_RUN_QUEUE_MESSAGE_TYPE = "diagnostic_run_tool_probe";
+const DIAGNOSTIC_RUN_RESULT_MESSAGE_TYPE = "diagnostic_run_tool_probe_result";
+const DIAGNOSTIC_RUN_PROBE_ID = "dfp_diagnostic_run_v1";
+const DIAGNOSTIC_RUN_PROBE_MODE = "sandbox_diagnostic";
+const DIAGNOSTIC_RUN_TASK_KEY = "dfp-runtime-health-diagnostic-task";
+const DIAGNOSTIC_RUN_TASK_NAME = "DFP Runtime Health Diagnostic Task";
+const DIAGNOSTIC_RUN_TASK_TYPE = "runtime_health_diagnostic";
+const DIAGNOSTIC_RUN_KEY_PREFIX = "dfp-diagnostic-run-";
+// Reuses the Prompt 17 dedicated identity + callable tool.
+const DIAGNOSTIC_RUN_AGENT_KEY = "dfp-runtime-readonly-tool-agent";
+const DIAGNOSTIC_RUN_TOOL_KEY = "dfp-runtime-health-read-tool";
+const DIAGNOSTIC_RUN_TOOL_OPERATION = "read_runtime_health_snapshot";
+const DIAGNOSTIC_RUN_PERMISSION = "execute";
+const DIAGNOSTIC_RUN_STEPS = [
+  "validate_runtime_gates",
+  "validate_agent",
+  "validate_tool_permission",
+  "dispatch_readonly_tool",
+  "verify_signed_result",
+  "close_diagnostic_run",
+];
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -1862,12 +1901,6 @@ serve(async (req: Request) => {
 
   // ===========================================================================
   // QUEUE_READONLY_TOOL_PROBE — owner/admin only.
-  //   Queues the FIRST callable read-only diagnostic tool. Strict isolation
-  //   validation before queueing: dedicated agent (active, autonomy none), fixed
-  //   callable tool (no credential/endpoint), exactly one active grant pointing to
-  //   this tool only with the exact invocation permission (execute), fresh HAL
-  //   heartbeat, and master kill switch ON / execution blocked. No tool is invoked
-  //   here — the outbound message instructs HAL to run the fixed read-only tool.
   // ===========================================================================
   if (operation === "queue_readonly_tool_probe") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to queue a read-only tool probe." }, 403);
@@ -2080,6 +2113,376 @@ serve(async (req: Request) => {
       message: verified
         ? "Read-only tool verified — the dedicated agent executed the fixed local runtime health read through HAL. No business data, no mutation."
         : "Read-only tool probe status read (no business data, no mutation).",
+    });
+  }
+
+  // ===========================================================================
+  // QUEUE_DIAGNOSTIC_RUN — owner/admin only.
+  //   Creates the FIRST persisted AI Operations task/run lifecycle. Strict
+  //   isolation validation before queueing: caller owner/admin, master kill
+  //   switch ON / execution blocked, fresh HAL heartbeat, fixed agent active +
+  //   autonomy none, fixed callable tool with no credential/endpoint, exactly one
+  //   active execute grant to this tool only, and no other active diagnostic run
+  //   of this type. Then creates one task + one run + six deterministic steps and
+  //   queues ONE fixed HAL message (diagnostic_run_tool_probe). No tool is invoked
+  //   here — the outbound message instructs HAL to run the fixed read-only tool.
+  // ===========================================================================
+  if (operation === "queue_diagnostic_run") {
+    if (!isPrivileged) return json({ error: "Owner or admin role required to queue a diagnostic run." }, 403);
+
+    // 2) Master kill switch must remain ON with execution blocked.
+    const master = await resolveMasterKillSwitch(admin);
+    if (!master || master.enabled !== true || master.execution_allowed !== false) {
+      await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
+        `Diagnostic run queue rejected: master kill switch not in required ON / execution-blocked state.`);
+      return json({ error: "Master kill switch is not in the required ON / execution-blocked state.", detail: "kill_switch_state_invalid" }, 409);
+    }
+
+    // 5) HAL bridge must be fresh/reachable.
+    const node = await resolveNode(admin, str(body.node_key));
+    if (!node) {
+      return json({
+        error: "No reachable, freshly-heartbeating bridge node found.",
+        detail: "queue_blocked",
+      }, 404);
+    }
+
+    // 6) Fixed agent must exist, be active, and have autonomy none.
+    const agent = await resolveReadonlyToolAgent(admin);
+    if (!agent) {
+      await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
+        `Diagnostic run queue rejected: dedicated agent ${DIAGNOSTIC_RUN_AGENT_KEY} not registered/active.`);
+      return json({ error: "Dedicated diagnostic agent is not registered or not active.", detail: "agent_not_registered" }, 409);
+    }
+    if (str(agent.autonomy_level) !== "none") {
+      await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
+        `Diagnostic run queue rejected: dedicated agent autonomy is not none.`);
+      return json({ error: "Dedicated diagnostic agent autonomy is not none.", detail: "agent_autonomy_invalid" }, 409);
+    }
+
+    // 7) Fixed callable tool must exist with no credential and no endpoint.
+    const tool = await resolveReadonlyTool(admin);
+    if (!tool) {
+      await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
+        `Diagnostic run queue rejected: callable tool ${DIAGNOSTIC_RUN_TOOL_KEY} not registered.`);
+      return json({ error: "Callable diagnostic tool is not registered.", detail: "tool_missing" }, 409);
+    }
+    if (str(tool.credential_reference) || str(tool.endpoint_reference)) {
+      await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
+        `Diagnostic run queue rejected: callable tool unexpectedly has a credential/endpoint.`);
+      return json({ error: "Callable diagnostic tool unexpectedly has an executable configuration.", detail: "tool_not_safe" }, 409);
+    }
+
+    // 11–13) Exactly one active execute grant for this agent → this tool only.
+    const { data: agentGrantRows } = await admin
+      .from("ai_tool_agent_access")
+      .select("id, connection_id, access_level")
+      .eq("agent_id", agent.id as string)
+      .eq("is_active", true);
+    const agentGrants = agentGrantRows ?? [];
+
+    if (agentGrants.length !== 1) {
+      await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
+        `Diagnostic run queue rejected: dedicated agent holds ${agentGrants.length} active tool grant(s) (expected exactly one).`);
+      return json({ error: "Dedicated agent must hold exactly one active tool grant.", detail: "tool_access_scope_invalid" }, 409);
+    }
+
+    const grant = agentGrants[0];
+    if (grant.connection_id !== tool.id || str(grant.access_level) !== DIAGNOSTIC_RUN_PERMISSION) {
+      await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
+        `Diagnostic run queue rejected: dedicated agent grant is not the exact isolated execute grant for the callable tool ` +
+        `(connection=${str(grant.connection_id) === str(tool.id) ? "callable" : "unrelated"}, access_level=${str(grant.access_level)}).`);
+      return json({ error: "Dedicated agent grant is not the exact isolated execute permission for the callable tool.", detail: "tool_access_scope_invalid" }, 409);
+    }
+
+    // 15) No other active diagnostic run of this exact type already running.
+    const { data: activeRuns } = await admin
+      .from("ai_runs")
+      .select("id, run_key")
+      .like("run_key", `${DIAGNOSTIC_RUN_KEY_PREFIX}%`)
+      .in("status", ["queued", "working", "waiting"]);
+    if (activeRuns && activeRuns.length > 0) {
+      await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
+        `Diagnostic run queue rejected: another diagnostic run of this type is already queued/working (${activeRuns.map((r) => r.run_key).join(", ")}).`);
+      return json({ error: "Another diagnostic run of this exact type is already in progress.", detail: "diagnostic_run_in_progress" }, 409);
+    }
+
+    const now = new Date();
+    const correlationId = uid("COR");
+    const runKey = `${DIAGNOSTIC_RUN_KEY_PREFIX}${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const probeKey = uid("DRP");
+
+    // 1) CREATE TASK RECORD (existing ai_tasks schema).
+    const taskInsert = {
+      task_key: DIAGNOSTIC_RUN_TASK_KEY,
+      name: DIAGNOSTIC_RUN_TASK_NAME,
+      description: "Sandbox AI Operations run that executes the approved fixed read-only runtime health tool and stores the verified result.",
+      task_type: DIAGNOSTIC_RUN_TASK_TYPE,
+      site_id: null,
+      requested_by: actor,
+      trigger_source: "manual",
+      priority: "low",
+      risk_level: "low",
+      environment: "sandbox",
+      status: "requested",
+      approval_required: false,
+      verification_required: true,
+      uat_required: false,
+      audit_required: true,
+      notes: JSON.stringify({
+        probe_id: DIAGNOSTIC_RUN_PROBE_ID,
+        tool_key: DIAGNOSTIC_RUN_TOOL_KEY,
+        tool_operation: DIAGNOSTIC_RUN_TOOL_OPERATION,
+      }),
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+    };
+    const taskIns = await admin.from("ai_tasks").insert(taskInsert).select("id");
+    if (taskIns.error || !taskIns.data || taskIns.data.length === 0) {
+      await auditEvent(admin, "diagnostic_run_failed", "failed", "high", actor,
+        `Diagnostic run queue failed: could not create the diagnostic task record.`);
+      return json({ error: "Failed to create the diagnostic task record.", detail: "task_create_failed" }, 500);
+    }
+    const taskId = taskIns.data[0].id as string;
+
+    // 2) CREATE RUN RECORD (existing ai_runs schema).
+    const runInsert = {
+      run_key: runKey,
+      task_id: taskId,
+      parent_run_id: null,
+      root_run_id: null,
+      correlation_id: correlationId,
+      site_id: null,
+      agent_id: agent.id,
+      status: "queued",
+      priority: "low",
+      risk_level: "low",
+      environment: "sandbox",
+      queue_position: null,
+      current_step: 0,
+      total_steps: DIAGNOSTIC_RUN_STEPS.length,
+      attempts: 1,
+      max_attempts: 1,
+      retry_count: 0,
+      started_at: now.toISOString(),
+      completed_at: null,
+      approval_required: false,
+      verification_required: true,
+      uat_required: false,
+      audit_required: true,
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+    };
+    const runIns = await admin.from("ai_runs").insert(runInsert).select("id");
+    if (runIns.error || !runIns.data || runIns.data.length === 0) {
+      await auditEvent(admin, "diagnostic_run_failed", "failed", "high", actor,
+        `Diagnostic run queue failed: could not create the diagnostic run record (task=${taskId}).`);
+      return json({ error: "Failed to create the diagnostic run record.", detail: "run_create_failed" }, 500);
+    }
+    const runId = runIns.data[0].id as string;
+
+    // 3) CREATE DETERMINISTIC RUN STEPS. Steps 1–4 are validated/dispatched
+    //    synchronously at queue time; steps 5–6 await the signed result.
+    const stepRows = DIAGNOSTIC_RUN_STEPS.map((name, idx) => ({
+      run_id: runId,
+      step_number: idx + 1,
+      name,
+      agent_id: agent.id,
+      status: idx < 4 ? "completed" : "pending",
+      risk_level: "low",
+      approval_required: false,
+      started_at: idx < 4 ? now.toISOString() : null,
+      completed_at: idx < 4 ? now.toISOString() : null,
+      created_at: now.toISOString(),
+    }));
+    const stepIns = await admin.from("ai_run_steps").insert(stepRows);
+    if (stepIns.error) {
+      await auditEvent(admin, "diagnostic_run_failed", "failed", "high", actor,
+        `Diagnostic run queue failed: could not create run steps (run=${runKey}).`);
+      return json({ error: "Failed to create the diagnostic run steps.", detail: "steps_create_failed" }, 500);
+    }
+
+    await admin.from("ai_runs").update({
+      current_step: 4,
+      updated_at: new Date().toISOString(),
+    }).eq("id", runId);
+
+    // 4) QUEUE ONE FIXED HAL MESSAGE (diagnostic_run_tool_probe).
+    const safePayload = {
+      probe_key: probeKey,
+      probe_id: DIAGNOSTIC_RUN_PROBE_ID,
+      correlation_id: correlationId,
+      task_reference: DIAGNOSTIC_RUN_TASK_KEY,
+      run_reference: runKey,
+      expected_node_key: node.node_key,
+      agent_key: DIAGNOSTIC_RUN_AGENT_KEY,
+      tool_key: DIAGNOSTIC_RUN_TOOL_KEY,
+      tool_operation: DIAGNOSTIC_RUN_TOOL_OPERATION,
+      probe_mode: DIAGNOSTIC_RUN_PROBE_MODE,
+      requested_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + PROBE_TTL_MS).toISOString(),
+    };
+
+    const payloadHash = await sha256Hex(JSON.stringify(safePayload));
+
+    await admin.from("ai_runtime_bridge_messages").insert({
+      message_key: uid("BRM"),
+      message_id: probeKey,
+      nonce_hash: null,
+      node_id: node.id,
+      direction: "outbound",
+      message_type: DIAGNOSTIC_RUN_QUEUE_MESSAGE_TYPE,
+      correlation_id: correlationId,
+      status: "pending",
+      payload_type: "diagnostic_run_tool_probe",
+      safe_payload: safePayload,
+      payload_hash: payloadHash,
+      created_at: now.toISOString(),
+    });
+
+    await auditEvent(admin, "diagnostic_run_queued", "success", "low", actor,
+      `Diagnostic run ${runKey} queued (task=${DIAGNOSTIC_RUN_TASK_KEY}, agent=${DIAGNOSTIC_RUN_AGENT_KEY}, tool=${DIAGNOSTIC_RUN_TOOL_KEY}, operation=${DIAGNOSTIC_RUN_TOOL_OPERATION}). Sandbox diagnostic only — no business data, no mutation.`,
+      correlationId);
+
+    await auditEvent(admin, "diagnostic_run_started", "success", "low", actor,
+      `Diagnostic run ${runKey} started (${DIAGNOSTIC_RUN_STEPS.length} deterministic steps created, fixed read-only tool dispatched). Sandbox diagnostic only.`,
+      correlationId);
+
+    return json({
+      accepted: true,
+      operation: "queue_diagnostic_run",
+      taskKey: DIAGNOSTIC_RUN_TASK_KEY,
+      runKey,
+      correlationId,
+      nodeKey: node.node_key,
+      nodeName: node.name ?? null,
+      probeId: DIAGNOSTIC_RUN_PROBE_ID,
+      probeMode: DIAGNOSTIC_RUN_PROBE_MODE,
+      agentKey: DIAGNOSTIC_RUN_AGENT_KEY,
+      toolKey: DIAGNOSTIC_RUN_TOOL_KEY,
+      toolOperation: DIAGNOSTIC_RUN_TOOL_OPERATION,
+      permission: DIAGNOSTIC_RUN_PERMISSION,
+      status: "queued",
+      totalSteps: DIAGNOSTIC_RUN_STEPS.length,
+      executionEnabled: false,
+      message: "Diagnostic run queued (fixed read-only runtime health tool through HAL — sandbox diagnostic only).",
+    });
+  }
+
+  // ===========================================================================
+  // GET_DIAGNOSTIC_RUN_STATUS — any internal role (viewer read-only).
+  // ===========================================================================
+  if (operation === "get_diagnostic_run_status") {
+    const { data: taskRows } = await admin
+      .from("ai_tasks")
+      .select("id, task_key, name, task_type, status, environment, risk_level, created_at")
+      .eq("task_key", DIAGNOSTIC_RUN_TASK_KEY)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const task = taskRows && taskRows.length > 0 ? taskRows[0] : null;
+
+    if (!task) {
+      return json({ operation: "get_diagnostic_run_status", found: false, task: null, run: null, steps: [], signedResult: null, executionEnabled: false });
+    }
+
+    const { data: runRows } = await admin
+      .from("ai_runs")
+      .select("id, run_key, status, current_step, total_steps, correlation_id, started_at, completed_at, error_summary, result_summary, created_at")
+      .eq("task_id", task.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const run = runRows && runRows.length > 0 ? runRows[0] : null;
+
+    if (!run) {
+      return json({
+        operation: "get_diagnostic_run_status",
+        found: true,
+        task: {
+          taskKey: str(task.task_key),
+          name: str(task.name),
+          taskType: str(task.task_type),
+          status: str(task.status),
+          environment: str(task.environment),
+          riskLevel: str(task.risk_level),
+        },
+        run: null,
+        steps: [],
+        signedResult: null,
+        executionEnabled: false,
+      });
+    }
+
+    const { data: stepRows } = await admin
+      .from("ai_run_steps")
+      .select("step_number, name, status, completed_at, error_summary")
+      .eq("run_id", run.id)
+      .order("step_number", { ascending: true });
+    const steps = (stepRows ?? []).map((s) => ({
+      stepNumber: s.step_number,
+      name: s.name,
+      status: s.status,
+      completedAt: s.completed_at ?? null,
+    }));
+
+    const corr = str(run.correlation_id);
+    let signedResult = null;
+    if (corr) {
+      const { data: resRows } = await admin
+        .from("ai_runtime_bridge_messages")
+        .select("status, safe_payload, acknowledged_at, created_at")
+        .eq("direction", "inbound")
+        .eq("message_type", DIAGNOSTIC_RUN_RESULT_MESSAGE_TYPE)
+        .eq("correlation_id", corr)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const res = resRows && resRows.length > 0 ? resRows[0] : null;
+      if (res) {
+        const rp = (res.safe_payload as Record<string, unknown>) ?? {};
+        signedResult = {
+          verified: rp.verified === true,
+          n8nStatus: str(rp.n8n_status) || null,
+          ollamaStatus: str(rp.ollama_status) || null,
+          ollamaModelCount: rp.ollama_model_count ?? null,
+          latencyMs: rp.latency_ms ?? null,
+          completedAt: str(res.acknowledged_at) || str(res.created_at),
+        };
+      }
+    }
+
+    return json({
+      operation: "get_diagnostic_run_status",
+      found: true,
+      task: {
+        taskKey: str(task.task_key),
+        name: str(task.name),
+        taskType: str(task.task_type),
+        status: str(task.status),
+        environment: str(task.environment),
+        riskLevel: str(task.risk_level),
+      },
+      run: {
+        runKey: str(run.run_key),
+        status: str(run.status),
+        currentStep: run.current_step ?? 0,
+        totalSteps: run.total_steps ?? DIAGNOSTIC_RUN_STEPS.length,
+        correlationId: str(run.correlation_id),
+        startedAt: str(run.started_at),
+        completedAt: str(run.completed_at),
+        errorSummary: str(run.error_summary) || null,
+        resultSummary: str(run.result_summary) || null,
+      },
+      steps,
+      signedResult,
+      agentKey: DIAGNOSTIC_RUN_AGENT_KEY,
+      toolKey: DIAGNOSTIC_RUN_TOOL_KEY,
+      toolOperation: DIAGNOSTIC_RUN_TOOL_OPERATION,
+      permission: DIAGNOSTIC_RUN_PERMISSION,
+      probeId: DIAGNOSTIC_RUN_PROBE_ID,
+      probeMode: DIAGNOSTIC_RUN_PROBE_MODE,
+      executionEnabled: false,
+      businessData: "NONE",
+      mutation: "NONE",
+      message: "Diagnostic run status read (sandbox diagnostic only — no business data, no mutation).",
     });
   }
 
