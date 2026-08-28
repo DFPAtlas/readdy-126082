@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { UatJob } from '../types';
+import TesterMarketplaceModal from './TesterMarketplaceModal';
+import TesterMarketplacePanel from './TesterMarketplacePanel';
+import TesterAssignmentsPanel from './TesterAssignmentsPanel';
 
 export default function UatTestRunsTab() {
   const [jobs, setJobs] = useState<UatJob[]>([]);
@@ -8,6 +11,8 @@ export default function UatTestRunsTab() {
   const [error, setError] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [assignmentCounts, setAssignmentCounts] = useState<Record<string, number>>({});
+  const [configureJob, setConfigureJob] = useState<UatJob | null>(null);
+  const [testCaseCounts, setTestCaseCounts] = useState<Record<string, number>>({});
 
   const loadData = useCallback(async () => {
     try {
@@ -17,10 +22,11 @@ export default function UatTestRunsTab() {
 
       const projectIds = [...new Set((data || []).map((j: Record<string, unknown>) => j.project_id))];
       const envIds = [...new Set((data || []).map((j: Record<string, unknown>) => j.environment_id).filter(Boolean))];
-      const [{ data: projects }, { data: envs }, { data: assignments }] = await Promise.all([
+      const [{ data: projects }, { data: envs }, { data: assignments }, { data: testCases }] = await Promise.all([
         projectIds.length > 0 ? supabase.from('uat_projects').select('id,name').in('id', projectIds) : Promise.resolve({ data: [] }),
         envIds.length > 0 ? supabase.from('uat_environments').select('id,environment_name').in('id', envIds as string[]) : Promise.resolve({ data: [] }),
         supabase.from('uat_assignments').select('job_id'),
+        supabase.from('uat_test_cases').select('project_id'),
       ]);
 
       const projMap = Object.fromEntries((projects || []).map((p: Record<string, unknown>) => [p.id, p.name]));
@@ -30,6 +36,12 @@ export default function UatTestRunsTab() {
         counts[a.job_id as string] = (counts[a.job_id as string] || 0) + 1;
       });
       setAssignmentCounts(counts);
+
+      const tcCounts: Record<string, number> = {};
+      (testCases || []).forEach((tc: Record<string, unknown>) => {
+        if (tc.project_id) tcCounts[tc.project_id as string] = (tcCounts[tc.project_id as string] || 0) + 1;
+      });
+      setTestCaseCounts(tcCounts);
 
       setJobs((data || []).map((j: Record<string, unknown>) => ({
         ...j,
@@ -64,9 +76,14 @@ export default function UatTestRunsTab() {
     );
   }
 
+  const configMinSlots = configureJob
+    ? Math.max(configureJob.reserve_count ?? 0, configureJob.tester_slots_filled ?? 0, assignmentCounts[configureJob.id] ?? 0)
+    : 0;
+
   return (
-    <div className="grid gap-3">
-      {jobs.map((j) => (
+    <>
+      <div className="grid gap-3">
+        {jobs.map((j) => (
         <div key={j.id} className="bg-background-100 border border-background-200/60 rounded-lg overflow-hidden">
           <div onClick={() => setExpandedId(expandedId === j.id ? null : j.id)} className="p-4 flex items-center justify-between cursor-pointer hover:bg-background-50/50 transition-colors">
             <div className="flex items-center gap-3 min-w-0">
@@ -93,11 +110,32 @@ export default function UatTestRunsTab() {
                 <div className="col-span-2"><span className="text-foreground-500">Devices:</span> <span className="text-foreground-200 ml-1">{j.required_devices?.join(', ') || 'Any'}</span></div>
                 <div><span className="text-foreground-500">Browsers:</span> <span className="text-foreground-200 ml-1">{j.required_browsers?.join(', ') || 'Any'}</span></div>
               </div>
+              <div className="mt-4">
+                <TesterMarketplacePanel
+                  job={j}
+                  testCaseCount={testCaseCounts[j.project_id] ?? 0}
+                  onChanged={loadData}
+                  onConfigure={() => setConfigureJob(j)}
+                />
+              </div>
+              <div className="mt-4">
+                <TesterAssignmentsPanel job={j} onChanged={loadData} />
+              </div>
               {j.description && <p className="text-xs text-foreground-500 mt-3">{j.description}</p>}
             </div>
           )}
         </div>
       ))}
-    </div>
+      </div>
+
+      <TesterMarketplaceModal
+        open={configureJob !== null}
+        job={configureJob}
+        minSlots={configMinSlots}
+        hasTesterActivity={configMinSlots > 0}
+        onClose={() => setConfigureJob(null)}
+        onSaved={loadData}
+      />
+    </>
   );
 }

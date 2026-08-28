@@ -1,4 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { GroupLiveDataProvider, useGroupLiveData, refreshGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
+import { useRuntimeHealth, refreshHistory } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import WallboardHeader from '@/pages/ai-operations/wallboard/components/WallboardHeader';
 import KpiStrip from '@/pages/ai-operations/wallboard/components/KpiStrip';
 import GroupSiteStatus from '@/pages/ai-operations/wallboard/components/GroupSiteStatus';
@@ -10,13 +12,23 @@ import SystemHealth from '@/pages/ai-operations/wallboard/components/SystemHealt
 import LiveActivity from '@/pages/ai-operations/wallboard/components/LiveActivity';
 import UsersOnline from '@/pages/ai-operations/wallboard/components/UsersOnline';
 import AiSpend from '@/pages/ai-operations/wallboard/components/AiSpend';
+import PrivateRuntimeBridge from '@/pages/ai-operations/wallboard/components/PrivateRuntimeBridge';
 
 const ROTATION_VIEWS = 5;
 const ROTATION_LABELS = ['Group Overview', 'Active Operations', 'Sites', 'Alerts & Approvals', 'Costs & Health'];
 
 export default function WallboardPage() {
+  return (
+    <GroupLiveDataProvider>
+      <WallboardInner />
+    </GroupLiveDataProvider>
+  );
+}
+
+function WallboardInner() {
+  const data = useGroupLiveData();
+  const healthState = useRuntimeHealth();
   const [now, setNow] = useState<Date>(() => new Date());
-  const [lastRefreshed, setLastRefreshed] = useState<Date>(() => new Date());
   const [autoRefresh, setAutoRefresh] = useState(30);
   const [focusMode, setFocusMode] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -29,10 +41,18 @@ export default function WallboardPage() {
     return () => clearInterval(id);
   }, []);
 
-  // Auto-refresh — local demo refresh only (no production polling).
+  // Load persisted runtime health once on mount.
+  useEffect(() => {
+    void refreshHistory();
+  }, []);
+
+  // Auto-refresh — one coordinated live-registry refresh (no per-widget polling).
   useEffect(() => {
     if (!autoRefresh) return;
-    const id = setInterval(() => setLastRefreshed(new Date()), autoRefresh * 1000);
+    const id = setInterval(() => {
+      void refreshGroupLiveData();
+      void refreshHistory();
+    }, autoRefresh * 1000);
     return () => clearInterval(id);
   }, [autoRefresh]);
 
@@ -43,7 +63,6 @@ export default function WallboardPage() {
     return () => clearInterval(id);
   }, [rotation]);
 
-  // Reset rotation index when rotation is disabled.
   const handleRotationChange = useCallback((seconds: number) => {
     setRotation(seconds);
     if (seconds === 0) setRotationIndex(0);
@@ -64,11 +83,27 @@ export default function WallboardPage() {
     }
   }, []);
 
+  const sourceLabel = data.mode === 'unavailable' ? 'Unavailable' : 'Partial Live Data';
+
+  const runtimeSummary = useMemo(() => {
+    const latest = healthState.latestBySystem;
+    if (latest.size === 0) return null;
+    let healthy = 0;
+    let degraded = 0;
+    let unavailable = 0;
+    for (const v of latest.values()) {
+      if (v.currentStatus === 'healthy') healthy += 1;
+      else if (v.currentStatus === 'degraded') degraded += 1;
+      else if (v.currentStatus === 'unavailable') unavailable += 1;
+    }
+    return `${healthy} healthy · ${degraded} degraded · ${unavailable} unavailable`;
+  }, [healthState.latestBySystem]);
+
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-background-50 text-foreground-50">
       <WallboardHeader
         now={now}
-        lastRefreshed={lastRefreshed}
+        lastRefreshed={data.lastRefreshed}
         autoRefresh={autoRefresh}
         onAutoRefreshChange={setAutoRefresh}
         focusMode={focusMode}
@@ -80,11 +115,27 @@ export default function WallboardPage() {
       />
 
       <div className="shrink-0 flex items-center justify-between px-5 pt-3 pb-1">
-        <p className="text-[11px] font-label text-foreground-600">
-          Last refresh {lastRefreshed.toLocaleTimeString('en-US', { hour12: false })}
-          {autoRefresh > 0 ? ` · auto-refresh ${autoRefresh}s` : ''}
-          {rotation > 0 ? ` · rotating every ${rotation}s` : ''}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-[11px] font-label text-foreground-600">
+            Last refresh {data.lastRefreshed.toLocaleTimeString('en-US', { hour12: false })}
+            {autoRefresh > 0 ? ` · auto-refresh ${autoRefresh}s` : ''}
+            {rotation > 0 ? ` · rotating every ${rotation}s` : ''}
+          </p>
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-label text-amber-400 bg-amber-500/10 border border-amber-500/25 rounded-full px-2.5 py-0.5 whitespace-nowrap">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            {sourceLabel}
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-label text-accent-400 bg-accent-500/10 border border-accent-500/25 rounded-full px-2.5 py-0.5 whitespace-nowrap">
+            <i className="ri-radar-line w-3.5 h-3.5 flex items-center justify-center"></i>
+            {runtimeSummary
+              ? `Runtime: ${runtimeSummary}`
+              : 'Runtime Connectivity: Not Checked'}
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-label font-semibold text-red-400 bg-red-500/10 border border-red-500/25 rounded-full px-2.5 py-0.5 whitespace-nowrap">
+            <i className="ri-shield-cross-line w-3.5 h-3.5 flex items-center justify-center"></i>
+            Runtime Execution: BLOCKED
+          </span>
+        </div>
         {rotation > 0 && (
           <span className="inline-flex items-center gap-1.5 text-[11px] font-label text-accent-400 bg-accent-500/10 border border-accent-500/25 rounded-full px-2.5 py-0.5 whitespace-nowrap">
             <i className="ri-loop-left-line w-3.5 h-3.5 flex items-center justify-center"></i>
@@ -114,7 +165,10 @@ function StandardLayout() {
 
         <div className="col-span-5 min-h-0"><CriticalAlerts /></div>
         <div className="col-span-4 min-h-0"><ApprovalsWatch /></div>
-        <div className="col-span-3 min-h-0"><SystemHealth /></div>
+        <div className="col-span-3 min-h-0 flex flex-col gap-3">
+          <div className="flex-1 min-h-0"><SystemHealth /></div>
+          <div className="flex-1 min-h-0"><PrivateRuntimeBridge /></div>
+        </div>
 
         <div className="col-span-4 min-h-0"><AgentsWorking /></div>
         <div className="col-span-5 min-h-0"><LiveActivity /></div>

@@ -38,7 +38,7 @@ export default function LiveHeader({
         <div className="flex items-center gap-2 flex-wrap">
           <h1 className="text-2xl font-heading font-bold text-foreground-50">Live AI Operations</h1>
           <span className="inline-flex items-center gap-1.5 text-[10px] font-label text-foreground-500 bg-background-100 border border-background-200/60 rounded-full px-2 py-0.5 whitespace-nowrap">
-            Demo data
+            Partial Live
           </span>
           {paused && (
             <span className="inline-flex items-center gap-1.5 text-[10px] font-label text-amber-400 bg-amber-500/10 border border-amber-500/25 rounded-full px-2 py-0.5 whitespace-nowrap">
@@ -53,11 +53,11 @@ export default function LiveHeader({
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] font-label text-foreground-500">
           <span className="inline-flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${paused ? 'bg-foreground-600' : 'bg-emerald-400 animate-pulse'}`}></span>
-            <span className="text-foreground-300">Group AI Status:</span>
-            <span className="text-emerald-400 font-medium">Operational</span>
+            <span className={`w-1.5 h-1.5 rounded-full ${paused ? 'bg-foreground-600' : 'bg-amber-400 animate-pulse'}`}></span>
+            <span className="text-foreground-300">Source:</span>
+            <span className="text-amber-400 font-medium">Partial Live</span>
           </span>
-          <span className="whitespace-nowrap">Agents working · <span className="text-foreground-200">{metrics.agentsWorking}</span></span>
+          <span className="whitespace-nowrap">Agents registered · <span className="text-foreground-200">{metrics.agentsWorking}</span></span>
           <span className="whitespace-nowrap">Active runs · <span className="text-foreground-200">{metrics.activeRuns}</span></span>
           <span className="whitespace-nowrap">Queue depth · <span className="text-foreground-200">{metrics.queuedRuns}</span></span>
           <span className="whitespace-nowrap">Pending approvals · <span className="text-foreground-200">{metrics.pendingApprovals}</span></span>
@@ -72,7 +72,7 @@ export default function LiveHeader({
           onClick={onRefresh}
           disabled={refreshing}
           className="inline-flex items-center gap-2 text-xs font-label text-foreground-200 bg-background-100 border border-background-200/60 rounded-md px-3 py-2 hover:border-background-300/60 transition-colors duration-150 cursor-pointer whitespace-nowrap"
-          title="Refresh (local demo refresh only)"
+          title="Refresh live registry data"
         >
           <i className={`ri-refresh-line text-sm w-4 h-4 flex items-center justify-center ${refreshing ? 'animate-spin' : ''}`}></i>
           {refreshing ? 'Refreshing…' : 'Refresh'}

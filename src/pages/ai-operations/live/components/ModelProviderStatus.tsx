@@ -8,7 +8,7 @@ export default function ModelProviderStatus() {
   return (
     <section className="bg-background-100 border border-background-200/60 rounded-lg">
       <div className="px-4 py-3 border-b border-background-200/60">
-        <h3 className="text-sm font-label font-semibold text-foreground-200 uppercase tracking-wide">AI Model Providers</h3>
+        <h3 className="text-sm font-label font-semibold text-foreground-200 uppercase tracking-wide">AI Model Providers · Registry Health</h3>
       </div>
 
       <div className="divide-y divide-background-200/40">

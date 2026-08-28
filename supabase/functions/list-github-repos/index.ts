@@ -18,34 +18,64 @@ serve(async (req) => {
     );
   }
 
+  const gh = async (path: string) => {
+    const res = await fetch(`https://api.github.com${path}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "readdy-command-centre",
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`GitHub API error ${res.status}: ${text.slice(0, 200)}`);
+    }
+    return res.json();
+  };
+
   try {
-    const allRepos: any[] = [];
-    let page = 1;
-
-    while (page <= 10) {
-      const url =
-        `https://api.github.com/user/repos?affiliation=owner,collaborator,organization_member&per_page=100&page=${page}&sort=updated`;
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "User-Agent": "readdy-command-centre",
-        },
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        return new Response(
-          JSON.stringify({ error: `GitHub API error ${res.status}: ${text}` }),
-          { status: res.status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
+    const seen = new Map<number, any>();
+    const addRepos = (list: any[]) => {
+      for (const r of list) {
+        if (r && typeof r.id === "number") seen.set(r.id, r);
       }
+    };
 
-      const data = await res.json();
-      allRepos.push(...data);
+    // Personal + collaborator + org-member repos.
+    let page = 1;
+    while (page <= 10) {
+      const data = await gh(
+        `/user/repos?affiliation=owner,collaborator,organization_member&per_page=100&page=${page}&sort=updated`,
+      );
+      addRepos(data);
       if (data.length < 100) break;
       page++;
     }
+
+    // Enumerate every organisation the token belongs to (e.g. DFPAtlas).
+    let orgs: any[] = [];
+    try {
+      orgs = await gh("/user/orgs?per_page=100");
+    } catch {
+      orgs = [];
+    }
+
+    for (const org of orgs) {
+      if (!org || !org.login) continue;
+      let p = 1;
+      while (p <= 10) {
+        try {
+          const data = await gh(`/orgs/${org.login}/repos?type=all&per_page=100&page=${p}`);
+          addRepos(data);
+          if (data.length < 100) break;
+        } catch {
+          break;
+        }
+        p++;
+      }
+    }
+
+    const allRepos = Array.from(seen.values());
 
     const repos = allRepos.map((r) => ({
       id: r.id,

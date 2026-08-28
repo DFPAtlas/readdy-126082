@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAgents } from '@/pages/ai-operations/agents/AgentsContext';
+import { useAgentIntegrations } from '@/pages/ai-operations/agents/detail/agentIntegrations';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import AgentHeader from '@/pages/ai-operations/agents/detail/components/AgentHeader';
 import AgentOverview from '@/pages/ai-operations/agents/detail/components/AgentOverview';
 import ModelConfiguration from '@/pages/ai-operations/agents/detail/components/ModelConfiguration';
 import KnowledgeSources from '@/pages/ai-operations/agents/detail/components/KnowledgeSources';
+import LiveModelConfiguration from '@/pages/ai-operations/agents/detail/components/LiveModelConfiguration';
+import LiveKnowledgeSources from '@/pages/ai-operations/agents/detail/components/LiveKnowledgeSources';
+import LiveAgentTools from '@/pages/ai-operations/agents/detail/components/LiveAgentTools';
 import SecurityPolicies from '@/pages/ai-operations/agents/detail/components/SecurityPolicies';
 import CostUsage from '@/pages/ai-operations/agents/detail/components/CostUsage';
 import AgentTools from '@/pages/ai-operations/agents/detail/components/AgentTools';
@@ -16,11 +20,17 @@ import AgentDependencies from '@/pages/ai-operations/agents/detail/components/Ag
 import RecentRuns from '@/pages/ai-operations/agents/detail/components/RecentRuns';
 import AgentEvents from '@/pages/ai-operations/agents/detail/components/AgentEvents';
 import AgentFormModal from '@/pages/ai-operations/agents/components/AgentFormModal';
+import RuntimeEligibility from '@/pages/ai-operations/runtime-controls/components/RuntimeEligibility';
+import AgentRuntimeRequestReadiness from '@/pages/ai-operations/runtime-controls/components/AgentRuntimeRequestReadiness';
+import AgentN8nMapping from '@/pages/ai-operations/runtime-controls/components/AgentN8nMapping';
 
 export default function AgentDetailPage() {
   const { agentId } = useParams<{ agentId: string }>();
   const { agents, mode, updateAgent, setAgentStatus, sites, sitesAvailable } = useAgents();
   const [editOpen, setEditOpen] = useState(false);
+
+  const live = mode === 'live';
+  const integrations = useAgentIntegrations(agentId ?? '', live);
 
   const agent = agents.find((a) => a.id === agentId);
 
@@ -47,8 +57,8 @@ export default function AgentDetailPage() {
       <div className="bg-background-100 border border-background-200/60 rounded-lg px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
         <DataSourceBadge mode={mode} />
         <p className="text-xs text-foreground-500">
-          {mode === 'live'
-            ? 'Live Agent Record — base identity and metadata are read from Supabase. Sections below the divider are demo supporting metadata with no production table yet.'
+          {live
+            ? 'Live Agent Record — base identity, registered tool access, model assignments and knowledge permissions are read from Supabase. Sections below the divider remain supporting metadata with no production runtime yet.'
             : mode === 'demo'
               ? 'Demo Data — this agent record is from the mock registry.'
               : 'Live agent data is unavailable; the registry may be in an error state.'}
@@ -64,18 +74,43 @@ export default function AgentDetailPage() {
 
       <AgentOverview agent={agent} />
 
-      {/* Demo supporting metadata — no live production tables yet */}
+      {/* Runtime eligibility (derived from the gate evaluator — not registry) */}
+      <RuntimeEligibility
+        agentName={agent.name}
+        registryReady={live}
+        modelAssigned={live ? integrations.models.items.length > 0 : !!agent.model?.primaryModel}
+      />
+
+      {/* Future-runtime request readiness (gateway view, no execution) */}
+      <AgentRuntimeRequestReadiness agentName={agent.name} />
+
+      {/* n8n runtime mapping (display-only, execution disabled) */}
+      <AgentN8nMapping agentName={agent.name} />
+
+      {/* Live cross-module wiring (tools / models / knowledge) */}
+      {live ? (
+        <>
+          <LiveModelConfiguration state={integrations.models.state} items={integrations.models.items} />
+          <LiveKnowledgeSources state={integrations.knowledge.state} items={integrations.knowledge.items} />
+          <LiveAgentTools state={integrations.tools.state} items={integrations.tools.items} />
+        </>
+      ) : (
+        <>
+          <ModelConfiguration model={agent.model} />
+          <KnowledgeSources agentId={agent.id} />
+          <AgentTools tools={agent.tools} />
+        </>
+      )}
+
+      {/* Still supporting / runtime-pending metadata — no live production tables yet */}
       <div className="flex items-center gap-3 pt-2">
         <div className="h-px flex-1 bg-background-200/60"></div>
         <span className="text-[11px] font-label text-foreground-500 uppercase tracking-wide whitespace-nowrap">
-          Demo Supporting Metadata
+          Supporting Metadata · Runtime Pending
         </span>
         <div className="h-px flex-1 bg-background-200/60"></div>
       </div>
 
-      <ModelConfiguration model={agent.model} />
-      <KnowledgeSources agentId={agent.id} />
-      <AgentTools tools={agent.tools} />
       <DataPermissions permissions={agent.dataPermissions} />
       <ActionPermissions actions={agent.actionPermissions} />
       <SecurityPolicies agentId={agent.id} />

@@ -28,7 +28,7 @@ export type TicketCategory =
   | 'security'
   | 'other';
 
-export type TicketSource = 'website' | 'email' | 'admin' | 'api' | 'ai_agent' | 'import';
+export type TicketSource = 'website' | 'email' | 'admin' | 'api' | 'ai_agent' | 'import' | 'uat';
 
 export type TicketSenderType = 'customer' | 'staff' | 'system' | 'ai_agent';
 

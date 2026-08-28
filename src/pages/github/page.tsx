@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import EmptyReposPanel from './components/EmptyReposPanel';
 
 interface Repo {
   id: number;
@@ -282,6 +283,11 @@ export default function GitHubPage() {
           {filtered.map((repo) => <RepoCard key={repo.id} repo={repo} />)}
         </div>
       )}
+
+      {/* Empty repository forensics */}
+      <div className="pt-4 border-t border-background-200/40">
+        <EmptyReposPanel />
+      </div>
     </div>
   );
 }

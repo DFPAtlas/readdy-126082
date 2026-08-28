@@ -232,7 +232,7 @@ export const checklistItems: ProductionChecklistItem[] = [
 
 export const goNoGo: GoNoGoStatus = {
   status: 'no_go',
-  summary: 'NO-GO — Demo Architecture Only',
+  summary: 'NO-GO — Control Plane Complete, Runtime Not Connected',
   goRequirements: [
     { label: 'All critical security gates PASS', met: false },
     { label: 'Approval workflow live', met: false },

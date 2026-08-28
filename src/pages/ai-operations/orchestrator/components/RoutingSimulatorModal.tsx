@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
 import Modal from '@/components/base/Modal';
-import type { AgentCandidate, RoutingSimulationResult } from '@/pages/ai-operations/types';
+import type { AgentCandidate, AgentHealth, RoutingSimulationResult } from '@/pages/ai-operations/types';
 import { demoAgents } from '@/mocks/ai-operations-agents';
 import { demoSites } from '@/mocks/ai-operations-sites';
 import { ENVIRONMENT_OPTIONS, ENVIRONMENT_LABELS, RISK_LEVEL } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
+import { useGroupLiveData, type GroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
+import type { SimulationCandidateInput } from '@/pages/ai-operations/orchestrator/OrchestratorContext';
 
 interface RoutingSimulatorModalProps {
   open: boolean;
   onClose: () => void;
-  onSave: (result: RoutingSimulationResult, form: SimulatorForm) => void;
+  mode: 'live' | 'demo' | 'error';
+  onSave: (result: SimulatorOutcome, form: SimulatorForm) => void;
 }
 
 export interface SimulatorForm {
@@ -21,6 +24,15 @@ export interface SimulatorForm {
   environment: string;
   priority: string;
   risk: string;
+}
+
+export interface SimulatorOutcome extends RoutingSimulationResult {
+  blockedCandidates: AgentCandidate[];
+  missingDependencies: string[];
+  policyResult: string;
+  candidateInputs: SimulationCandidateInput[];
+  workflowSteps: string[];
+  checks: { toolReady: boolean; modelReady: boolean; knowledgeReady: boolean };
 }
 
 const empty: SimulatorForm = {
@@ -42,11 +54,146 @@ const TASK_TYPES = ['Support', 'Diagnostics', 'Monitoring', 'Security', 'UAT', '
 const PRIORITIES = ['low', 'normal', 'high', 'urgent', 'critical'];
 const RISKS = ['low', 'medium', 'high', 'critical'];
 
-function simulate(form: SimulatorForm): RoutingSimulationResult {
+const RISK_PENALTY: Record<string, number> = { low: 0, medium: 5, high: 10, critical: 15 };
+
+function reasonFor(active: boolean, toolReady: boolean, modelReady: boolean, knowledgeReady: boolean, policyBlocked: boolean, policyReason: string): string {
+  if (!active) return 'Not active / disabled / paused';
+  if (policyBlocked) return `Policy blocked — ${policyReason}`;
+  if (!toolReady) return 'BLOCKED — Tool access not registered';
+  if (!modelReady) return 'BLOCKED — Model assignment missing';
+  if (!knowledgeReady) return 'BLOCKED — Knowledge access missing';
+  return 'Registry eligible (planning only)';
+}
+
+// Deterministic, registry-only candidate evaluation. Never fabricates runtime
+// availability; capacity is always "unknown" (runtime is not connected).
+function simulateLive(form: SimulatorForm, data: GroupLiveData): SimulatorOutcome {
+  const siteKey = form.site || 'group';
+  const siteRow = siteKey === 'group' ? undefined : data.sites.find((s) => s.site_key === siteKey);
+  const siteUuid = siteRow?.id ?? null;
+  const siteName = siteRow?.name ?? 'Group-wide';
+
+  const toolAccessActive = new Set(data.toolAccess.filter((t) => t.is_active !== false).map((t) => t.agent_id));
+  const modelAssignActive = new Set(data.modelAssignments.filter((m) => m.is_active !== false).map((m) => m.agent_id));
+  const knowledgeActive = new Set(data.knowledgePermissions.filter((k) => k.is_active !== false).map((k) => k.agent_id));
+  const activePolicies = data.policies.filter((p) => p.is_active !== false);
+
+  const candidates: AgentCandidate[] = [];
+  const blocked: AgentCandidate[] = [];
+  const candidateInputs: SimulationCandidateInput[] = [];
+
+  let rank = 0;
+
+  for (const agent of data.agents) {
+    const inScope =
+      siteKey === 'group'
+        ? agent.site_id == null
+        : agent.site_id == null || agent.site_id === siteUuid;
+    if (!inScope) continue;
+
+    const uuid = agent.id;
+    const active = agent.is_active !== false && agent.status !== 'disabled' && agent.status !== 'paused';
+    const toolReady = toolAccessActive.has(uuid);
+    const modelReady = modelAssignActive.has(uuid);
+    const knowledgeReady = knowledgeActive.has(uuid);
+
+    let policyResult = 'allow';
+    let policyReason = '';
+    for (const p of activePolicies) {
+      const appliesSite = p.site_id == null || p.site_id === siteUuid;
+      const appliesAgent = p.agent_id == null || p.agent_id === uuid;
+      if (!appliesSite || !appliesAgent) continue;
+      if (p.effect === 'deny') { policyResult = 'deny'; policyReason = p.name; break; }
+      if (p.effect === 'restrict') { policyResult = 'restrict'; policyReason = p.name; }
+      if (p.effect === 'require_approval' && policyResult !== 'restrict') policyResult = 'require_approval';
+    }
+    const policyBlocked = policyResult === 'deny' || policyResult === 'restrict';
+
+    const riskPenalty = RISK_PENALTY[agent.risk_level ?? 'low'] ?? 0;
+    const score = Math.max(0, Math.min(100,
+      50 + (inScope ? 15 : 0) + (toolReady ? 10 : 0) + (modelReady ? 10 : 0) + (knowledgeReady ? 5 : 0) + (policyBlocked ? 0 : 10) - riskPenalty,
+    ));
+
+    const eligible = active && toolReady && modelReady && knowledgeReady && !policyBlocked;
+
+    const candidate: AgentCandidate = {
+      agentId: agent.agent_key,
+      agentName: agent.name,
+      eligibility: eligible ? 'Eligible' : 'Blocked',
+      score,
+      health: (agent.health as AgentHealth) ?? 'unknown',
+      capacity: 'unknown',
+      capabilityMatch: `${score}%`,
+      permissionMatch: toolReady && modelReady && knowledgeReady ? 'Full' : 'Partial',
+      reason: reasonFor(active, toolReady, modelReady, knowledgeReady, policyBlocked, policyReason),
+      selected: false,
+    };
+
+    candidateInputs.push({
+      agentKey: agent.agent_key,
+      rank: rank + 1,
+      score,
+      eligible,
+      rejectionReason: eligible ? null : candidate.reason,
+      selectionReason: eligible ? 'Registry eligible (planning only)' : null,
+    });
+
+    if (eligible) {
+      rank += 1;
+      candidates.push(candidate);
+    } else {
+      blocked.push(candidate);
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const recommended = candidates[0] ?? null;
+
+  const checks = recommended
+    ? {
+        toolReady: toolAccessActive.has(data.agents.find((a) => a.agent_key === recommended.agentId)?.id ?? ''),
+        modelReady: modelAssignActive.has(data.agents.find((a) => a.agent_key === recommended.agentId)?.id ?? ''),
+        knowledgeReady: knowledgeActive.has(data.agents.find((a) => a.agent_key === recommended.agentId)?.id ?? ''),
+      }
+    : { toolReady: false, modelReady: false, knowledgeReady: false };
+
+  const missingDependencies: string[] = [];
+  if (recommended) {
+    if (!checks.toolReady) missingDependencies.push('Tool access not registered');
+    if (!checks.modelReady) missingDependencies.push('Model assignment missing');
+    if (!checks.knowledgeReady) missingDependencies.push('Knowledge access missing');
+  }
+
+  const approvalRequired =
+    form.risk === 'high' || form.risk === 'critical' || form.priority === 'urgent' || form.priority === 'critical';
+
+  const workflow = approvalRequired
+    ? ['Classify', 'Resolve Site', 'Select Agent', 'Check Permissions', 'Human Approval', 'Execute', 'Verify', 'Complete']
+    : ['Classify', 'Resolve Site', 'Select Agent', 'Check Permissions', 'Execute', 'Verify', 'Complete'];
+
+  return {
+    detectedSite: siteName,
+    recommendedAgentId: recommended?.agentId ?? '',
+    recommendedAgentName: recommended?.agentName ?? 'No eligible agent',
+    candidates: candidates.slice(0, 5),
+    blockedCandidates: blocked,
+    missingDependencies,
+    policyResult: recommended ? 'allow' : 'no_eligible',
+    approvalRequired,
+    workflow,
+    tools: [],
+    estimatedCost: '—',
+    candidateInputs,
+    workflowSteps: workflow,
+    checks,
+  };
+}
+
+// Demo-mode fallback (explicit demo only) — mirrors the previous behaviour.
+function simulateDemo(form: SimulatorForm): SimulatorOutcome {
   const siteId = form.site || 'group';
   const siteName = form.site ? (demoSites.find((s) => s.id === form.site)?.name ?? 'Group-wide') : 'Group-wide';
 
-  // Candidate pool: site-specific agents for the chosen site (or core agents for group).
   const pool =
     siteId === 'group'
       ? demoAgents.filter((a) => a.assignedSite === null)
@@ -74,24 +221,28 @@ function simulate(form: SimulatorForm): RoutingSimulationResult {
     ? ['Classify', 'Select Agent', 'Check Permissions', 'Human Approval', 'Execute', 'Verify', 'Complete']
     : ['Classify', 'Select Agent', 'Check Permissions', 'Execute', 'Verify', 'Complete'];
 
-  const estimatedCost =
-    form.priority === 'urgent' || form.priority === 'critical' ? '£0.10' : form.priority === 'high' ? '£0.06' : '£0.02';
-
   return {
     detectedSite: siteName,
     recommendedAgentId: recommended.id,
     recommendedAgentName: recommended.name,
     candidates,
+    blockedCandidates: [],
+    missingDependencies: [],
+    policyResult: 'allow',
     approvalRequired,
     workflow,
     tools: ['Supabase', 'n8n', 'Monitoring'],
-    estimatedCost,
+    estimatedCost: form.priority === 'urgent' || form.priority === 'critical' ? '£0.10' : form.priority === 'high' ? '£0.06' : '£0.02',
+    candidateInputs: candidates.map((c, i) => ({ agentKey: c.agentId, rank: i + 1, score: c.score, eligible: true, rejectionReason: null, selectionReason: c.reason })),
+    workflowSteps: workflow,
+    checks: { toolReady: true, modelReady: true, knowledgeReady: true },
   };
 }
 
-export default function RoutingSimulatorModal({ open, onClose, onSave }: RoutingSimulatorModalProps) {
+export default function RoutingSimulatorModal({ open, onClose, mode, onSave }: RoutingSimulatorModalProps) {
+  const data = useGroupLiveData();
   const [form, setForm] = useState<SimulatorForm>(empty);
-  const [preview, setPreview] = useState<RoutingSimulationResult | null>(null);
+  const [preview, setPreview] = useState<SimulatorOutcome | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -101,6 +252,17 @@ export default function RoutingSimulatorModal({ open, onClose, onSave }: Routing
   }, [open]);
 
   const set = (patch: Partial<SimulatorForm>) => setForm((f) => ({ ...f, ...patch }));
+
+  const live = mode === 'live';
+
+  const siteOptions = live
+    ? data.sites.map((s) => ({ key: s.site_key, name: s.name }))
+    : demoSites.map((s) => ({ key: s.id, name: s.name }));
+
+  const handlePreview = () => {
+    if (live) setPreview(simulateLive(form, data));
+    else setPreview(simulateDemo(form));
+  };
 
   const handleSave = () => {
     if (!preview) return;
@@ -134,8 +296,8 @@ export default function RoutingSimulatorModal({ open, onClose, onSave }: Routing
             <label className="block text-xs font-label text-foreground-500 mb-1">Site (if known)</label>
             <select value={form.site} onChange={(e) => set({ site: e.target.value })} className={`${inputCls} cursor-pointer`}>
               <option value="">Auto-detect / Group-wide</option>
-              {demoSites.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+              {siteOptions.map((s) => (
+                <option key={s.key} value={s.key}>{s.name}</option>
               ))}
             </select>
           </div>
@@ -176,11 +338,11 @@ export default function RoutingSimulatorModal({ open, onClose, onSave }: Routing
 
         <div className="flex items-center justify-between gap-3 pt-1 flex-wrap">
           <p className="text-[11px] font-label text-foreground-600 max-w-[320px]">
-            Routing simulation does not execute agents or modify production systems.
+            Simulation / planning only — execution runtime is disabled. No agent, tool, model or n8n execution occurs.
           </p>
           <button
             type="button"
-            onClick={() => setPreview(simulate(form))}
+            onClick={handlePreview}
             className="bg-accent-500 hover:bg-accent-400 text-background-950 px-5 py-2 rounded-full text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
           >
             Preview Routing
@@ -191,7 +353,7 @@ export default function RoutingSimulatorModal({ open, onClose, onSave }: Routing
           <div className="bg-background-50 border border-background-200/60 rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h4 className="text-sm font-heading font-semibold text-foreground-50">Routing Preview</h4>
-              <span className="text-[11px] font-label text-foreground-600">⚠️ Demo preview only</span>
+              <span className="text-[11px] font-label text-foreground-600">{live ? 'Live registry eligibility' : '⚠️ Demo preview only'}</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
@@ -214,14 +376,17 @@ export default function RoutingSimulatorModal({ open, onClose, onSave }: Routing
                 </div>
               </div>
               <div>
-                <p className="text-[10px] font-label text-foreground-600 uppercase tracking-wide">Estimated cost</p>
-                <p className="text-foreground-100 mt-0.5">{preview.estimatedCost}</p>
+                <p className="text-[10px] font-label text-foreground-600 uppercase tracking-wide">Runtime capacity</p>
+                <p className="text-foreground-100 mt-0.5">Unknown — runtime not connected</p>
               </div>
             </div>
 
             <div>
               <p className="text-[10px] font-label text-foreground-600 uppercase tracking-wide mb-1.5">Candidate agents</p>
               <div className="space-y-1.5">
+                {preview.candidates.length === 0 && (
+                  <p className="text-sm text-foreground-500">No eligible candidates in the live registry.</p>
+                )}
                 {preview.candidates.map((c) => (
                   <div key={c.agentId} className="flex items-center justify-between gap-3 text-sm">
                     <span className="text-foreground-300 truncate">{c.agentName}</span>
@@ -231,6 +396,31 @@ export default function RoutingSimulatorModal({ open, onClose, onSave }: Routing
               </div>
             </div>
 
+            {preview.blockedCandidates.length > 0 && (
+              <div>
+                <p className="text-[10px] font-label text-foreground-600 uppercase tracking-wide mb-1.5">Blocked / ineligible</p>
+                <div className="space-y-1">
+                  {preview.blockedCandidates.map((c) => (
+                    <div key={c.agentId} className="flex items-center justify-between gap-3 text-xs">
+                      <span className="text-foreground-500 truncate">{c.agentName}</span>
+                      <span className="text-red-400 shrink-0">{c.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {preview.missingDependencies.length > 0 && (
+              <div>
+                <p className="text-[10px] font-label text-foreground-600 uppercase tracking-wide mb-1.5">Missing dependencies</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {preview.missingDependencies.map((d) => (
+                    <span key={d} className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded px-2 py-0.5">{d}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div>
               <p className="text-[10px] font-label text-foreground-600 uppercase tracking-wide mb-1.5">Proposed workflow</p>
               <div className="flex flex-wrap gap-1.5">
@@ -239,15 +429,6 @@ export default function RoutingSimulatorModal({ open, onClose, onSave }: Routing
                     <span className="text-xs text-foreground-300 border border-background-300/50 rounded-md px-2 py-1">{step}</span>
                     {i < preview.workflow.length - 1 && <i className="ri-arrow-right-line text-foreground-600 w-3.5 h-3.5 flex items-center justify-center"></i>}
                   </span>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="text-[10px] font-label text-foreground-600 uppercase tracking-wide mb-1.5">Tools</p>
-              <div className="flex flex-wrap gap-1.5">
-                {preview.tools.map((t) => (
-                  <span key={t} className="text-xs text-foreground-500 bg-background-100 border border-background-200/60 rounded-md px-2 py-1">{t}</span>
                 ))}
               </div>
             </div>

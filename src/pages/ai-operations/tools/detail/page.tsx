@@ -21,6 +21,8 @@ import { getAuditByTool } from '@/pages/ai-operations/audit/selectors';
 import RecentAuditEvents from '@/pages/ai-operations/audit/components/RecentAuditEvents';
 import ConnectionFormModal from '@/pages/ai-operations/tools/components/ConnectionFormModal';
 import AgentAccessFormModal from '@/pages/ai-operations/tools/detail/components/AgentAccessFormModal';
+import RuntimeConnectivity from '@/pages/ai-operations/runtime-health/components/RuntimeConnectivity';
+import { resolveCategorySystem } from '@/lib/ai-operations/runtimeHealth';
 
 export default function ToolDetailPage() {
   const { connectionId } = useParams<{ connectionId: string }>();
@@ -116,6 +118,12 @@ export default function ToolDetailPage() {
       <ConnectionHeader connection={connection} onEdit={() => setEditOpen(true)} />
 
       <Overview connection={connection} />
+
+      {/* Live runtime connectivity (verified server-side, manual check only) */}
+      <RuntimeConnectivity
+        connectionKey={connection.id}
+        system={resolveCategorySystem(connection.category)}
+      />
 
       {/* Live agent access (from ai_tool_agent_access) */}
       <AgentAccess

@@ -17,7 +17,7 @@ export default function OrchestratorStatus() {
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-base font-heading font-semibold text-foreground-100">DFP Group Master Orchestrator</h2>
-              <StatusPill tone={display.tone} label={display.label} pulse />
+              <StatusPill tone="secondary" label="Planning / Registry State" />
             </div>
             <p className="text-sm text-foreground-500 mt-1 max-w-2xl">
               Routes AI tasks to the correct group, site and specialist agent while enforcing permissions, approvals and audit controls.
@@ -63,8 +63,8 @@ export default function OrchestratorStatus() {
           <p className="text-lg font-heading font-bold text-foreground-100 mt-1">{o.lastRoutingEvent}</p>
         </div>
         <div className="bg-background-50 border border-background-200/40 rounded-lg p-3">
-          <p className="text-[10px] font-label text-foreground-600 uppercase tracking-wide">Demo</p>
-          <p className="text-[11px] font-label text-foreground-500 mt-1.5 leading-snug">⚠️ Not production — no live routing occurs.</p>
+          <p className="text-[10px] font-label text-foreground-600 uppercase tracking-wide">Runtime</p>
+          <p className="text-[11px] font-label text-foreground-500 mt-1.5 leading-snug">Not connected — no live routing occurs.</p>
         </div>
       </div>
     </section>

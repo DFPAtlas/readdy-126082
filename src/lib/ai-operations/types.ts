@@ -905,3 +905,198 @@ export interface AiScheduleHistoryRow {
   correlation_id: string | null;
   created_at: string;
 }
+
+// --- Master Orchestrator (Phase 2 Prompt 14) ----------------------------------
+
+// Top-level orchestration request / routing-plan row. `orchestration_key` is
+// the stable application identifier (used by routes). `site_id` /
+// `selected_agent_id` / `approval_id` / `run_id` are resolved UUIDs (ON DELETE
+// SET NULL). Planning/governance metadata only — `execution_allowed` is FALSE
+// for all migrated records and is NOT an Execute switch. No secrets.
+export interface AiOrchestrationRow {
+  id: string;
+  orchestration_key: string;
+  title: string;
+  description: string | null;
+  request_type: string | null;
+  request_source: string | null;
+  requested_action: string | null;
+  site_id: string | null;
+  environment: string;
+  priority: string | null;
+  risk_level: string | null;
+  status: string | null;
+  classification: string | null;
+  classification_confidence: string | null;
+  selected_agent_id: string | null;
+  approval_id: string | null;
+  run_id: string | null;
+  policy_result: string | null;
+  permission_result: string | null;
+  approval_required: boolean;
+  verification_required: boolean;
+  uat_required: boolean;
+  audit_required: boolean;
+  execution_allowed: boolean;
+  blocked_reason: string | null;
+  correlation_id: string | null;
+  failure_strategy: string | null;
+  fallback_strategy: string | null;
+  result_summary: string | null;
+  requested_by: string | null;
+  requested_at: string | null;
+  completed_at: string | null;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Ordered orchestration plan step row. `orchestration_id` FK ON DELETE RESTRICT.
+// `agent_id` resolved UUID (ON DELETE SET NULL). `tool_references` /
+// `knowledge_references` are JSONB-safe arrays. Planned workflow metadata only.
+export interface AiOrchestrationStepRow {
+  id: string;
+  orchestration_id: string;
+  step_number: number;
+  name: string | null;
+  step_type: string | null;
+  agent_id: string | null;
+  status: string | null;
+  risk_level: string | null;
+  approval_required: boolean;
+  tool_references: unknown;
+  knowledge_references: unknown;
+  model_reference: string | null;
+  input_summary: string | null;
+  expected_output: string | null;
+  result_summary: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Candidate-agent scoring row. `orchestration_id`/`agent_id` FK ON DELETE
+// RESTRICT. Scoring metadata only — runtime availability is not implied.
+export interface AiOrchestrationCandidateRow {
+  id: string;
+  orchestration_id: string;
+  agent_id: string;
+  rank: number;
+  score: number | null;
+  capability_score: number | null;
+  availability_score: number | null;
+  policy_score: number | null;
+  tool_score: number | null;
+  knowledge_score: number | null;
+  model_score: number | null;
+  risk_score: number | null;
+  eligible: boolean;
+  rejection_reason: string | null;
+  selection_reason: string | null;
+  created_at: string;
+}
+
+// Append-oriented routing/governance decision row. INSERT-only — history is
+// never overwritten or deleted. Display-safe business reasoning only.
+export interface AiOrchestrationDecisionRow {
+  id: string;
+  orchestration_id: string;
+  decision_type: string | null;
+  decision: string | null;
+  reason: string | null;
+  actor_type: string | null;
+  actor_reference: string | null;
+  policy_reference: string | null;
+  agent_reference: string | null;
+  previous_state: string | null;
+  new_state: string | null;
+  created_at: string;
+}
+
+// --- Cost, Usage & Budgets (Phase 2 Prompt 15) -------------------------------
+
+// Budget registry row. `budget_key` is the stable application identifier.
+// `site_id`/`agent_id`/`model_id`/`provider_id` are resolved UUIDs (ON DELETE
+// SET NULL). Configuration + reporting metadata only — budget limits are NOT
+// enforced against runtime. `currency` is a safe ISO code (e.g. GBP). No
+// customer billing credentials.
+export interface AiBudgetRow {
+  id: string;
+  budget_key: string;
+  name: string;
+  description: string | null;
+  scope_type: string;
+  scope_reference: string | null;
+  site_id: string | null;
+  agent_id: string | null;
+  model_id: string | null;
+  provider_id: string | null;
+  environment: string;
+  period_type: string;
+  currency: string;
+  budget_amount: number | null;
+  warning_threshold_percent: number | null;
+  critical_threshold_percent: number | null;
+  current_usage_amount: number;
+  forecast_amount: number | null;
+  status: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  owner_team: string | null;
+  approval_required: boolean;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Append-oriented usage/cost record. `usage_key` is the stable identifier.
+// Optional FKs (site/agent/run/model/provider) resolve to live rows where the
+// key exists. `is_estimate`/`cost_source` mark honest migrated baselines.
+export interface AiUsageCostRow {
+  id: string;
+  usage_key: string;
+  occurred_at: string;
+  site_id: string | null;
+  agent_id: string | null;
+  run_id: string | null;
+  model_id: string | null;
+  provider_id: string | null;
+  usage_type: string | null;
+  source_type: string | null;
+  source_reference: string | null;
+  input_units: number | null;
+  output_units: number | null;
+  total_units: number | null;
+  unit_type: string | null;
+  estimated_cost: number | null;
+  actual_cost: number | null;
+  currency: string;
+  cost_source: string | null;
+  environment: string;
+  correlation_id: string | null;
+  is_estimate: boolean;
+  metadata: unknown;
+  created_at: string;
+}
+
+// Append-oriented budget threshold/governance history row. `event_key` is the
+// stable identifier. `budget_id` is the resolved ai_budgets.id UUID (ON DELETE
+// RESTRICT). No external notification is sent from these records.
+export interface AiBudgetEventRow {
+  id: string;
+  event_key: string;
+  budget_id: string | null;
+  event_type: string;
+  threshold_percent: number | null;
+  observed_amount: number | null;
+  budget_amount: number | null;
+  forecast_amount: number | null;
+  status: string;
+  severity: string;
+  acknowledged: boolean;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  summary: string | null;
+  created_at: string;
+}

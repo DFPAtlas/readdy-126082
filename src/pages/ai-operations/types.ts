@@ -733,7 +733,7 @@ export type Severity = 'info' | 'low' | 'medium' | 'high' | 'critical';
 
 export type ActivitySourceType = 'agent' | 'run' | 'approval' | 'site' | 'monitoring' | 'uat' | 'system';
 
-export type CapacityState = 'available' | 'busy' | 'high_load' | 'at_capacity' | 'paused' | 'offline';
+export type CapacityState = 'available' | 'busy' | 'high_load' | 'at_capacity' | 'paused' | 'offline' | 'unknown';
 
 export interface LiveActivityEvent {
   id: string;

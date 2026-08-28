@@ -1,0 +1,23 @@
+# ============================================================================
+# dfp-runtime-bridge — local Docker deployment (outbound-first).
+#
+#   docker compose up -d
+#
+# The container makes OUTBOUND HTTPS calls only; it exposes no inbound ports to
+# n8n / Ollama / the private LAN. All secrets come from a local `.env` file
+# (create it from `.env.example` — names only, no committed values).
+# ============================================================================
+
+services:
+  dfp-runtime-bridge:
+    build: .
+    container_name: dfp-runtime-bridge
+    restart: unless-stopped
+    env_file:
+      - .env
+    # No `ports:` mapping — the bridge is outbound-only and never listens.
+    # If your local n8n/Ollama live on the host, reach them via host networking:
+    # network_mode: host
+    environment:
+      - HEARTBEAT_INTERVAL_SECONDS=${HEARTBEAT_INTERVAL_SECONDS:-60}
+      - POLL_INTERVAL_SECONDS=${POLL_INTERVAL_SECONDS:-30}

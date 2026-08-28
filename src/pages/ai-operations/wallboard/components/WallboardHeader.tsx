@@ -60,9 +60,9 @@ export default function WallboardHeader({
             Group Wallboard
           </p>
         </div>
-        <span className="inline-flex items-center gap-2 text-sm font-label text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-3 py-1 whitespace-nowrap">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          Group AI Operational
+        <span className="inline-flex items-center gap-2 text-sm font-label text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-full px-3 py-1 whitespace-nowrap">
+          <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+          Partial Live Data
         </span>
       </div>
 

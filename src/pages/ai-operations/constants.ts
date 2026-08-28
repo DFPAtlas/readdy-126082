@@ -540,6 +540,7 @@ export const CAPACITY_STATE: Record<CapacityState, StatusDisplay> = {
   at_capacity: { tone: 'red', label: 'At Capacity' },
   paused: { tone: 'amber', label: 'Paused' },
   offline: { tone: 'secondary', label: 'Offline' },
+  unknown: { tone: 'secondary', label: 'Unknown' },
 };
 
 export const ACTIVITY_SOURCE_LABELS: Record<ActivitySourceType, string> = {

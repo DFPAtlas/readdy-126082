@@ -1,19 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { AiGlobalSearchResult } from '@/pages/ai-operations/search/searchIndex';
-import { searchIndexByRef } from '@/pages/ai-operations/search/searchIndex';
+import { buildLiveSearchIndex, demoSearchIndex } from '@/pages/ai-operations/search/searchIndex';
 import { searchRecords, QUICK_NAV, CATEGORY_ORDER, type QuickNavItem } from '@/pages/ai-operations/search/searchUtils';
 import { useSearch } from '@/pages/ai-operations/search/SearchContext';
+import { useGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
 import ResultRow from '@/pages/ai-operations/search/components/ResultRow';
 
 type FlatItem = { kind: 'result'; result: AiGlobalSearchResult } | { kind: 'nav'; item: QuickNavItem };
 
 export default function CommandPalette() {
   const { isOpen, closeSearch, recent, addRecent, favourites, toggleFavourite, isFavourite } = useSearch();
+  const data = useGroupLiveData();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // Build the search index from the already-loaded live snapshot (once per
+  // snapshot change). Demo index is only used as an explicit fallback when live
+  // data is unavailable, and is surfaced as Demo mode.
+  const index = useMemo(() => {
+    if (data.mode === 'unavailable') return demoSearchIndex;
+    return buildLiveSearchIndex(data);
+  }, [data]);
+  const indexByRef = useMemo(() => new Map(index.map((r) => [r.referenceId, r])), [index]);
+  const sourceLabel = data.mode === 'unavailable' ? 'Demo' : 'Partial Live';
 
   // Reset + focus on open.
   useEffect(() => {
@@ -25,7 +37,7 @@ export default function CommandPalette() {
     }
   }, [isOpen]);
 
-  const results = useMemo(() => searchRecords(query), [query]);
+  const results = useMemo(() => searchRecords(query, index), [query, index]);
 
   const { sections, flat } = useMemo(() => {
     if (query.trim()) {
@@ -49,21 +61,21 @@ export default function CommandPalette() {
     sections.push({ label: 'Quick Navigation', items: QUICK_NAV.map((n) => ({ kind: 'nav' as const, item: n })) });
 
     const favs = favourites
-      .map((ref) => searchIndexByRef.get(ref))
+      .map((ref) => indexByRef.get(ref))
       .filter((r): r is AiGlobalSearchResult => Boolean(r));
     if (favs.length) {
       sections.push({ label: 'Favourites', items: favs.map((r) => ({ kind: 'result' as const, result: r })) });
     }
 
     const recs = recent
-      .map((ref) => searchIndexByRef.get(ref))
+      .map((ref) => indexByRef.get(ref))
       .filter((r): r is AiGlobalSearchResult => Boolean(r) && !favourites.includes(r.referenceId));
     if (recs.length) {
       sections.push({ label: 'Recently Opened', items: recs.map((r) => ({ kind: 'result' as const, result: r })) });
     }
 
     return { sections, flat: sections.flatMap((s) => s.items) };
-  }, [query, results, favourites, recent]);
+  }, [query, results, favourites, recent, indexByRef]);
 
   // Keep the active index in range when the flat list shrinks.
   useEffect(() => {
@@ -201,16 +213,9 @@ export default function CommandPalette() {
 
           {/* Footer */}
           <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-background-400/60 shrink-0 text-[10px] font-label text-foreground-600">
-            <span className="hidden sm:inline-flex items-center gap-2 whitespace-nowrap">
-              <span className="inline-flex items-center gap-0.5">
-                <span className="border border-background-400/60 rounded px-1">↑</span>
-                <span className="border border-background-400/60 rounded px-1">↓</span>
-                <span>Navigate</span>
-              </span>
-              <span className="inline-flex items-center gap-0.5">
-                <span className="border border-background-400/60 rounded px-1">↵</span>
-                <span>Open</span>
-              </span>
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+              <span className={`w-1.5 h-1.5 rounded-full ${sourceLabel === 'Demo' ? 'bg-foreground-600' : 'bg-amber-400'}`}></span>
+              {sourceLabel}
             </span>
             {query.trim() ? (
               <button

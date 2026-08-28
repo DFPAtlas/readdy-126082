@@ -1,11 +1,13 @@
 // ============================================================================
-// AI Operations — Wallboard / Big Screen derived-data layer.
+// AI Operations — Wallboard selectors.
 //
-// Thin read-only projections over the central registries (via the existing
-// Live Operations / Cost selectors). No record is duplicated here and no
-// production polling, execution or write occurs — the wallboard renders the
-// same demo data the Live Operations screen already uses, only reformatted
-// for a large, distance-viewed display.
+// Derived exclusively from the consolidated group live-data selectors (shared
+// with Live Operations / Overview). No separate wallboard data model exists —
+// these are read-only reformattings of the same live snapshot for a large,
+// distance-viewed display.
+//
+// "Users Online" intentionally remains a demo placeholder (no live analytics
+// source exists) and is clearly labelled as such.
 // ============================================================================
 
 import type {
@@ -13,8 +15,7 @@ import type {
   OperationsAlert,
   LiveActivityEvent,
   SystemHealthRow,
-  AgentRegistryRecord,
-  AiApproval,
+  BudgetStatus,
 } from '@/pages/ai-operations/types';
 import {
   getStatusBarMetrics,
@@ -25,10 +26,10 @@ import {
   getPlatformHealthRows,
   getActivityEvents,
   getOperationsAlerts,
-} from '@/pages/ai-operations/live/selectors';
-import { getCostSummary } from '@/pages/ai-operations/costs/selectors';
-import { demoBudgets } from '@/mocks/ai-operations-costs';
-import { demoAgents } from '@/mocks/ai-operations-agents';
+  type AgentsWorkingItem,
+  type ApprovalWatchItem,
+} from '@/pages/ai-operations/live/liveDataSelectors';
+import { getGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
 
 // --- Primary KPI strip ----------------------------------------------------------
 
@@ -46,13 +47,11 @@ export interface WallboardKpis {
 
 export function getWallboardKpis(): WallboardKpis {
   const m = getStatusBarMetrics();
-  const agents = demoAgents as AgentRegistryRecord[];
-  const agentsOnline = agents.filter(
-    (a) => !['disabled', 'not_configured', 'paused'].includes(a.status),
-  ).length;
+  const data = getGroupLiveData();
+  const agentsRegistered = data.agents.filter((a) => !['disabled', 'not_configured', 'paused'].includes(a.status ?? '')).length;
   return {
     sitesHealthy: `${m.sitesHealthy} / ${m.sitesTotal}`,
-    agentsOnline,
+    agentsOnline: agentsRegistered,
     agentsWorking: m.agentsWorking,
     activeRuns: m.activeRuns,
     queuedRuns: m.queuedRuns,
@@ -69,7 +68,7 @@ export function getWallboardSites(): SiteHealthCard[] {
   return getSiteHealth();
 }
 
-// --- Active operations (Runs + Orchestrator) --------------------------------------
+// --- Active operations (Runs) ------------------------------------------------------
 
 export interface ActiveOperation {
   site: string;
@@ -85,7 +84,7 @@ export interface ActiveOperation {
 }
 
 export function getActiveOperations(): ActiveOperation[] {
-  const mission = getMissionControl().map((item) => ({
+  return getMissionControl().slice(0, 8).map((item) => ({
     site: item.siteName,
     agent: item.agentName,
     task: item.task,
@@ -97,17 +96,15 @@ export function getActiveOperations(): ActiveOperation[] {
     kind: 'run' as const,
     refId: item.runId,
   }));
-
-  return mission.slice(0, 8);
 }
 
-// --- Agents working now (limited) -------------------------------------------------
+// --- Agents working now -----------------------------------------------------------
 
-export function getWallboardAgents(limit = 6): AgentRegistryRecord[] {
+export function getWallboardAgents(limit = 6): AgentsWorkingItem[] {
   return getAgentsWorkingNow().slice(0, limit);
 }
 
-// --- Critical alerts --------------------------------------------------------------
+// --- Critical alerts ---------------------------------------------------------------
 
 const CRITICAL_SEVERITIES = ['critical', 'high'];
 
@@ -117,27 +114,27 @@ export function getCriticalAlerts(limit = 6): OperationsAlert[] {
     .slice(0, limit);
 }
 
-// --- Approvals watch ---------------------------------------------------------------
+// --- Approvals watch -----------------------------------------------------------------
 
-export function getWallboardApprovals(limit = 5): AiApproval[] {
+export function getWallboardApprovals(limit = 5): ApprovalWatchItem[] {
   return getApprovalWatch().slice(0, limit);
 }
 
-// --- System health -----------------------------------------------------------------
+// --- System health -------------------------------------------------------------------
 
-const WALLBOARD_SYSTEM_KEYS = ['orchestrator', 'supabase', 'n8n', 'models', 'monitoring', 'notifications', 'email', 'billing'];
+const WALLBOARD_SYSTEM_KEYS = ['orchestrator', 'sites', 'agents', 'runs', 'tools', 'models', 'runtime', 'monitoring', 'analytics'];
 
 export function getWallboardSystemHealth(): SystemHealthRow[] {
   return getPlatformHealthRows().filter((row) => WALLBOARD_SYSTEM_KEYS.includes(row.key));
 }
 
-// --- Live activity ---------------------------------------------------------------
+// --- Live activity --------------------------------------------------------------------
 
 export function getWallboardActivity(limit = 10): LiveActivityEvent[] {
   return getActivityEvents().slice(0, limit);
 }
 
-// --- Users online (demo placeholder) ---------------------------------------------
+// --- Users online (demo placeholder — no live analytics source) -----------------------
 
 export interface UsersOnlineBreakdown {
   site: string;
@@ -158,7 +155,7 @@ export function getUsersOnline(): { total: number; sites: UsersOnlineBreakdown[]
   };
 }
 
-// --- AI spend --------------------------------------------------------------------
+// --- AI spend (estimated / migrated baseline) ----------------------------------------
 
 export interface WallboardSpend {
   total: string;
@@ -168,23 +165,49 @@ export interface WallboardSpend {
   budgetStatusLabel: string;
 }
 
+function pounds(n: number | null | undefined): number {
+  return typeof n === 'number' && Number.isFinite(n) ? n : 0;
+}
+
+const BUDGET_LABELS: Record<string, string> = {
+  healthy: 'Healthy',
+  warning: 'Warning',
+  critical: 'Critical',
+  exceeded: 'Exceeded',
+  disabled: 'Disabled',
+  not_configured: 'Not Configured',
+};
+
 export function getWallboardSpend(): WallboardSpend {
-  const summary = getCostSummary();
-  const groupBudget = demoBudgets.find((b) => b.scope === 'group');
-  const status = groupBudget?.status ?? 'warning';
-  const labels: Record<string, string> = {
-    healthy: 'Healthy',
-    warning: 'Warning',
-    critical: 'Critical',
-    exceeded: 'Exceeded',
-    disabled: 'Disabled',
-    not_configured: 'Not Configured',
-  };
+  const data = getGroupLiveData();
+  const usage = data.usageCosts;
+
+  const total = usage.reduce((acc, u) => acc + (pounds(u.estimated_cost) || pounds(u.actual_cost)), 0);
+
+  const bySite = new Map<string, number>();
+  for (const u of usage) {
+    if (!u.site_id) continue;
+    const key = data.siteNameByUuid.get(u.site_id) ?? 'Group-wide';
+    bySite.set(key, (bySite.get(key) ?? 0) + (pounds(u.estimated_cost) || pounds(u.actual_cost)));
+  }
+  const highestSite = [...bySite.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
+
+  const byModel = new Map<string, number>();
+  for (const u of usage) {
+    if (!u.model_id) continue;
+    const key = data.models.find((m) => m.id === u.model_id)?.name ?? '—';
+    byModel.set(key, (byModel.get(key) ?? 0) + (pounds(u.estimated_cost) || pounds(u.actual_cost)));
+  }
+  const highestModel = [...byModel.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
+
+  const groupBudget = data.budgets.find((b) => b.scope_type === 'group');
+  const status = (groupBudget?.status ?? 'not_configured') as BudgetStatus;
+
   return {
-    total: summary.costToday,
-    highestSite: summary.highestCostSite,
-    highestModel: summary.highestCostModel,
+    total: `£${total.toFixed(2)}`,
+    highestSite,
+    highestModel,
     budgetStatus: status,
-    budgetStatusLabel: labels[status] ?? status,
+    budgetStatusLabel: BUDGET_LABELS[status] ?? status,
   };
 }

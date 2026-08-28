@@ -12,7 +12,7 @@ export default function KpiStrip({ large = false }: { large?: boolean }) {
 
   const items: KpiItem[] = [
     { label: 'Sites Healthy', value: k.sitesHealthy, tone: 'text-emerald-400', icon: 'ri-global-line' },
-    { label: 'Agents Online', value: k.agentsOnline, tone: 'text-foreground-100', icon: 'ri-robot-2-line' },
+    { label: 'Agents Active', value: k.agentsOnline, tone: 'text-foreground-100', icon: 'ri-robot-2-line' },
     { label: 'Agents Working', value: k.agentsWorking, tone: 'text-accent-400', icon: 'ri-flashlight-line' },
     { label: 'Active Runs', value: k.activeRuns, tone: 'text-accent-400', icon: 'ri-play-circle-line' },
     { label: 'Queued Runs', value: k.queuedRuns, tone: 'text-foreground-200', icon: 'ri-stack-line' },

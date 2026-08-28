@@ -7,12 +7,14 @@ import {
   ENVIRONMENT_OPTIONS,
   ENVIRONMENT_LABELS,
 } from '@/pages/ai-operations/constants';
+import type { ScopeOptions } from '@/pages/ai-operations/costs/CostsContext';
 
 interface BudgetFormModalProps {
   open: boolean;
   onClose: () => void;
   budget: AiBudget | null;
-  onSave: (budget: AiBudget) => void;
+  scopeOptions: ScopeOptions;
+  onSave: (budget: AiBudget) => Promise<{ error: string | null }>;
 }
 
 const inputCls =
@@ -20,48 +22,18 @@ const inputCls =
 
 const labelCls = 'block text-[11px] font-label text-foreground-500 uppercase tracking-wide mb-1.5';
 
-const SITES = [
-  { id: 'digital-footprint', label: 'Digital Footprint' },
-  { id: 'quickguard', label: 'QuickGuard' },
-  { id: 'guardianhub', label: 'GuardianHub' },
-  { id: 'lethub', label: 'LetHub' },
-  { id: 'wedora', label: 'Wedora' },
-  { id: 'the-forge', label: 'The Forge' },
-];
-
-const AGENTS = [
-  { id: 'tf-code', label: 'Code Agent' },
-  { id: 'core-orchestrator', label: 'DFP Group Master Orchestrator' },
-  { id: 'core-diagnostics', label: 'Diagnostics Agent' },
-  { id: 'qg-match', label: 'Guard Matching Agent' },
-];
-
-const MODELS = [
-  { id: 'MOD-CLAUDE-SONNET', label: 'Claude Sonnet' },
-  { id: 'MOD-GPT4O', label: 'GPT-4o' },
-  { id: 'MOD-CLAUDE-HAIKU', label: 'Claude Haiku' },
-  { id: 'MOD-LLAMA-70B', label: 'Llama 3.1 70B' },
-];
-
-const PROVIDERS = [
-  { id: 'PROV-ANTHROPIC', label: 'Anthropic' },
-  { id: 'PROV-OPENAI', label: 'OpenAI' },
-  { id: 'PROV-OLLAMA', label: 'Local Ollama' },
-];
-
-function targetsFor(scope: BudgetScope) {
-  if (scope === 'site') return SITES;
-  if (scope === 'agent') return AGENTS;
-  if (scope === 'model') return MODELS;
-  if (scope === 'provider') return PROVIDERS;
+function targetsFor(scope: BudgetScope, options: ScopeOptions) {
+  if (scope === 'site') return options.sites;
+  if (scope === 'agent') return options.agents;
+  if (scope === 'model') return options.models;
+  if (scope === 'provider') return options.providers;
   return [];
 }
 
-export default function BudgetFormModal({ open, onClose, budget, onSave }: BudgetFormModalProps) {
+export default function BudgetFormModal({ open, onClose, budget, scopeOptions, onSave }: BudgetFormModalProps) {
   const [name, setName] = useState(budget?.name ?? '');
   const [scope, setScope] = useState<BudgetScope>(budget?.scope ?? 'site');
   const [scopeId, setScopeId] = useState(budget?.scopeId ?? '');
-  const [dailyLimit, setDailyLimit] = useState(budget?.dailyLimit ?? '');
   const [monthlyLimit, setMonthlyLimit] = useState(budget?.monthlyLimit ?? '');
   const [warningThreshold, setWarningThreshold] = useState(budget?.warningThreshold ?? 70);
   const [criticalThreshold, setCriticalThreshold] = useState(budget?.criticalThreshold ?? 90);
@@ -69,15 +41,17 @@ export default function BudgetFormModal({ open, onClose, budget, onSave }: Budge
   const [environment, setEnvironment] = useState(budget?.environment ?? 'production');
   const [reviewDate, setReviewDate] = useState(budget?.reviewDate ?? '2026-09-01');
   const [notes, setNotes] = useState(budget?.notes ?? '');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const targets = targetsFor(scope);
+  const targets = targetsFor(scope, scopeOptions);
 
   const handleScopeChange = (next: BudgetScope) => {
     setScope(next);
     setScopeId('');
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const target = targets.find((t) => t.id === scopeId);
     const id = budget?.id ?? `BUD-${Date.now().toString(36).toUpperCase()}`;
@@ -89,21 +63,28 @@ export default function BudgetFormModal({ open, onClose, budget, onSave }: Budge
       scopeId: scope === 'group' || scope === 'environment' ? null : scopeId || null,
       scopeLabel: scope === 'group' ? 'Group-wide' : scope === 'environment' ? environment : target?.label ?? '—',
       monthlyLimit: monthlyLimit.trim() || '£0.00',
-      dailyLimit: dailyLimit.trim() || '£0.00',
+      dailyLimit: '—',
       warningThreshold,
       criticalThreshold,
-      currentSpend: '£0.00',
-      forecast: '£0.00',
+      currentSpend: budget?.currentSpend ?? '£0.00',
+      forecast: budget?.forecast ?? '£0.00',
       remaining: monthlyLimit.trim() || '£0.00',
-      status: 'not_configured',
+      status: budget?.status ?? 'healthy',
       ownerTeam: ownerTeam.trim() || 'Group AI Operations',
       environment,
-      startDate: '2026-08-25',
+      startDate: budget?.startDate ?? '2026-08-25',
       reviewDate: reviewDate || '2026-09-01',
       notes: notes.trim(),
     };
 
-    onSave(record);
+    setSaving(true);
+    setSaveError(null);
+    const result = await onSave(record);
+    setSaving(false);
+    if (result?.error) {
+      setSaveError(result.error);
+      return;
+    }
     onClose();
   };
 
@@ -148,12 +129,12 @@ export default function BudgetFormModal({ open, onClose, budget, onSave }: Budge
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className={labelCls}>Monthly limit</label>
-            <input value={monthlyLimit} onChange={(e) => setMonthlyLimit(e.target.value)} required placeholder="£100.00" className={inputCls} />
+            <label className={labelCls}>Monthly limit (£)</label>
+            <input value={monthlyLimit} onChange={(e) => setMonthlyLimit(e.target.value)} required placeholder="100.00" className={inputCls} />
           </div>
           <div>
-            <label className={labelCls}>Daily limit</label>
-            <input value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)} placeholder="£4.00" className={inputCls} />
+            <label className={labelCls}>Review date</label>
+            <input type="date" value={reviewDate} onChange={(e) => setReviewDate(e.target.value)} className={inputCls} />
           </div>
         </div>
 
@@ -168,15 +149,9 @@ export default function BudgetFormModal({ open, onClose, budget, onSave }: Budge
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className={labelCls}>Owner / team</label>
-            <input value={ownerTeam} onChange={(e) => setOwnerTeam(e.target.value)} className={inputCls} placeholder="e.g. Group AI Operations" />
-          </div>
-          <div>
-            <label className={labelCls}>Review date</label>
-            <input type="date" value={reviewDate} onChange={(e) => setReviewDate(e.target.value)} className={inputCls} />
-          </div>
+        <div>
+          <label className={labelCls}>Owner / team</label>
+          <input value={ownerTeam} onChange={(e) => setOwnerTeam(e.target.value)} className={inputCls} placeholder="e.g. Group AI Operations" />
         </div>
 
         <div>
@@ -186,9 +161,13 @@ export default function BudgetFormModal({ open, onClose, budget, onSave }: Budge
 
         <div className="bg-amber-500/10 border border-amber-500/25 rounded-md p-3">
           <p className="text-[11px] font-label text-amber-300 leading-relaxed">
-            Budgets are stored locally as demo metadata only — no spend limit is enforced and no real billing system is touched.
+            Budgets are configuration &amp; reporting metadata only — no spend limit is enforced and no billing system is touched. Budget enforcement runtime is not connected.
           </p>
         </div>
+
+        {saveError && (
+          <p className="text-xs font-label text-red-400">{saveError}</p>
+        )}
 
         <div className="flex items-center justify-end gap-2 pt-1">
           <button
@@ -200,9 +179,10 @@ export default function BudgetFormModal({ open, onClose, budget, onSave }: Budge
           </button>
           <button
             type="submit"
-            className="inline-flex items-center gap-1.5 text-xs font-label bg-accent-500 hover:bg-accent-400 text-background-950 rounded-md px-3 py-2 transition-colors duration-150 cursor-pointer whitespace-nowrap"
+            disabled={saving}
+            className="inline-flex items-center gap-1.5 text-xs font-label bg-accent-500 hover:bg-accent-400 text-background-950 rounded-md px-3 py-2 transition-colors duration-150 cursor-pointer whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            Save Budget
+            {saving ? 'Saving…' : 'Save Budget'}
           </button>
         </div>
       </form>

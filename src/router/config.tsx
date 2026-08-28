@@ -38,6 +38,13 @@ import WebsiteUatDashboard from "@/pages/admin/website-uat/page";
 import SupportIntegrations from "@/pages/admin/support-integrations/page";
 import SupportIntegrationTestForm from "@/pages/admin/support-integrations/test-form/page";
 import UatAdminGuard from "@/components/feature/UatAdminGuard";
+import TesterAuthGuard from "@/components/feature/TesterAuthGuard";
+import TesterLayout from "@/pages/account-uat/layout";
+import TesterUatDashboard from "@/pages/account-uat/page";
+import AssignmentDetail from "@/pages/account-uat/assignment/page";
+import UatRunner from "@/pages/account-uat/run/page";
+import JobDetail from "@/pages/account-uat/job/page";
+import UatMarketplace from "@/pages/account-uat/marketplace/page";
 import AiOperationsPage from "@/pages/ai-operations/page";
 import SitesLayout from "@/pages/ai-operations/sites/SitesLayout";
 import SitesPage from "@/pages/ai-operations/sites/page";
@@ -85,6 +92,8 @@ import ScheduleDetailPage from "@/pages/ai-operations/schedules/detail/page";
 import SearchPage from "@/pages/ai-operations/search/page";
 import WallboardPage from "@/pages/ai-operations/wallboard/page";
 import ReadinessPage from "@/pages/ai-operations/readiness/page";
+import RuntimeHealthPage from "@/pages/ai-operations/runtime-health/page";
+import RuntimeControlsPage from "@/pages/ai-operations/runtime-controls/page";
 
 const routes: RouteObject[] = [
   {
@@ -110,6 +119,23 @@ const routes: RouteObject[] = [
   {
     path: "/ai-operations/wallboard",
     element: <WallboardPage />,
+  },
+  {
+    path: "/account/uat",
+    element: <TesterAuthGuard><TesterLayout /></TesterAuthGuard>,
+    children: [
+      { index: true, element: <TesterUatDashboard /> },
+      { path: "assignment/:assignmentId", element: <AssignmentDetail /> },
+      { path: "assignment/:assignmentId/run", element: <UatRunner /> },
+      { path: "job/:jobId", element: <JobDetail /> },
+    ],
+  },
+  {
+    path: "/uat",
+    element: <TesterAuthGuard><TesterLayout /></TesterAuthGuard>,
+    children: [
+      { index: true, element: <UatMarketplace /> },
+    ],
   },
   {
     path: "/",
@@ -260,6 +286,8 @@ const routes: RouteObject[] = [
       },
       { path: "ai-operations/search", element: <SearchPage /> },
       { path: "ai-operations/readiness", element: <ReadinessPage /> },
+      { path: "ai-operations/runtime-health", element: <RuntimeHealthPage /> },
+      { path: "ai-operations/runtime-controls", element: <RuntimeControlsPage /> },
       { path: "command-centre/tickets", element: <SupportTickets /> },
       { path: "admin/website-uat", element: <UatAdminGuard><WebsiteUatDashboard /></UatAdminGuard> },
       { path: "admin/support-integrations", element: <SupportIntegrations /> },

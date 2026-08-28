@@ -1,19 +1,40 @@
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { useRuntimeHealth } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
+import { HEALTH_STATUS_META } from '@/lib/ai-operations/runtimeHealth';
+import { computeAvailability } from '@/lib/ai-operations/runtimeMonitoring';
 import type { AiProvider } from '@/pages/ai-operations/types';
 import { MODEL_STATUS, PROVIDER_TYPE_LABELS } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
+function providerSystemSlug(p: AiProvider): string | null {
+  if (p.type === 'local') return 'ollama';
+  const name = p.name.toLowerCase();
+  if (name.includes('openai')) return 'openai';
+  if (name.includes('anthropic') || name.includes('claude')) return 'anthropic';
+  return null;
+}
+
 export default function ProviderStatus({ providers }: { providers: AiProvider[] }) {
+  const health = useRuntimeHealth();
+
   return (
     <section className="bg-background-100 border border-background-200/60 rounded-lg">
       <div className="px-4 py-3 border-b border-background-200/60 flex items-center justify-between gap-3">
         <h3 className="text-sm font-label font-semibold text-foreground-200 uppercase tracking-wide">Provider Status</h3>
-        <span className="text-[10px] font-label text-foreground-600">Registry metadata — no live checks</span>
+        <span className="text-[10px] font-label text-foreground-600">Registry metadata · API connectivity when monitored</span>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-background-200/40">
         {providers.map((p) => {
           const status = MODEL_STATUS[p.status];
+          const system = providerSystemSlug(p);
+          const derived = system ? health.latestBySystem.get(system) : undefined;
+          const availability = system
+            ? computeAvailability(health.checks.filter((c) => c.system_slug === system))
+            : null;
+          const runtimeMeta = derived ? HEALTH_STATUS_META[derived.currentStatus] : null;
+
           return (
             <div key={p.id} className="p-4">
               <div className="flex items-start justify-between gap-2">
@@ -23,6 +44,26 @@ export default function ProviderStatus({ providers }: { providers: AiProvider[] 
                 </div>
                 <StatusPill tone={status.tone} label={status.label} pulse={p.status === 'degraded'} />
               </div>
+
+              {/* Provider API connectivity (persisted monitoring state) */}
+              <div className="mt-2.5 flex items-center gap-1.5">
+                <span className="text-[9px] font-label text-foreground-600 uppercase tracking-wide whitespace-nowrap">API Connectivity</span>
+                {runtimeMeta ? (
+                  <StatusPill tone={runtimeMeta.tone} label={runtimeMeta.label} pulse={derived?.currentStatus === 'degraded'} />
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-label text-foreground-600 whitespace-nowrap">
+                    <i className="ri-time-line w-3 h-3 flex items-center justify-center"></i>
+                    Not Checked
+                  </span>
+                )}
+              </div>
+
+              {derived && (
+                <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] font-label text-foreground-600">
+                  <span>last {derived.lastCheckedAt ? new Date(derived.lastCheckedAt).toLocaleTimeString('en-US', { hour12: false }) : '—'}</span>
+                  <span>{availability != null ? `${availability}% avail` : 'no history'}</span>
+                </div>
+              )}
 
               <p className="text-xs text-foreground-500 mt-3 line-clamp-2 leading-relaxed">{p.description}</p>
 

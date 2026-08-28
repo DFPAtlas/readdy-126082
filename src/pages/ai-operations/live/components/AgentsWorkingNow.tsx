@@ -9,7 +9,7 @@ export default function AgentsWorkingNow() {
   return (
     <section className="bg-background-100 border border-background-200/60 rounded-lg">
       <div className="px-4 py-3 border-b border-background-200/60 flex items-center justify-between">
-        <h3 className="text-sm font-label font-semibold text-foreground-200 uppercase tracking-wide">Agents Working Now</h3>
+        <h3 className="text-sm font-label font-semibold text-foreground-200 uppercase tracking-wide">Agents Registered (Active)</h3>
         <span className="text-xs font-label text-foreground-600">{agents.length} agents</span>
       </div>
 

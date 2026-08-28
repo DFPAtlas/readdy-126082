@@ -1,15 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { AiGlobalSearchResult } from '@/pages/ai-operations/search/searchIndex';
-import { searchIndex } from '@/pages/ai-operations/search/searchIndex';
+import { buildLiveSearchIndex, demoSearchIndex } from '@/pages/ai-operations/search/searchIndex';
 import {
   queryResults,
   applyFilters,
   RECORD_TYPE_OPTIONS,
   CATEGORY_ORDER,
 } from '@/pages/ai-operations/search/searchUtils';
-import { demoSites } from '@/mocks/ai-operations-sites';
 import { useSearch } from '@/pages/ai-operations/search/SearchContext';
+import { useGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
 import ResultRow from '@/pages/ai-operations/search/components/ResultRow';
 
 const selectCls =
@@ -19,6 +19,7 @@ export default function SearchPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { addRecent, toggleFavourite, isFavourite } = useSearch();
+  const data = useGroupLiveData();
 
   const [query, setQuery] = useState(searchParams.get('q') ?? '');
   const [recordType, setRecordType] = useState('');
@@ -26,14 +27,22 @@ export default function SearchPage() {
   const [module, setModule] = useState('');
   const [status, setStatus] = useState('');
 
+  // Build the live index once per snapshot change (demo fallback is surfaced
+  // explicitly as Demo mode when live data is unavailable).
+  const index = useMemo(() => {
+    if (data.mode === 'unavailable') return demoSearchIndex;
+    return buildLiveSearchIndex(data);
+  }, [data]);
+  const sourceLabel = data.mode === 'unavailable' ? 'Demo' : 'Partial Live';
+
   const statusOptions = useMemo(
-    () => Array.from(new Set(searchIndex.map((r) => r.statusLabel))).sort(),
-    [],
+    () => Array.from(new Set(index.map((r) => r.statusLabel))).sort(),
+    [index],
   );
 
   const results = useMemo(() => {
-    return applyFilters(queryResults(query), { recordType, site, module, status });
-  }, [query, recordType, site, module, status]);
+    return applyFilters(queryResults(query, index), { recordType, site, module, status });
+  }, [query, index, recordType, site, module, status]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, AiGlobalSearchResult[]>();
@@ -59,7 +68,12 @@ export default function SearchPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-heading font-bold text-foreground-50">Search AI Operations</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-2xl font-heading font-bold text-foreground-50">Search AI Operations</h1>
+            <span className={`inline-flex items-center gap-1.5 text-[10px] font-label rounded-full px-2 py-0.5 whitespace-nowrap ${sourceLabel === 'Demo' ? 'text-foreground-500 bg-background-100 border border-background-200/60' : 'text-amber-400 bg-amber-500/10 border border-amber-500/25'}`}>
+              {sourceLabel}
+            </span>
+          </div>
           <p className="text-sm text-foreground-500 mt-1 max-w-2xl">
             Search every AI Operations registry — sites, agents, runs, approvals, orchestrations, tools, models, knowledge, policies, alerts, audit, budgets, notifications and schedules.
           </p>
@@ -94,8 +108,8 @@ export default function SearchPage() {
           <select value={site} onChange={(e) => setSite(e.target.value)} className={selectCls}>
             <option value="">Site: All</option>
             <option value="group">Group-wide</option>
-            {demoSites.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
+            {data.sites.map((s) => (
+              <option key={s.site_key} value={s.site_key}>{s.name}</option>
             ))}
           </select>
 

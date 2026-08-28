@@ -164,6 +164,8 @@ export default function AuthGuard({ children }: { children: ReactNode }) {
   const isPublic = publicPaths.includes(location.pathname);
   const isMfaSetup = location.pathname === mfaSetupPath;
   const isMfaVerify = location.pathname === mfaVerifyPath;
+  const isTesterPath =
+    location.pathname.startsWith('/account/uat') || location.pathname.startsWith('/uat');
 
   useEffect(() => {
     if (auth.loading) return;
@@ -208,6 +210,16 @@ export default function AuthGuard({ children }: { children: ReactNode }) {
 
   if (!auth.user && !isPublic) return null;
   if (auth.user && isPublic) return null;
+
+  // Tester account area — requires sign-in only (no Command role or MFA).
+  // Testers are not Command staff, so they bypass the invite-only role gate here.
+  if (isTesterPath && auth.user) {
+    return (
+      <AuthContext.Provider value={{ ...auth, refreshMfa }}>
+        {children}
+      </AuthContext.Provider>
+    );
+  }
 
   // Authenticated but no Command Centre role — deny access (invite-only).
   if (auth.user && auth.role === null) {

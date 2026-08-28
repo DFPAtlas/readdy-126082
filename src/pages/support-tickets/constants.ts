@@ -38,6 +38,7 @@ export const SOURCE_OPTIONS: TicketSource[] = [
   'api',
   'ai_agent',
   'import',
+  'uat',
 ];
 
 export const statusLabels: Record<TicketStatus, string> = {
@@ -79,6 +80,7 @@ export const sourceLabels: Record<TicketSource, string> = {
   api: 'API',
   ai_agent: 'AI Agent',
   import: 'Import',
+  uat: 'UAT',
 };
 
 export const statusColors: Record<TicketStatus, string> = {

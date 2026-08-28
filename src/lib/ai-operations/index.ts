@@ -48,6 +48,13 @@ import type {
   AiEventAutomationRuleRow,
   AiMaintenanceWindowRow,
   AiScheduleHistoryRow,
+  AiOrchestrationRow,
+  AiOrchestrationStepRow,
+  AiOrchestrationCandidateRow,
+  AiOrchestrationDecisionRow,
+  AiBudgetRow,
+  AiUsageCostRow,
+  AiBudgetEventRow,
 } from '@/lib/ai-operations/types';
 
 // --- Error sanitisation -------------------------------------------------------
@@ -1744,6 +1751,387 @@ export function appendAiScheduleHistory(
   );
 }
 
+// --- Master Orchestrator (Phase 2 Prompt 14) ----------------------------------
+
+// --- Orchestrations ------------------------------------------------------------
+
+export function getAiOrchestrations(): Promise<AiOpsResult<AiOrchestrationRow[]>> {
+  return runQuery<AiOrchestrationRow[]>(
+    supabase.from('ai_orchestrations').select('*').order('requested_at', { ascending: false }),
+  );
+}
+
+export function getAiOrchestrationByKey(
+  orchestrationKey: string,
+): Promise<AiOpsResult<AiOrchestrationRow>> {
+  return runQuery<AiOrchestrationRow>(
+    supabase.from('ai_orchestrations').select('*').eq('orchestration_key', orchestrationKey).maybeSingle(),
+  );
+}
+
+// Orchestration request metadata input. `orchestration_key` is the stable
+// identifier (used by routes). `site_id`/`selected_agent_id`/`approval_id`/
+// `run_id` are resolved UUIDs (resolved by the caller). Saving a request NEVER
+// creates a run, executes an agent, calls a tool/model, or triggers n8n.
+// `execution_allowed` must remain false. No secrets accepted.
+export interface AiOrchestrationUpsertInput {
+  orchestration_key: string;
+  title: string;
+  description?: string | null;
+  request_type?: string | null;
+  request_source?: string | null;
+  requested_action?: string | null;
+  site_id?: string | null;
+  environment?: string;
+  priority?: string | null;
+  risk_level?: string | null;
+  status?: string | null;
+  classification?: string | null;
+  classification_confidence?: string | null;
+  selected_agent_id?: string | null;
+  approval_id?: string | null;
+  run_id?: string | null;
+  policy_result?: string | null;
+  permission_result?: string | null;
+  approval_required?: boolean;
+  verification_required?: boolean;
+  uat_required?: boolean;
+  audit_required?: boolean;
+  execution_allowed?: boolean;
+  blocked_reason?: string | null;
+  correlation_id?: string | null;
+  failure_strategy?: string | null;
+  fallback_strategy?: string | null;
+  result_summary?: string | null;
+  requested_by?: string | null;
+  is_active?: boolean;
+  notes?: string | null;
+}
+
+export function createAiOrchestration(
+  input: AiOrchestrationUpsertInput,
+): Promise<AiOpsResult<AiOrchestrationRow>> {
+  return runQuery<AiOrchestrationRow>(
+    supabase.from('ai_orchestrations').insert(input).select().single(),
+  );
+}
+
+export function updateAiOrchestration(
+  orchestrationKey: string,
+  input: Partial<AiOrchestrationUpsertInput>,
+): Promise<AiOpsResult<AiOrchestrationRow>> {
+  return runQuery<AiOrchestrationRow>(
+    supabase.from('ai_orchestrations').update(input).eq('orchestration_key', orchestrationKey).select().single(),
+  );
+}
+
+// --- Orchestration Steps -------------------------------------------------------
+
+export function getAiOrchestrationSteps(
+  orchestrationId: string,
+): Promise<AiOpsResult<AiOrchestrationStepRow[]>> {
+  return runQuery<AiOrchestrationStepRow[]>(
+    supabase.from('ai_orchestration_steps').select('*').eq('orchestration_id', orchestrationId).order('step_number', { ascending: true }),
+  );
+}
+
+export function getAllAiOrchestrationSteps(): Promise<AiOpsResult<AiOrchestrationStepRow[]>> {
+  return runQuery<AiOrchestrationStepRow[]>(
+    supabase.from('ai_orchestration_steps').select('*').order('step_number', { ascending: true }),
+  );
+}
+
+// Planned step input. `orchestration_id`/`agent_id` are resolved UUIDs
+// (resolved by the caller). `tool_references`/`knowledge_references` are safe
+// string arrays. Planned workflow metadata only — no run is created.
+export interface AiOrchestrationStepInput {
+  orchestration_id: string;
+  step_number: number;
+  name?: string | null;
+  step_type?: string | null;
+  agent_id?: string | null;
+  status?: string | null;
+  risk_level?: string | null;
+  approval_required?: boolean;
+  tool_references?: string[] | null;
+  knowledge_references?: string[] | null;
+  model_reference?: string | null;
+  input_summary?: string | null;
+  expected_output?: string | null;
+  result_summary?: string | null;
+}
+
+export function createAiOrchestrationStep(
+  input: AiOrchestrationStepInput,
+): Promise<AiOpsResult<AiOrchestrationStepRow>> {
+  return runQuery<AiOrchestrationStepRow>(
+    supabase.from('ai_orchestration_steps').insert(input).select().single(),
+  );
+}
+
+// --- Candidate Scoring ---------------------------------------------------------
+
+export function getAiOrchestrationCandidates(
+  orchestrationId: string,
+): Promise<AiOpsResult<AiOrchestrationCandidateRow[]>> {
+  return runQuery<AiOrchestrationCandidateRow[]>(
+    supabase.from('ai_orchestration_candidates').select('*').eq('orchestration_id', orchestrationId).order('rank', { ascending: true }),
+  );
+}
+
+// Candidate scoring input. `orchestration_id`/`agent_id` are resolved UUIDs.
+// Registry eligibility scoring metadata only — runtime availability is not
+// implied. No secrets.
+export interface AiOrchestrationCandidateInput {
+  orchestration_id: string;
+  agent_id: string;
+  rank?: number;
+  score?: number | null;
+  capability_score?: number | null;
+  availability_score?: number | null;
+  policy_score?: number | null;
+  tool_score?: number | null;
+  knowledge_score?: number | null;
+  model_score?: number | null;
+  risk_score?: number | null;
+  eligible?: boolean;
+  rejection_reason?: string | null;
+  selection_reason?: string | null;
+}
+
+export function createAiOrchestrationCandidate(
+  input: AiOrchestrationCandidateInput,
+): Promise<AiOpsResult<AiOrchestrationCandidateRow>> {
+  return runQuery<AiOrchestrationCandidateRow>(
+    supabase.from('ai_orchestration_candidates').insert(input).select().single(),
+  );
+}
+
+// --- Routing Decisions (append-oriented) ---------------------------------------
+
+export function getAiOrchestrationDecisions(
+  orchestrationId: string,
+): Promise<AiOpsResult<AiOrchestrationDecisionRow[]>> {
+  return runQuery<AiOrchestrationDecisionRow[]>(
+    supabase.from('ai_orchestration_decisions').select('*').eq('orchestration_id', orchestrationId).order('created_at', { ascending: true }),
+  );
+}
+
+export function getAllAiOrchestrationDecisions(): Promise<AiOpsResult<AiOrchestrationDecisionRow[]>> {
+  return runQuery<AiOrchestrationDecisionRow[]>(
+    supabase.from('ai_orchestration_decisions').select('*').order('created_at', { ascending: true }),
+  );
+}
+
+// Append-only decision input. `orchestration_id` is the resolved UUID. Records
+// display-safe business/governance reasoning only — never overwritten. No
+// secrets or hidden chain-of-thought.
+export interface AiOrchestrationDecisionInput {
+  orchestration_id: string;
+  decision_type?: string | null;
+  decision?: string | null;
+  reason?: string | null;
+  actor_type?: string | null;
+  actor_reference?: string | null;
+  policy_reference?: string | null;
+  agent_reference?: string | null;
+  previous_state?: string | null;
+  new_state?: string | null;
+}
+
+export function appendAiOrchestrationDecision(
+  input: AiOrchestrationDecisionInput,
+): Promise<AiOpsResult<AiOrchestrationDecisionRow>> {
+  return runQuery<AiOrchestrationDecisionRow>(
+    supabase.from('ai_orchestration_decisions').insert(input).select().single(),
+  );
+}
+
+// --- Cost, Usage & Budgets (Phase 2 Prompt 15) --------------------------------
+
+// --- Budgets ------------------------------------------------------------------
+
+export function getAiBudgets(): Promise<AiOpsResult<AiBudgetRow[]>> {
+  return runQuery<AiBudgetRow[]>(
+    supabase.from('ai_budgets').select('*').order('created_at', { ascending: true }),
+  );
+}
+
+export function getAiBudgetByKey(budgetKey: string): Promise<AiOpsResult<AiBudgetRow>> {
+  return runQuery<AiBudgetRow>(
+    supabase.from('ai_budgets').select('*').eq('budget_key', budgetKey).maybeSingle(),
+  );
+}
+
+// Budget configuration input. `budget_key` is the stable identifier.
+// `site_id`/`agent_id`/`model_id`/`provider_id` are resolved UUIDs (resolved by
+// the caller, never here). `currency` is a safe ISO code. Budget values are
+// configuration/reporting metadata only — never enforced against runtime. No
+// billing credentials.
+export interface AiBudgetUpsertInput {
+  budget_key: string;
+  name: string;
+  description?: string | null;
+  scope_type?: string;
+  scope_reference?: string | null;
+  site_id?: string | null;
+  agent_id?: string | null;
+  model_id?: string | null;
+  provider_id?: string | null;
+  environment?: string;
+  period_type?: string;
+  currency?: string;
+  budget_amount?: number | null;
+  warning_threshold_percent?: number | null;
+  critical_threshold_percent?: number | null;
+  current_usage_amount?: number;
+  forecast_amount?: number | null;
+  status?: string;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  owner_team?: string | null;
+  approval_required?: boolean;
+  is_active?: boolean;
+  notes?: string | null;
+}
+
+export function createAiBudget(input: AiBudgetUpsertInput): Promise<AiOpsResult<AiBudgetRow>> {
+  return runQuery<AiBudgetRow>(
+    supabase.from('ai_budgets').insert(input).select().single(),
+  );
+}
+
+export function updateAiBudget(
+  budgetKey: string,
+  input: Partial<AiBudgetUpsertInput>,
+): Promise<AiOpsResult<AiBudgetRow>> {
+  return runQuery<AiBudgetRow>(
+    supabase.from('ai_budgets').update(input).eq('budget_key', budgetKey).select().single(),
+  );
+}
+
+// --- Usage costs --------------------------------------------------------------
+
+export function getAiUsageCosts(): Promise<AiOpsResult<AiUsageCostRow[]>> {
+  return runQuery<AiUsageCostRow[]>(
+    supabase.from('ai_usage_costs').select('*').order('occurred_at', { ascending: false }),
+  );
+}
+
+export function getAiUsageCostsBySite(siteId: string): Promise<AiOpsResult<AiUsageCostRow[]>> {
+  return runQuery<AiUsageCostRow[]>(
+    supabase.from('ai_usage_costs').select('*').eq('site_id', siteId).order('occurred_at', { ascending: false }),
+  );
+}
+
+export function getAiUsageCostsByAgent(agentId: string): Promise<AiOpsResult<AiUsageCostRow[]>> {
+  return runQuery<AiUsageCostRow[]>(
+    supabase.from('ai_usage_costs').select('*').eq('agent_id', agentId).order('occurred_at', { ascending: false }),
+  );
+}
+
+export function getAiUsageCostsByModel(modelId: string): Promise<AiOpsResult<AiUsageCostRow[]>> {
+  return runQuery<AiUsageCostRow[]>(
+    supabase.from('ai_usage_costs').select('*').eq('model_id', modelId).order('occurred_at', { ascending: false }),
+  );
+}
+
+export function getAiUsageCostsByProvider(providerId: string): Promise<AiOpsResult<AiUsageCostRow[]>> {
+  return runQuery<AiUsageCostRow[]>(
+    supabase.from('ai_usage_costs').select('*').eq('provider_id', providerId).order('occurred_at', { ascending: false }),
+  );
+}
+
+// Append-only usage/cost input. Optional FKs are resolved UUIDs (resolved by
+// the caller). `is_estimate`/`cost_source` must be set honestly for migrated
+// baselines. No provider billing is called.
+export interface AiUsageCostInput {
+  usage_key: string;
+  occurred_at?: string | null;
+  site_id?: string | null;
+  agent_id?: string | null;
+  run_id?: string | null;
+  model_id?: string | null;
+  provider_id?: string | null;
+  usage_type?: string | null;
+  source_type?: string | null;
+  source_reference?: string | null;
+  input_units?: number | null;
+  output_units?: number | null;
+  total_units?: number | null;
+  unit_type?: string | null;
+  estimated_cost?: number | null;
+  actual_cost?: number | null;
+  currency?: string;
+  cost_source?: string | null;
+  environment?: string;
+  correlation_id?: string | null;
+  is_estimate?: boolean;
+  metadata?: Record<string, unknown> | null;
+}
+
+export function createAiUsageCost(input: AiUsageCostInput): Promise<AiOpsResult<AiUsageCostRow>> {
+  return runQuery<AiUsageCostRow>(
+    supabase.from('ai_usage_costs').insert(input).select().single(),
+  );
+}
+
+// --- Budget events ------------------------------------------------------------
+
+export function getAiBudgetEvents(): Promise<AiOpsResult<AiBudgetEventRow[]>> {
+  return runQuery<AiBudgetEventRow[]>(
+    supabase.from('ai_budget_events').select('*').order('created_at', { ascending: false }),
+  );
+}
+
+export function getAiBudgetEventsByBudget(budgetId: string): Promise<AiOpsResult<AiBudgetEventRow[]>> {
+  return runQuery<AiBudgetEventRow[]>(
+    supabase.from('ai_budget_events').select('*').eq('budget_id', budgetId).order('created_at', { ascending: false }),
+  );
+}
+
+// Append-only governance event input. `budget_id` is the resolved ai_budgets.id
+// UUID. No external notification is sent from these records.
+export interface AiBudgetEventInput {
+  event_key: string;
+  budget_id?: string | null;
+  event_type: string;
+  threshold_percent?: number | null;
+  observed_amount?: number | null;
+  budget_amount?: number | null;
+  forecast_amount?: number | null;
+  status?: string;
+  severity?: string;
+  acknowledged?: boolean;
+  summary?: string | null;
+}
+
+export function createAiBudgetEvent(input: AiBudgetEventInput): Promise<AiOpsResult<AiBudgetEventRow>> {
+  return runQuery<AiBudgetEventRow>(
+    supabase.from('ai_budget_events').insert(input).select().single(),
+  );
+}
+
+// Acknowledgement metadata only — sets acknowledged/acknowledged_by/
+// acknowledged_at. Never triggers external actions. No notifications.
+export function acknowledgeAiBudgetEvent(
+  eventKey: string,
+  actor: string,
+): Promise<AiOpsResult<AiBudgetEventRow>> {
+  return runQuery<AiBudgetEventRow>(
+    supabase
+      .from('ai_budget_events')
+      .update({
+        acknowledged: true,
+        acknowledged_by: actor,
+        acknowledged_at: new Date().toISOString(),
+      })
+      .eq('event_key', eventKey)
+      .select()
+      .single(),
+  );
+}
+
 // --- Re-exports for convenience ----------------------------------------------
 
 export type {
@@ -1780,4 +2168,11 @@ export type {
   AiEventAutomationRuleRow,
   AiMaintenanceWindowRow,
   AiScheduleHistoryRow,
+  AiOrchestrationRow,
+  AiOrchestrationStepRow,
+  AiOrchestrationCandidateRow,
+  AiOrchestrationDecisionRow,
+  AiBudgetRow,
+  AiUsageCostRow,
+  AiBudgetEventRow,
 } from '@/lib/ai-operations/types';

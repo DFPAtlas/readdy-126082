@@ -20,6 +20,8 @@ const QUICK_ACTIONS = [
   { key: 'notifications', label: 'Notifications & Escalations', icon: 'ri-notification-3-line', to: '/ai-operations/notifications' },
   { key: 'schedules', label: 'Scheduling & Automation', icon: 'ri-calendar-2-line', to: '/ai-operations/schedules' },
   { key: 'readiness', label: 'Production Readiness', icon: 'ri-shield-check-line', to: '/ai-operations/readiness' },
+  { key: 'runtime-health', label: 'Runtime Health', icon: 'ri-radar-line', to: '/ai-operations/runtime-health' },
+  { key: 'runtime-controls', label: 'Runtime Controls', icon: 'ri-shield-cross-line', to: '/ai-operations/runtime-controls' },
 ];
 
 export default function QuickActions() {

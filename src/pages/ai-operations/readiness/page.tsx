@@ -1,4 +1,12 @@
 import ReadinessKpis from '@/pages/ai-operations/readiness/components/ReadinessKpis';
+import Phase2Closeout from '@/pages/ai-operations/readiness/components/Phase2Closeout';
+import RuntimeHealthReadiness from '@/pages/ai-operations/readiness/components/RuntimeHealthReadiness';
+import RuntimeConfigurationReadiness from '@/pages/ai-operations/readiness/components/RuntimeConfigurationReadiness';
+import RuntimeSafetyReadiness from '@/pages/ai-operations/readiness/components/RuntimeSafetyReadiness';
+import RuntimeBoundaryReadiness from '@/pages/ai-operations/readiness/components/RuntimeBoundaryReadiness';
+import RuntimeN8nConnectorReadiness from '@/pages/ai-operations/readiness/components/RuntimeN8nConnectorReadiness';
+import RuntimeMessageBoundaryReadiness from '@/pages/ai-operations/readiness/components/RuntimeMessageBoundaryReadiness';
+import RuntimeBridgeReadiness from '@/pages/ai-operations/readiness/components/RuntimeBridgeReadiness';
 import ModuleReadinessMatrix from '@/pages/ai-operations/readiness/components/ModuleReadinessMatrix';
 import MockDataAudit from '@/pages/ai-operations/readiness/components/MockDataAudit';
 import DatabasePlan from '@/pages/ai-operations/readiness/components/DatabasePlan';
@@ -36,12 +44,36 @@ export default function ReadinessPage() {
         </div>
         <div className="shrink-0 inline-flex items-center gap-2 bg-background-100 border border-background-200/60 rounded-lg px-3 py-2">
           <i className="ri-information-line text-accent-400 text-sm w-4 h-4 flex items-center justify-center"></i>
-          <span className="text-xs font-label text-foreground-100">Demo Architecture Complete — Production Connections Pending</span>
+          <span className="text-xs font-label text-foreground-100">Phase 2 Control Plane Complete — Runtime Pending</span>
         </div>
       </div>
 
       {/* KPIs */}
       <ReadinessKpis />
+
+      {/* Phase 2 closeout */}
+      <Phase2Closeout />
+
+      {/* Phase 3 runtime connectivity & health */}
+      <RuntimeHealthReadiness />
+
+      {/* Phase 3 runtime configuration & connection gate */}
+      <RuntimeConfigurationReadiness />
+
+      {/* Phase 3 runtime safety controls + pilot execution gate */}
+      <RuntimeSafetyReadiness />
+
+      {/* Phase 3 trusted runtime boundary (deny-only gateway) */}
+      <RuntimeBoundaryReadiness />
+
+      {/* Phase 3 n8n runtime connector (read-only metadata adapter) */}
+      <RuntimeN8nConnectorReadiness />
+
+      {/* Phase 3 runtime message boundary (signed callbacks) */}
+      <RuntimeMessageBoundaryReadiness />
+
+      {/* Phase 3 private runtime bridge (outbound local runtime connectivity) */}
+      <RuntimeBridgeReadiness />
 
       {/* Module readiness matrix */}
       <ModuleReadinessMatrix />

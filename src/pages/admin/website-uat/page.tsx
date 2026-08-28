@@ -8,6 +8,8 @@ import PageReviewTab from './components/PageReviewTab';
 import LinkCheckerTab from './components/LinkCheckerTab';
 import ImageManagerTab from './components/ImageManagerTab';
 import UatTestRunsTab from './components/UatTestRunsTab';
+import UatRewardsTab from './components/UatRewardsTab';
+import DefectReviewTab from './components/DefectReviewTab';
 import ApprovalQueueTab from './components/ApprovalQueueTab';
 
 const TABS = [
@@ -17,6 +19,8 @@ const TABS = [
   { key: 'link-checker', label: 'Evidence', icon: 'ri-camera-line' },
   { key: 'image-manager', label: 'Sessions', icon: 'ri-timer-line' },
   { key: 'uat-runs', label: 'Test Runs', icon: 'ri-test-tube-line' },
+  { key: 'rewards', label: 'Rewards', icon: 'ri-money-pound-circle-line' },
+  { key: 'defects', label: 'Defects', icon: 'ri-bug-2-line' },
   { key: 'approval', label: 'Approvals', icon: 'ri-shield-check-line' },
 ];
 
@@ -164,6 +168,8 @@ export default function WebsiteUatDashboard() {
         {activeTab === 'link-checker' && <LinkCheckerTab />}
         {activeTab === 'image-manager' && <ImageManagerTab />}
         {activeTab === 'uat-runs' && <UatTestRunsTab />}
+        {activeTab === 'rewards' && <UatRewardsTab />}
+        {activeTab === 'defects' && <DefectReviewTab />}
         {activeTab === 'approval' && <ApprovalQueueTab />}
       </div>
     </div>

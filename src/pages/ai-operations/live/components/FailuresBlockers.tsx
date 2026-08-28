@@ -13,9 +13,11 @@ function openLink(item: OperationsAlert) {
       ? '/ai-operations/agents'
       : item.referenceType === 'approval'
         ? '/ai-operations/approvals'
-        : item.referenceType === 'site'
-          ? '/ai-operations/sites'
-          : null;
+        : item.referenceType === 'alert'
+          ? '/ai-operations/alerts'
+          : item.referenceType === 'site'
+            ? '/ai-operations/sites'
+            : null;
   if (!base) return null;
   return (
     <Link

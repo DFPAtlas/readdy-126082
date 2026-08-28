@@ -5,6 +5,7 @@ import { useAuth } from '@/components/feature/AuthGuard';
 import { useUnreadTicketCount } from '@/pages/support-tickets/hooks';
 import { hasPermission, ROLE_BADGE_COLORS, ROLE_LABELS, type Role } from '@/lib/permissions';
 import { SearchProvider } from '@/pages/ai-operations/search/SearchContext';
+import { GroupLiveDataProvider } from '@/pages/ai-operations/live/groupLiveDataStore';
 import CommandPalette from '@/pages/ai-operations/search/components/CommandPalette';
 import SearchTrigger from '@/pages/ai-operations/search/components/SearchTrigger';
 
@@ -86,6 +87,7 @@ export default function AppLayout() {
   };
 
   return (
+    <GroupLiveDataProvider>
     <SearchProvider>
     <div className="min-h-screen bg-background-50 flex">
       {/* Sidebar backdrop (mobile only) */}
@@ -415,5 +417,6 @@ export default function AppLayout() {
       {/* Global AI Operations command palette */}
       <CommandPalette />
     </SearchProvider>
+    </GroupLiveDataProvider>
   );
 }
