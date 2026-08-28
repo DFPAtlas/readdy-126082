@@ -24,6 +24,7 @@ import {
   type ApprovalResolutionContext,
 } from '@/pages/ai-operations/approvals/approvalMapper';
 import type { DataSourceMode } from '@/pages/ai-operations/sites/components/DataSourceBadge';
+import { APPROVAL_GATED_APPROVAL_TYPE } from '@/lib/ai-operations/runtimeApprovalGatedRun';
 
 // Data-source state for the Human Approvals & Governance module. Mirrors the
 // proven Sites/Agents/Runs pattern so the page never pretends demo data is live:
@@ -302,8 +303,11 @@ export function ApprovalsProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // TEST/SANDBOX approvals are excluded from the registry view.
-    const approvalRows = (approvalsRes.data ?? []).filter((r) => r.environment !== 'sandbox');
+    // TEST/SANDBOX approvals are excluded from the registry view, except the
+    // fixed Prompt 19 approval-gated diagnostic approval (a real live approval).
+    const approvalRows = (approvalsRes.data ?? []).filter(
+      (r) => r.environment !== 'sandbox' || r.request_type === APPROVAL_GATED_APPROVAL_TYPE,
+    );
 
     const historyByApprovalId = new Map<string, AiApprovalHistoryRow[]>();
     if (historyRes.data) {

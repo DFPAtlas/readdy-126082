@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ============================================================================
 // runtime-bridge — secure OUTBOUND-FIRST private-runtime bridge API for DFP AI
-// Operations (Phase 3 Prompt 08 + 09C + 10 + 11A + 12 + 13 + 14 + 17 + 18).
+// Operations (Phase 3 Prompt 08 + 09C + 10 + 11A + 12 + 13 + 14 + 17 + 18 + 19).
 //
 // The trusted server-side endpoint that a local trusted runtime machine (the
 // `dfp-runtime-bridge` local service) calls OUTBOUND over HTTPS. The cloud never
@@ -13,7 +13,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // SANDBOX INFERENCE PROBE (Prompt 11A) + CONTROLLED N8N SANDBOX WORKFLOW PROBE
 // (Prompt 12) + CONTROLLED MULTI-RUNTIME CHAIN PROBE (Prompt 13) + CONTROLLED
 // REGISTERED-AGENT DRY-RUN PROBE (Prompt 14) + CONTROLLED READ-ONLY TOOL PROBE
-// (Prompt 17) + CONTROLLED RUNTIME-BACKED DIAGNOSTIC RUN (Prompt 18).
+// (Prompt 17) + CONTROLLED RUNTIME-BACKED DIAGNOSTIC RUN (Prompt 18) +
+// CONTROLLED HUMAN APPROVAL-GATED DIAGNOSTIC RUN (Prompt 19).
 //
 // It NEVER:
 //   * executes an agent or a business n8n workflow (the ONLY n8n execution is
@@ -23,7 +24,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //     dfp_agent_dry_run_v1 agent dry-run diagnostic, mapped server-side)
 //   * calls a model/tool, retrieves knowledge, sends notifications
 //   * creates arbitrary runs or mutates orchestration execution state (the ONLY
-//     run lifecycle touched is the single fixed diagnostic run, Prompt 18)
+//     run lifecycles touched are the single fixed diagnostic run (Prompt 18) and
+//     the single fixed approval-gated diagnostic run (Prompt 19))
 //   * runs schedules or performs remediation
 //   * proxies arbitrary URLs/IPs/ports/files/shell commands
 //   * mutates the ai_operations_models registry automatically
@@ -45,7 +47,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // report_transport_probe_ack, report_ollama_inference_probe,
 // report_n8n_sandbox_probe, report_runtime_chain_probe,
 // report_agent_dry_run_probe, report_readonly_tool_probe,
-// report_diagnostic_run_tool_probe.
+// report_diagnostic_run_tool_probe, report_approval_gated_diagnostic_probe.
 // ============================================================================
 
 const CORS = {
@@ -126,6 +128,14 @@ const DIAGNOSTIC_RUN_PROBE_MODE = "sandbox_diagnostic";
 const DIAGNOSTIC_RUN_TASK_KEY = "dfp-runtime-health-diagnostic-task";
 const DIAGNOSTIC_RUN_STEP_COUNT = 6;
 
+// --- Controlled human approval-gated diagnostic run (Prompt 19) ----------------
+const APPROVAL_GATED_PROBE_MESSAGE_TYPE = "approval_gated_diagnostic_probe";
+const APPROVAL_GATED_PROBE_RESULT_MESSAGE_TYPE = "approval_gated_diagnostic_probe_result";
+const APPROVAL_GATED_PROBE_ID = "dfp_approval_run_v1";
+const APPROVAL_GATED_PROBE_MODE = "sandbox_diagnostic";
+const APPROVAL_GATED_TASK_KEY_PREFIX = "dfp-runtime-health-approval-task";
+const APPROVAL_GATED_STEP_COUNT = 6;
+
 const ALLOWED_OPERATIONS = new Set([
   "handshake",
   "heartbeat",
@@ -140,6 +150,7 @@ const ALLOWED_OPERATIONS = new Set([
   "report_agent_dry_run_probe",
   "report_readonly_tool_probe",
   "report_diagnostic_run_tool_probe",
+  "report_approval_gated_diagnostic_probe",
 ]);
 
 // Allowlisted capabilities only — never shell/arbitrary_http/filesystem/docker.
@@ -171,6 +182,7 @@ const ALLOWED_CONTROL_MESSAGE_TYPES = new Set([
   "agent_dry_run_probe",
   "readonly_tool_probe",
   "diagnostic_run_tool_probe",
+  "approval_gated_diagnostic_probe",
 ]);
 
 // Control messages that have their own distinct signed-result lifecycle (they
@@ -183,6 +195,7 @@ const PROBE_CONTROL_TYPES = new Set([
   "agent_dry_run_probe",
   "readonly_tool_probe",
   "diagnostic_run_tool_probe",
+  "approval_gated_diagnostic_probe",
 ]);
 
 const ALLOWED_PROBE_ACK_STATUSES = new Set(["verified", "rejected"]);
@@ -430,6 +443,60 @@ async function validateReadonlyToolGrant(
   return { ok: true, detail: null };
 }
 
+// Cloud-side revalidation of the approval-gated approval (Prompt 19). The bridge
+// never trusts HAL-supplied values alone — it re-checks that the approval is
+// genuinely approved, belongs to the run/task, and was approved before dispatch.
+async function validateApprovalGatedApproval(
+  admin: ReturnType<typeof createClient>,
+  runReference: string,
+  approvalReference: string,
+  taskReference: string,
+  dispatchCreatedAt: string,
+): Promise<{ ok: boolean; detail: string | null }> {
+  if (!approvalReference) return { ok: false, detail: "approval_reference_missing" };
+
+  const { data: approvalRows } = await admin
+    .from("ai_approvals")
+    .select("id, approval_key, status, run_id, decision_at")
+    .eq("approval_key", approvalReference)
+    .limit(1);
+  const approval = approvalRows && approvalRows.length > 0 ? approvalRows[0] : null;
+  if (!approval) return { ok: false, detail: "approval_not_found" };
+  if (str(approval.status) !== "approved" && str(approval.status) !== "completed") {
+    return { ok: false, detail: "approval_not_approved" };
+  }
+
+  const { data: runRows } = await admin
+    .from("ai_runs")
+    .select("id, run_key, task_id")
+    .eq("run_key", runReference)
+    .limit(1);
+  const run = runRows && runRows.length > 0 ? runRows[0] : null;
+  if (!run) return { ok: false, detail: "run_not_found" };
+  if (approval.run_id !== run.id) return { ok: false, detail: "approval_run_mismatch" };
+
+  if (taskReference) {
+    const { data: taskRows } = await admin
+      .from("ai_tasks")
+      .select("id, task_key")
+      .eq("id", run.task_id)
+      .limit(1);
+    const task = taskRows && taskRows.length > 0 ? taskRows[0] : null;
+    if (!task || str(task.task_key) !== taskReference) return { ok: false, detail: "approval_task_mismatch" };
+  }
+
+  // Approved before dispatch (decision_at <= dispatch message created_at).
+  const decisionAt = str(approval.decision_at);
+  const createdAt = str(dispatchCreatedAt);
+  if (decisionAt && createdAt) {
+    if (new Date(decisionAt).getTime() > new Date(createdAt).getTime()) {
+      return { ok: false, detail: "approval_not_before_dispatch" };
+    }
+  }
+
+  return { ok: true, detail: null };
+}
+
 // Finalise the fixed diagnostic run lifecycle (Prompt 18). ONLY after a valid
 // signed result. Resolves the run by its run_key, then:
 //   * verified  → mark all steps completed, run completed (+ safe result summary),
@@ -506,6 +573,121 @@ async function finalizeDiagnosticRun(
         status: "failed",
         updated_at: result.completedAt,
       }).eq("id", run.task_id);
+    }
+  }
+
+  return run.id as string;
+}
+
+// Finalise the fixed approval-gated diagnostic run lifecycle (Prompt 19). ONLY
+// after a valid signed result. Resolves the run by run_key, then:
+//   * verified → mark steps 5+6 completed, run completed, task completed.
+//   * not verified → mark step 6 failed, run failed, task failed.
+// The approval is CONSUMED (marked completed) in both cases so an approved
+// approval can never authorize a second dispatch. No retry, no second call.
+async function finalizeApprovalGatedRun(
+  admin: ReturnType<typeof createClient>,
+  runReference: string,
+  approvalReference: string,
+  verified: boolean,
+  result: {
+    n8nStatus: string;
+    ollamaStatus: string;
+    ollamaModelCount: number | null;
+    latencyMs: number | null;
+    completedAt: string;
+    errorCategory: string | null;
+  },
+): Promise<string | null> {
+  if (!runReference) return null;
+
+  const { data: runRows } = await admin
+    .from("ai_runs")
+    .select("id, task_id")
+    .eq("run_key", runReference)
+    .limit(1);
+  const run = runRows && runRows.length > 0 ? runRows[0] : null;
+  if (!run) return null;
+
+  if (verified) {
+    await admin.from("ai_run_steps")
+      .update({ status: "completed", completed_at: result.completedAt })
+      .eq("run_id", run.id)
+      .in("status", ["pending", "working", "awaiting_approval"]);
+
+    const resultSummary =
+      `Read-only tool verified (approval-gated): n8n=${result.n8nStatus}, ollama=${result.ollamaStatus}, ` +
+      `models=${result.ollamaModelCount === null ? "n/a" : result.ollamaModelCount}, ` +
+      `latency=${result.latencyMs === null ? "n/a" : result.latencyMs + "ms"}. Sandbox diagnostic only.`;
+
+    await admin.from("ai_runs").update({
+      status: "completed",
+      current_step: APPROVAL_GATED_STEP_COUNT,
+      completed_at: result.completedAt,
+      result_summary: resultSummary,
+      error_summary: null,
+      updated_at: result.completedAt,
+    }).eq("id", run.id);
+
+    if (run.task_id) {
+      await admin.from("ai_tasks").update({
+        status: "completed",
+        updated_at: result.completedAt,
+      }).eq("id", run.task_id);
+    }
+  } else {
+    const errorSummary = result.errorCategory ?? "signed_result_not_verified";
+
+    await admin.from("ai_run_steps")
+      .update({ status: "failed", error_summary: errorSummary, completed_at: result.completedAt })
+      .eq("run_id", run.id)
+      .eq("step_number", 6);
+
+    await admin.from("ai_runs").update({
+      status: "failed",
+      error_summary: errorSummary,
+      completed_at: result.completedAt,
+      updated_at: result.completedAt,
+    }).eq("id", run.id);
+
+    if (run.task_id) {
+      await admin.from("ai_tasks").update({
+        status: "failed",
+        updated_at: result.completedAt,
+      }).eq("id", run.task_id);
+    }
+  }
+
+  // Consume the approval (single-use authorization) in both cases.
+  if (approvalReference) {
+    const { data: appRows } = await admin
+      .from("ai_approvals")
+      .select("id, status")
+      .eq("approval_key", approvalReference)
+      .limit(1);
+    const app = appRows && appRows.length > 0 ? appRows[0] : null;
+    if (app) {
+      await admin.from("ai_approvals").update({
+        status: "completed",
+        updated_at: result.completedAt,
+      }).eq("id", app.id);
+
+      await admin.from("ai_approval_history").insert({
+        approval_id: app.id,
+        event_type: "consumed",
+        previous_status: str(app.status),
+        new_status: "completed",
+        decision: null,
+        actor_reference: IDENTITY_KEY,
+        actor_role: "system",
+        reason: verified
+          ? "Approval consumed after a verified signed result."
+          : "Approval consumed after the authorized single attempt failed.",
+        conditions: null,
+        approval_count_before: 1,
+        approval_count_after: 1,
+        created_at: result.completedAt,
+      });
     }
   }
 
@@ -2175,6 +2357,226 @@ serve(async (req: Request) => {
       message: verified
         ? "Diagnostic run tool probe verified — run lifecycle, steps and signed evidence persisted. No business data, no mutation."
         : "Diagnostic run tool probe recorded — sandbox diagnostic only, no business data, no mutation.",
+    });
+  }
+
+  // ===========================================================================
+  // REPORT_APPROVAL_GATED_DIAGNOSTIC_PROBE — signed result for the fixed human
+  //   approval-gated diagnostic run (Prompt 19). The local HAL reports the
+  //   sanitised local runtime health snapshot plus task/run/approval references.
+  //   The cloud validates: correct node, original outbound probe exists,
+  //   correlation matches, probe_id/mode/agent/tool/operation are fixed values,
+  //   task/run/approval references present, not expired, not already recorded.
+  //   The cloud INDEPENDENTLY re-checks: the approval is genuinely approved and
+  //   belongs to the run/task (and was approved before dispatch), plus the
+  //   dedicated agent + tool + exact isolated execute permission. ONLY after a
+  //   valid signed result does it finalize the run lifecycle (steps 5+6 → run →
+  //   task) and CONSUME the approval. No retry, no second call, no reuse.
+  // ===========================================================================
+  if (operation === "report_approval_gated_diagnostic_probe") {
+    const probeKey = str(body.probe_key);
+    const originalMessageKey = str(body.original_message_key);
+    const resultCorrelationId = str(body.correlation_id);
+    const probeId = str(body.probe_id);
+    const probeMode = str(body.probe_mode);
+    const agentKey = str(body.agent_key);
+    const toolKey = str(body.tool_key);
+    const toolOperation = str(body.tool_operation);
+    const taskReference = str(body.task_reference);
+    const runReference = str(body.run_reference);
+    const approvalReference = str(body.approval_reference);
+    const resultStatus = ALLOWED_RESULT_STATUSES.has(str(body.status)) ? str(body.status) : "failed";
+    const n8nStatus = READONLY_TOOL_ALLOWED_SERVICE_STATES.has(str(body.n8n_status)) ? str(body.n8n_status) : "unavailable";
+    const ollamaStatus = READONLY_TOOL_ALLOWED_SERVICE_STATES.has(str(body.ollama_status)) ? str(body.ollama_status) : "unavailable";
+    const ollamaModelCount = typeof body.ollama_model_count === "number" && body.ollama_model_count >= 0 ? body.ollama_model_count : null;
+    const latencyMs = typeof body.latency_ms === "number" && body.latency_ms >= 0 ? body.latency_ms : null;
+    const errorCategory = str(body.error_category).slice(0, MAX_META_CHARS) || null;
+    const startedAt = str(body.started_at) || receivedAt;
+    const completedAt = str(body.completed_at) || receivedAt;
+
+    if (!originalMessageKey) {
+      return json({ error: "original_message_key is required for an approval-gated diagnostic probe result." }, 400);
+    }
+
+    const { data: origRows } = await admin
+      .from("ai_runtime_bridge_messages")
+      .select("message_key, node_id, correlation_id, status, safe_payload, created_at")
+      .eq("message_key", originalMessageKey)
+      .eq("direction", "outbound")
+      .eq("message_type", APPROVAL_GATED_PROBE_MESSAGE_TYPE)
+      .limit(1);
+    const orig = origRows && origRows.length > 0 ? origRows[0] : null;
+
+    if (!orig) {
+      await auditEvent(admin, "approval_gated_run_rejected", "rejected", "medium",
+        `Approval-gated diagnostic probe result rejected: no matching outbound probe for key ${originalMessageKey}. No tool executed.`);
+      return json({ error: "Original approval-gated diagnostic probe not found." }, 404);
+    }
+
+    if ((orig.node_id as string | null) !== nodeId) {
+      await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high",
+        `Approval-gated diagnostic probe result rejected: node mismatch for probe ${probeKey || originalMessageKey}. No tool executed.`);
+      return json({ error: "Probe result node does not match the originating node." }, 403);
+    }
+    if (resultCorrelationId && (orig.correlation_id as string | null) !== resultCorrelationId) {
+      await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high",
+        `Approval-gated diagnostic probe result rejected: correlation mismatch for probe ${probeKey || originalMessageKey}. No tool executed.`);
+      return json({ error: "Probe result correlation ID does not match." }, 409);
+    }
+
+    if (probeId && probeId !== APPROVAL_GATED_PROBE_ID) {
+      await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high",
+        `Approval-gated diagnostic probe result rejected: unexpected probe_id ${probeId}. No tool executed.`);
+      return json({ error: "Unexpected probe_id — probe result rejected." }, 422);
+    }
+    if (probeMode && probeMode !== APPROVAL_GATED_PROBE_MODE) {
+      await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high",
+        `Approval-gated diagnostic probe result rejected: unexpected probe_mode ${probeMode}. No tool executed.`);
+      return json({ error: "Unexpected probe_mode — probe result rejected." }, 422);
+    }
+    if (agentKey && agentKey !== READONLY_TOOL_PROBE_AGENT_KEY) {
+      await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high",
+        `Approval-gated diagnostic probe result rejected: unexpected agent_key ${agentKey}. No tool executed.`);
+      return json({ error: "Unexpected agent_key — probe result rejected." }, 422);
+    }
+    if (toolKey && toolKey !== READONLY_TOOL_PROBE_TOOL_KEY) {
+      await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high",
+        `Approval-gated diagnostic probe result rejected: unexpected tool_key ${toolKey}. No tool executed.`);
+      return json({ error: "Unexpected tool_key — probe result rejected." }, 422);
+    }
+    if (toolOperation && toolOperation !== READONLY_TOOL_PROBE_TOOL_OPERATION) {
+      await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high",
+        `Approval-gated diagnostic probe result rejected: unexpected tool_operation ${toolOperation}. No tool executed.`);
+      return json({ error: "Unexpected tool_operation — probe result rejected." }, 422);
+    }
+    if (!taskReference || !runReference || !approvalReference) {
+      await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high",
+        `Approval-gated diagnostic probe result rejected: missing task/run/approval reference. No tool executed.`);
+      return json({ error: "Missing task/run/approval reference — probe result rejected." }, 422);
+    }
+
+    const origPayload = (orig.safe_payload as Record<string, unknown>) ?? {};
+    const expiresAt = str(origPayload.expires_at);
+    const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
+
+    if (expired && !ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
+      await admin.from("ai_runtime_bridge_messages").update({ status: "expired" }).eq("message_key", originalMessageKey);
+      await auditEvent(admin, "approval_gated_run_expired", "expired", "low",
+        `Approval-gated diagnostic probe ${probeKey || originalMessageKey} expired before a valid result. No tool executed.`);
+      const expiredRunId = await finalizeApprovalGatedRun(admin, runReference, approvalReference, false, {
+        n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: "expired",
+      });
+      const expiredExtra = expiredRunId ? { run_id: expiredRunId } : {};
+      await auditEvent(admin, "approval_gated_run_failed", "failed", "medium",
+        `Approval-gated run ${runReference || "(unknown)"} failed: probe expired before a signed result. No normal execution occurred.`, expiredExtra);
+      return json({
+        accepted: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_approval_gated_diagnostic_probe",
+        status: "expired",
+        executionEnabled: false,
+        message: "Approval-gated diagnostic probe expired — result not accepted.",
+      });
+    }
+
+    if (ALLOWED_RESULT_STATUSES.has(str(orig.status))) {
+      return json({
+        accepted: true,
+        duplicate: true,
+        operation: "report_approval_gated_diagnostic_probe",
+        status: str(orig.status),
+        executionEnabled: false,
+        message: "Approval-gated diagnostic probe already recorded — no duplicate evidence created.",
+      });
+    }
+
+    // Cloud independently re-validates the dedicated agent + tool + exact isolated
+    // execute permission, AND the approval (genuinely approved, belongs to run/
+    // task, approved before dispatch). Never trust HAL alone.
+    const grantRecheck = await validateReadonlyToolGrant(admin);
+    const approvalRecheck = await validateApprovalGatedApproval(
+      admin, runReference, approvalReference, taskReference, str(orig.created_at),
+    );
+
+    const verified = resultStatus === "completed" && grantRecheck.ok && approvalRecheck.ok;
+    const finalStatus = verified ? "completed"
+      : resultStatus === "completed" ? "failed"
+      : resultStatus;
+    const finalErrorCategory = !grantRecheck.ok
+      ? (grantRecheck.detail ?? "cloud_revalidation_failed")
+      : (!approvalRecheck.ok ? (approvalRecheck.detail ?? "approval_revalidation_failed") : errorCategory);
+
+    await admin.from("ai_runtime_bridge_messages").update({
+      status: finalStatus,
+      acknowledged_at: completedAt,
+    }).eq("message_key", originalMessageKey);
+
+    await admin.from("ai_runtime_bridge_messages").insert({
+      message_key: uid("BRM"),
+      message_id: messageId,
+      nonce_hash: nonceHash,
+      node_id: nodeId,
+      direction: "inbound",
+      message_type: APPROVAL_GATED_PROBE_RESULT_MESSAGE_TYPE,
+      correlation_id: resultCorrelationId || (orig.correlation_id as string | null),
+      status: "recorded",
+      payload_type: "approval_gated_diagnostic_probe_result",
+      safe_payload: {
+        probe_key: probeKey,
+        original_message_key: originalMessageKey,
+        node_key: nodeKey,
+        probe_id: probeId || APPROVAL_GATED_PROBE_ID,
+        probe_mode: probeMode || APPROVAL_GATED_PROBE_MODE,
+        agent_key: agentKey || READONLY_TOOL_PROBE_AGENT_KEY,
+        tool_key: toolKey || READONLY_TOOL_PROBE_TOOL_KEY,
+        tool_operation: toolOperation || READONLY_TOOL_PROBE_TOOL_OPERATION,
+        task_reference: taskReference,
+        run_reference: runReference,
+        approval_reference: approvalReference,
+        status: finalStatus,
+        verified,
+        n8n_status: n8nStatus,
+        ollama_status: ollamaStatus,
+        ollama_model_count: ollamaModelCount,
+        latency_ms: latencyMs,
+        error_category: finalErrorCategory,
+        started_at: startedAt,
+        completed_at: completedAt,
+      },
+      payload_hash: payloadHash,
+      created_at: receivedAt,
+    });
+
+    // Finalise the approval-gated run lifecycle ONLY after a valid signed result,
+    // and CONSUME the approval (single-use authorization).
+    const finalizedRunId = await finalizeApprovalGatedRun(admin, runReference, approvalReference, verified, {
+      n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: finalErrorCategory,
+    });
+    const runExtra = finalizedRunId ? { run_id: finalizedRunId } : {};
+
+    if (verified) {
+      await auditEvent(admin, "approval_gated_tool_verified", "success", "low",
+        `Approval-gated tool probe ${probeKey || originalMessageKey} verified — approved fixed read-only tool returned a sanitised snapshot (n8n=${n8nStatus}, ollama=${ollamaStatus}, models=${ollamaModelCount ?? "null"}). Approval consumed. No business data, no mutation.`, runExtra);
+      await auditEvent(admin, "approval_gated_run_completed", "success", "low",
+        `Approval-gated run ${runReference || "(unknown)"} completed — 6 steps closed, signed evidence persisted, approval consumed. Sandbox diagnostic only.`, runExtra);
+    } else {
+      await auditEvent(admin, "approval_gated_run_failed", "failed", "medium",
+        `Approval-gated run ${runReference || "(unknown)"} failed (error=${finalErrorCategory ?? "none"}). No retry, no second tool call, no normal execution.`, runExtra);
+    }
+
+    return json({
+      accepted: true,
+      allowed: false,
+      blocked: false,
+      operation: "report_approval_gated_diagnostic_probe",
+      status: finalStatus,
+      verified,
+      duplicate: false,
+      executionEnabled: false,
+      message: verified
+        ? "Approval-gated tool probe verified — run lifecycle, steps, approval consumption and signed evidence persisted. No business data, no mutation."
+        : "Approval-gated tool probe recorded — sandbox diagnostic only, no business data, no mutation.",
     });
   }
 

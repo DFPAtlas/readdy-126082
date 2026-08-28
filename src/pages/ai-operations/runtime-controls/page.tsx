@@ -20,6 +20,7 @@ import ToolAccessDenialProbeVerification from '@/pages/ai-operations/runtime-con
 import ToolAccessGrantProbeVerification from '@/pages/ai-operations/runtime-controls/components/ToolAccessGrantProbeVerification';
 import ReadonlyToolProbeVerification from '@/pages/ai-operations/runtime-controls/components/ReadonlyToolProbeVerification';
 import DiagnosticRunVerification from '@/pages/ai-operations/runtime-controls/components/DiagnosticRunVerification';
+import ApprovalGatedRunVerification from '@/pages/ai-operations/runtime-controls/components/ApprovalGatedRunVerification';
 
 export default function RuntimeControlsPage() {
   const { controls, loading, error } = useRuntimeControls();
@@ -144,6 +145,9 @@ export default function RuntimeControlsPage() {
 
       {/* Runtime-backed diagnostic run (Prompt 18 first persisted task/run lifecycle) */}
       <DiagnosticRunVerification />
+
+      {/* Human approval-gated run (Prompt 19 first approval-gated diagnostic lifecycle) */}
+      <ApprovalGatedRunVerification />
 
       {/* Change history */}
       <ControlHistory />

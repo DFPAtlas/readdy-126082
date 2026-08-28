@@ -1,10 +1,15 @@
 import { Link } from 'react-router-dom';
 import type { AiApproval } from '@/pages/ai-operations/types';
 import { APPROVAL_STATUS, RISK_CLASS, RISK_LEVEL } from '@/pages/ai-operations/constants';
+import { APPROVAL_GATED_APPROVAL_TYPE } from '@/lib/ai-operations/runtimeApprovalGatedRun';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
 function approversLabel(a: AiApproval): string {
   return `${a.approvalCount} / ${a.minApprovers}`;
+}
+
+function isRuntimeDiagnostic(a: AiApproval): boolean {
+  return (a.requestType as string) === APPROVAL_GATED_APPROVAL_TYPE;
 }
 
 export default function ApprovalsTable({ approvals }: { approvals: AiApproval[] }) {
@@ -47,7 +52,15 @@ export default function ApprovalsTable({ approvals }: { approvals: AiApproval[] 
                 return (
                   <tr key={a.id} className="border-t border-background-200/40 hover:bg-background-200/30 transition-colors duration-150">
                     <td className="px-4 py-3 font-mono text-xs text-accent-400 whitespace-nowrap">{a.id}</td>
-                    <td className="px-4 py-3 text-foreground-300 max-w-[220px] truncate" title={a.title}>{a.title}</td>
+                    <td className="px-4 py-3 max-w-[220px]">
+                      <span className="block text-foreground-300 truncate" title={a.title}>{a.title}</span>
+                      {isRuntimeDiagnostic(a) && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-label text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-1.5 py-0.5 whitespace-nowrap mt-1">
+                          <i className="ri-shield-check-line w-3 h-3 flex items-center justify-center"></i>
+                          Runtime Diagnostic Approval
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-foreground-500 whitespace-nowrap">{a.siteName}</td>
                     <td className="px-4 py-3 text-foreground-400 max-w-[170px] truncate" title={a.agentName}>{a.agentName}</td>
                     <td className="px-4 py-3"><StatusPill tone={riskClass.tone} label={riskClass.label} /></td>
@@ -88,6 +101,12 @@ export default function ApprovalsTable({ approvals }: { approvals: AiApproval[] 
                     <StatusPill tone={status.tone} label={status.label} pulse={a.status === 'under_review'} />
                   </div>
                   <p className="text-sm font-medium text-foreground-100 mt-1.5">{a.title}</p>
+                  {isRuntimeDiagnostic(a) && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-label text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-1.5 py-0.5 whitespace-nowrap mt-1">
+                      <i className="ri-shield-check-line w-3 h-3 flex items-center justify-center"></i>
+                      Runtime Diagnostic Approval
+                    </span>
+                  )}
                   <p className="text-xs text-foreground-500 mt-0.5">{a.siteName} · {a.agentName}</p>
                 </div>
                 <Link

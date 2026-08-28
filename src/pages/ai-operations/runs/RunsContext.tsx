@@ -16,6 +16,7 @@ import { mapAuditEventRowToRecord, type AuditResolutionContext } from '@/pages/a
 import { buildTaskLookup, toAiTaskInput, type TaskCreateInput } from '@/pages/ai-operations/runs/taskMapper';
 import type { DataSourceMode } from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import { DIAGNOSTIC_RUN_TASK_KEY, DIAGNOSTIC_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeDiagnosticRun';
+import { APPROVAL_GATED_TASK_KEY_PREFIX, APPROVAL_GATED_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeApprovalGatedRun';
 
 // Data-source state for the Tasks & Runs module. Mirrors the proven Sites and
 // Agents pattern so the page never pretends demo data is live:
@@ -168,16 +169,24 @@ export function RunsProvider({ children }: { children: ReactNode }) {
     }
 
     // Build task lookup (TEST/SANDBOX excluded, except the fixed Prompt 18
-    // diagnostic task which is a legitimately persisted sandbox diagnostic run).
+    // diagnostic task and the fixed Prompt 19 approval-gated task which are
+    // legitimately persisted sandbox diagnostic runs).
     const taskRows = (tasksRes.data ?? []).filter(
-      (r) => r.environment !== 'sandbox' || r.task_key === DIAGNOSTIC_RUN_TASK_KEY,
+      (r) =>
+        r.environment !== 'sandbox' ||
+        r.task_key === DIAGNOSTIC_RUN_TASK_KEY ||
+        String(r.task_key).startsWith(APPROVAL_GATED_TASK_KEY_PREFIX),
     );
     const taskLookup = buildTaskLookup(taskRows, siteKeyById);
 
     // Build run-key lookup from live runs for parent/root resolution (sandbox
-    // excluded except the fixed Prompt 18 diagnostic run).
+    // excluded except the fixed Prompt 18 diagnostic run and Prompt 19
+    // approval-gated run).
     const runRows = (runsRes.data ?? []).filter(
-      (r) => r.environment !== 'sandbox' || String(r.run_key).startsWith(DIAGNOSTIC_RUN_KEY_PREFIX),
+      (r) =>
+        r.environment !== 'sandbox' ||
+        String(r.run_key).startsWith(DIAGNOSTIC_RUN_KEY_PREFIX) ||
+        String(r.run_key).startsWith(APPROVAL_GATED_RUN_KEY_PREFIX),
     );
     const runKeyById = new Map<string, string>();
     for (const row of runRows) runKeyById.set(row.id, row.run_key);

@@ -2,6 +2,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useRuns } from '@/pages/ai-operations/runs/RunsContext';
 import { getAlertByRun } from '@/pages/ai-operations/alerts/selectors';
 import { DIAGNOSTIC_RUN_TASK_KEY, DIAGNOSTIC_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeDiagnosticRun';
+import { APPROVAL_GATED_TASK_KEY_PREFIX, APPROVAL_GATED_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeApprovalGatedRun';
 import OpenIncident from '@/pages/ai-operations/alerts/components/OpenIncident';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import RunHeader from '@/pages/ai-operations/runs/detail/components/RunHeader';
@@ -40,6 +41,9 @@ export default function RunDetailPage() {
   const liveMode = mode === 'live';
   const isDiagnosticRun =
     !!run && (run.id?.startsWith(DIAGNOSTIC_RUN_KEY_PREFIX) || run.parentTaskId === DIAGNOSTIC_RUN_TASK_KEY);
+  const isApprovalGatedRun =
+    !!run &&
+    (run.id?.startsWith(APPROVAL_GATED_RUN_KEY_PREFIX) || String(run.parentTaskId ?? '').startsWith(APPROVAL_GATED_TASK_KEY_PREFIX));
 
   if (loading) {
     return (
@@ -132,6 +136,20 @@ export default function RunDetailPage() {
               {run.resultSummary ? `Signed result: ${run.resultSummary}` : 'No signed evidence summary recorded.'}
             </p>
             <p className="text-[10px] font-label text-emerald-400/60 mt-1.5 uppercase tracking-wide">Business data: NONE · Mutation: NONE · Normal execution: BLOCKED</p>
+          </div>
+        </div>
+      )}
+
+      {isApprovalGatedRun && (
+        <div className="flex items-start gap-2.5 bg-accent-500/10 border border-accent-500/25 rounded-lg px-4 py-3">
+          <i className="ri-verified-badge-line text-accent-400 text-lg w-5 h-5 flex items-center justify-center shrink-0"></i>
+          <div className="min-w-0">
+            <p className="text-xs font-label font-semibold text-accent-300/90">Human Approved Runtime Diagnostic</p>
+            <p className="text-[11px] text-accent-400/70 mt-1">
+              This run completed only after an explicit human approval and a separate manual dispatch. Its six live step records and signed evidence are persisted, with the approval reference recorded on the run.{' '}
+              {run.resultSummary ? `Signed result: ${run.resultSummary}` : 'No signed evidence summary recorded.'}
+            </p>
+            <p className="text-[10px] font-label text-accent-400/60 mt-1.5 uppercase tracking-wide">Business data: NONE · Mutation: NONE · Normal execution: BLOCKED</p>
           </div>
         </div>
       )}
