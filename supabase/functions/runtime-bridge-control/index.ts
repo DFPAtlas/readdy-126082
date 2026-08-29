@@ -11,8 +11,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // (Phase 3 Prompt 15), the controlled tool access grant probe (Phase 3
 // Prompt 16), the controlled read-only tool probe (Phase 3 Prompt 17), the
 // controlled runtime-backed diagnostic run (Phase 3 Prompt 18), the
-// controlled human approval-gated diagnostic run (Phase 3 Prompt 19), and the
-// approval expiry + context binding extension (Phase 3 Prompt 20).
+// controlled human approval-gated diagnostic run (Phase 3 Prompt 19), the
+// approval expiry + context binding extension (Phase 3 Prompt 20), the
+// permanent context invalidation repair (Phase 3 Prompt 20B), and the
+// maker/checker separation-of-duties control (Phase 3 Prompt 21).
 //
 // SECURITY: verify_jwt = true -> only authenticated users reach this.
 //   * internal_role() gate: owner/admin may queue/run/approve/reject/dispatch;
@@ -171,6 +173,13 @@ function uid(prefix: string): string {
 
 function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
+}
+
+// PROMPT 21 — maker/checker separation of duties: normalise a persisted human
+// identity for safe comparison. Lowercases so email case differences can never
+// defeat the self-approval / separation-of-duties gate.
+function normaliseIdentity(v: unknown): string {
+  return str(v).toLowerCase();
 }
 
 async function sha256Hex(input: string): Promise<string> {
@@ -576,6 +585,101 @@ async function revalidateApprovalContext(
   const cur = await currentApprovalContextHash(admin);
   if (!cur.ok || cur.hash !== stored) return { ok: false, detail: "approval_context_changed" };
   return { ok: true, detail: null };
+}
+
+// PROMPT 20A — dispatch-specific context revalidation.
+async function revalidateApprovalContextForDispatch(
+  admin: ReturnType<typeof createClient>,
+  approval: Record<string, unknown>,
+): Promise<{ ok: boolean; detail: string | null; currentHash: string | null }> {
+  const stored = str((approval.conditions as Record<string, unknown> | null)?.approval_context_hash);
+  if (!stored) return { ok: true, detail: null, currentHash: null };
+  const cur = await currentApprovalContextHash(admin);
+  if (!cur.ok) return { ok: false, detail: "approval_context_changed", currentHash: null };
+  if (cur.hash !== stored) return { ok: false, detail: "approval_context_changed", currentHash: cur.hash };
+  return { ok: true, detail: null, currentHash: cur.hash };
+}
+
+// PROMPT 20B — fail-closed detection of a prior context-drift audit event.
+async function hasContextChangedAuditEvent(
+  admin: ReturnType<typeof createClient>,
+  correlationId: string,
+): Promise<boolean> {
+  if (!correlationId) return false;
+  const { data } = await admin
+    .from("ai_audit_events")
+    .select("audit_key")
+    .eq("correlation_id", correlationId)
+    .eq("event_type", "approval_context_changed")
+    .limit(1);
+  return !!(data && data.length > 0);
+}
+
+// PROMPT 20B — permanently invalidate an approved context-bound approval.
+async function permanentlyInvalidateApprovalContext(
+  admin: ReturnType<typeof createClient>,
+  approval: Record<string, unknown>,
+  run: Record<string, unknown>,
+  actor: string,
+  role: string,
+): Promise<void> {
+  const invalidatedAt = new Date().toISOString();
+  const conditions = (approval.conditions as Record<string, unknown> | null) ?? {};
+  const contextHash = str(conditions.approval_context_hash);
+  const fingerprint = contextHash ? contextHash.slice(0, 8) : null;
+  const mergedConditions = {
+    ...conditions,
+    context_invalidated: true,
+    context_invalidated_reason: "approval_context_changed",
+    context_invalidated_at: invalidatedAt,
+  };
+
+  await admin.from("ai_approvals").update({
+    status: "rejected",
+    decision_reason: "Previously approved; authorization context later changed before dispatch. Fresh approval required.",
+    conditions: mergedConditions,
+    updated_at: invalidatedAt,
+  }).eq("id", approval.id);
+
+  await admin.from("ai_approval_history").insert({
+    approval_id: approval.id,
+    event_type: "context_invalidated",
+    previous_status: "approved",
+    new_status: "rejected",
+    decision: null,
+    actor_reference: actor,
+    actor_role: role,
+    reason: "Authorization context changed after human approval and before dispatch. Approval permanently invalidated; fresh approval required.",
+    conditions: null,
+    approval_count_before: 1,
+    approval_count_after: 1,
+    created_at: invalidatedAt,
+  });
+
+  await admin.from("ai_run_steps").update({
+    status: "failed",
+    error_summary: "approval_context_changed",
+    completed_at: invalidatedAt,
+  }).eq("run_id", run.id).eq("step_number", 5);
+
+  await admin.from("ai_runs").update({
+    status: "cancelled",
+    error_summary: "approval_context_changed",
+    completed_at: invalidatedAt,
+    updated_at: invalidatedAt,
+  }).eq("id", run.id);
+
+  if (run.task_id) {
+    await admin.from("ai_tasks").update({ status: "failed", updated_at: invalidatedAt }).eq("id", run.task_id);
+  }
+
+  const corr = str(run.correlation_id) || null;
+  const safeNote =
+    `Approval ${str(approval.approval_key)} permanently invalidated after authorization-context drift ` +
+    `(run ${str(run.run_key)}, fingerprint=${fingerprint ?? "n/a"}). Reason=approval_context_changed. HAL dispatch=blocked.`;
+
+  await auditEvent(admin, "approval_context_changed", "blocked", "high", actor, safeNote, corr);
+  await auditEvent(admin, "approval_context_invalidated", "blocked", "high", actor, safeNote, corr);
 }
 
 serve(async (req: Request) => {
@@ -2779,6 +2883,8 @@ serve(async (req: Request) => {
       totalSteps: APPROVAL_GATED_STEPS.length,
       expiresAt: new Date(now.getTime() + APPROVAL_GATED_VALIDITY_MS).toISOString(),
       contextFingerprint: approvalContextHash.slice(0, 8),
+      separationOfDutiesRequired: true,
+      selfApprovalAllowed: false,
       executionEnabled: false,
       message: "Approval-gated run created. HAL dispatch is BLOCKED until explicit human approval and a separate manual dispatch.",
     });
@@ -2815,6 +2921,22 @@ serve(async (req: Request) => {
     }
     if (str(run.status) !== "awaiting_approval") {
       return json({ error: "Run is not awaiting approval.", detail: "run_not_awaiting_approval" }, 409);
+    }
+
+    // PROMPT 21 — self-approval gate (maker ≠ checker). The human who created
+    // this request can never approve it. This fails closed before ANY state
+    // change, decision timestamp, count increment, or HAL dispatch.
+    const requesterIdentity = normaliseIdentity(approval.requested_by);
+    const approverIdentity = normaliseIdentity(actor);
+    if (requesterIdentity && approverIdentity && requesterIdentity === approverIdentity) {
+      await auditEvent(admin, "approval_self_approval_blocked", "blocked", "high", actor,
+        `Self-approval blocked: requester ${requesterIdentity} attempted to approve their own request ` +
+        `(approval ${str(approval.approval_key)}, run ${str(run.run_key)}). Reason=self_approval_forbidden. A different owner/admin is required.`,
+        str(run.correlation_id) || null);
+      return json({
+        error: "The requester cannot approve their own runtime request. A different owner or admin must review it.",
+        detail: "self_approval_forbidden",
+      }, 409);
     }
 
     // Prompt 20: expiry gate — a pending approval expires after 5 minutes.
@@ -2892,13 +3014,30 @@ serve(async (req: Request) => {
       created_at: decisionAt,
     });
 
+    // PROMPT 21 — append an explicit maker/checker separation-of-duties record.
+    await admin.from("ai_approval_history").insert({
+      approval_id: approval.id,
+      event_type: "separation_of_duties_verified",
+      previous_status: "approved",
+      new_status: "approved",
+      decision: null,
+      actor_reference: actor,
+      actor_role: role,
+      reason: "Independent maker/checker verified — requester and approver are different authenticated humans.",
+      conditions: null,
+      approval_count_before: 1,
+      approval_count_after: 1,
+      created_at: decisionAt,
+    });
+
     await admin.from("ai_run_steps").update({
       status: "completed",
       completed_at: decisionAt,
     }).eq("run_id", runId).eq("step_number", 4);
 
     await auditEvent(admin, "approval_granted", "success", "low", actor,
-      `Approval ${str(approval.approval_key)} granted by ${actor} for run ${str(run.run_key)}. HAL still NOT dispatched — awaiting manual dispatch.`,
+      `Approval ${str(approval.approval_key)} granted by ${actor} for run ${str(run.run_key)}. ` +
+      `separation_of_duties=verified (requester ≠ approver). HAL still NOT dispatched — awaiting manual dispatch.`,
       str(run.correlation_id) || null);
 
     return json({
@@ -2908,6 +3047,7 @@ serve(async (req: Request) => {
       runKey: str(run.run_key),
       status: "approved",
       halDispatch: "NOT_YET_SENT",
+      separationOfDutiesVerified: true,
       executionEnabled: false,
       message: "Approval granted. HAL dispatch has NOT occurred — explicit manual dispatch is required.",
     });
@@ -3042,6 +3182,22 @@ serve(async (req: Request) => {
       return json({ error: "Run is already in a terminal state.", detail: "run_terminal" }, 409);
     }
 
+    // PROMPT 21 — separation-of-duties revalidation at dispatch. A NEW approval
+    // must carry distinct maker/checker evidence. Legacy approvals lacking this
+    // evidence also fail closed here (no backfill).
+    const sodRequester = normaliseIdentity(approval.requested_by);
+    const sodApprover = normaliseIdentity(approval.decision_actor);
+    if (!sodRequester || !sodApprover || sodRequester === sodApprover) {
+      await auditEvent(admin, "separation_of_duties_invalid", "blocked", "high", actor,
+        `Dispatch blocked: separation of duties invalid for approval ${str(approval.approval_key)} ` +
+        `(run ${str(run.run_key)}). Requester and approver must be different authenticated humans. Reason=separation_of_duties_invalid.`,
+        str(run.correlation_id) || null);
+      return json({
+        error: "This approval lacks valid maker/checker separation-of-duties evidence. Create a fresh approval.",
+        detail: "separation_of_duties_invalid",
+      }, 409);
+    }
+
     const corr = str(run.correlation_id);
     const { data: existingDispatch } = await admin
       .from("ai_runtime_bridge_messages")
@@ -3114,6 +3270,41 @@ serve(async (req: Request) => {
       }, 404);
     }
 
+    // PROMPT 20B — permanent context invalidation gate.
+    const approvalConditionsForGate = (approval.conditions as Record<string, unknown> | null) ?? {};
+    if (approvalConditionsForGate.context_invalidated === true) {
+      await auditEvent(admin, "approval_context_changed", "blocked", "high", actor,
+        `Dispatch blocked: approval ${str(approval.approval_key)} was permanently invalidated after prior context drift (run ${str(run.run_key)}). It cannot be reused. A fresh approval is required.`,
+        corr);
+      return json({
+        error: "This approval was permanently invalidated after its authorization context changed. Create a fresh approval-gated run and approval.",
+        detail: "approval_context_changed",
+      }, 409);
+    }
+
+    // PROMPT 20B — fail-closed compatibility for approvals that drifted under
+    // the previous implementation.
+    if (await hasContextChangedAuditEvent(admin, corr)) {
+      await permanentlyInvalidateApprovalContext(admin, approval, run, actor, role);
+      return json({
+        error: "This approval's authorization context previously changed. It is permanently invalid and cannot be reused. Create a fresh approval.",
+        detail: "approval_context_changed",
+      }, 409);
+    }
+
+    // PROMPT 20A — context revalidation FIRST for context-bound approvals.
+    const boundContextHash = str((approval.conditions as Record<string, unknown> | null)?.approval_context_hash);
+    if (boundContextHash) {
+      const ctxRecheck = await revalidateApprovalContextForDispatch(admin, approval);
+      if (!ctxRecheck.ok) {
+        await permanentlyInvalidateApprovalContext(admin, approval, run, actor, role);
+        return json({
+          error: "The approved authorization context has changed since approval. This approval is permanently invalidated; a fresh human approval is required.",
+          detail: "approval_context_changed",
+        }, 409);
+      }
+    }
+
     const agent = await resolveReadonlyToolAgent(admin);
     if (!agent) {
       await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high", actor,
@@ -3164,11 +3355,12 @@ serve(async (req: Request) => {
     });
     const dispatchContextHash = await computeApprovalContextHash(dispatchContext);
     const storedContextHash = str((approval.conditions as Record<string, unknown> | null)?.approval_context_hash);
-    if (!storedContextHash || dispatchContextHash !== storedContextHash) {
-      await auditEvent(admin, "approval_context_changed", "blocked", "high", actor,
-        `Dispatch blocked: approval ${str(approval.approval_key)} context changed since approval (run ${str(run.run_key)}). A fresh human approval is required.`,
-        corr);
-      return json({ error: "The approved authorization context has changed since approval. A fresh human approval is required.", detail: "approval_context_changed" }, 409);
+    if (storedContextHash && dispatchContextHash !== storedContextHash) {
+      await permanentlyInvalidateApprovalContext(admin, approval, run, actor, role);
+      return json({
+        error: "The approved authorization context has changed since approval. This approval is permanently invalidated; a fresh human approval is required.",
+        detail: "approval_context_changed",
+      }, 409);
     }
 
     let taskKey = "";
@@ -3291,8 +3483,8 @@ serve(async (req: Request) => {
     if (run) {
       const approvalId = run.approval_id;
       const appQuery = approvalId
-        ? admin.from("ai_approvals").select("id, approval_key, status, decision, decision_actor, decision_at, current_approval_count, expires_at, conditions").eq("id", approvalId).limit(1)
-        : admin.from("ai_approvals").select("id, approval_key, status, decision, decision_actor, decision_at, current_approval_count, expires_at, conditions").eq("run_id", run.id).limit(1);
+        ? admin.from("ai_approvals").select("id, approval_key, status, decision, decision_actor, decision_at, requested_by, current_approval_count, expires_at, conditions").eq("id", approvalId).limit(1)
+        : admin.from("ai_approvals").select("id, approval_key, status, decision, decision_actor, decision_at, requested_by, current_approval_count, expires_at, conditions").eq("run_id", run.id).limit(1);
       const { data: appRows } = await appQuery;
       approval = appRows && appRows.length > 0 ? appRows[0] : null;
 
@@ -3339,17 +3531,42 @@ serve(async (req: Request) => {
     const approvalConditions = (approval?.conditions as Record<string, unknown> | null) ?? {};
     const approvalContextHash = str(approvalConditions.approval_context_hash);
     const approvalContextBound = !!approvalContextHash;
+    const contextFingerprint = approvalContextHash ? approvalContextHash.slice(0, 8) : null;
+
+    // Prompt 20B: permanent invalidation marker + fail-closed compatibility.
+    let contextInvalidated = approvalConditions.context_invalidated === true;
+    let contextInvalidatedAt = str(approvalConditions.context_invalidated_at) || null;
+    if (!contextInvalidated && approval && str(approval.status) === "approved" && run) {
+      const priorDrift = await hasContextChangedAuditEvent(admin, str(run.correlation_id));
+      if (priorDrift) {
+        contextInvalidated = true;
+        contextInvalidatedAt = null;
+      }
+    }
+
     let approvalContextMatched = false;
-    if (approvalContextBound) {
+    if (approvalContextBound && !contextInvalidated) {
       const cur = await currentApprovalContextHash(admin);
       approvalContextMatched = cur.ok && cur.hash === approvalContextHash;
     }
-    const contextFingerprint = approvalContextHash ? approvalContextHash.slice(0, 8) : null;
+
+    // PROMPT 21 — separation of duties (maker ≠ checker) status.
+    const requestedBy = approval ? str(approval.requested_by) : null;
+    const approvedBy = approval ? str(approval.decision_actor) : null;
+    const separationOfDutiesRequired = true;
+    const selfApprovalAllowed = false;
+    const separationOfDutiesVerified = !!requestedBy && !!approvedBy && normaliseIdentity(requestedBy) !== normaliseIdentity(approvedBy);
 
     let halDispatch = "BLOCKED";
-    if (approval && str(approval.status) === "approved") halDispatch = "NOT_YET_SENT";
-    if (run && str(run.status) === "working") halDispatch = "SENT";
-    if (signedResult) halDispatch = "RESULT_RECEIVED";
+    if (contextInvalidated) {
+      halDispatch = "BLOCKED";
+    } else if (signedResult) {
+      halDispatch = "RESULT_RECEIVED";
+    } else if (run && str(run.status) === "working") {
+      halDispatch = "SENT";
+    } else if (approval && str(approval.status) === "approved") {
+      halDispatch = "NOT_YET_SENT";
+    }
 
     return json({
       operation: "get_approval_gated_run_status",
@@ -3384,7 +3601,14 @@ serve(async (req: Request) => {
         isExpired: approvalIsExpired,
         approvalContextBound,
         approvalContextMatched,
+        contextInvalidated,
+        contextInvalidatedAt,
         contextFingerprint,
+        requestedBy,
+        approvedBy,
+        separationOfDutiesRequired,
+        separationOfDutiesVerified,
+        selfApprovalAllowed,
       } : null,
       steps,
       signedResult,

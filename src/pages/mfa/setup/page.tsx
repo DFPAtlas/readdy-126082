@@ -115,6 +115,11 @@ export default function MfaSetup() {
     }
   };
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    navigate('/login', { replace: true });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!enrollment || verifying) return;
@@ -297,6 +302,15 @@ export default function MfaSetup() {
             </p>
           </div>
         )}
+
+        <div className="mt-6 text-center">
+          <button
+            onClick={handleSignOut}
+            className="text-sm text-foreground-500 hover:text-foreground-200 transition-colors cursor-pointer"
+          >
+            Not you? Sign out
+          </button>
+        </div>
       </div>
     </div>
   );

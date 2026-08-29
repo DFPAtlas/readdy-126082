@@ -47,15 +47,17 @@ function formatTimeRemaining(expiresAt: string | null, isExpired: boolean, nowMs
 }
 
 export default function ApprovalGatedRunVerification() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const { nodes } = useRuntimeBridge();
 
   const isPrivileged = role === 'owner' || role === 'admin';
+  const currentIdentity = (user?.email ?? user?.id ?? '').trim().toLowerCase();
 
   const [status, setStatus] = useState<ApprovalGatedRunStatusResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState<'create' | 'approve' | 'reject' | 'dispatch' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selfApprovalBlocked, setSelfApprovalBlocked] = useState(false);
   const pollActiveRef = useRef(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -76,6 +78,7 @@ export default function ApprovalGatedRunVerification() {
   async function refreshStatus() {
     setLoading(true);
     setError(null);
+    setSelfApprovalBlocked(false);
     const res = await getApprovalGatedRunStatus();
     if (res.error) {
       setError(res.error);
@@ -125,8 +128,11 @@ export default function ApprovalGatedRunVerification() {
     if (!isPrivileged || !approvalKey) return;
     setSending('approve');
     setError(null);
+    setSelfApprovalBlocked(false);
     const res = await approveApprovalGatedRun(approvalKey);
     if (res.error) {
+      const isSelfApproval = /cannot approve their own/i.test(res.error) || res.data?.detail === 'self_approval_forbidden';
+      setSelfApprovalBlocked(isSelfApproval);
       setError(res.error);
       setSending(null);
       return;
@@ -175,7 +181,20 @@ export default function ApprovalGatedRunVerification() {
   const isExpired = status?.approval?.isExpired ?? false;
   const contextBound = status?.approval?.approvalContextBound ?? false;
   const contextMatched = status?.approval?.approvalContextMatched ?? false;
+  const contextInvalidated = status?.approval?.contextInvalidated ?? false;
+  const contextInvalidatedAt = status?.approval?.contextInvalidatedAt ?? null;
   const contextFingerprint = status?.approval?.contextFingerprint ?? null;
+  const requestedBy = status?.approval?.requestedBy ?? null;
+  const approvedBy = status?.approval?.approvedBy ?? null;
+  const sodRequired = status?.approval?.separationOfDutiesRequired ?? true;
+  const sodVerified = status?.approval?.separationOfDutiesVerified ?? false;
+  const selfApprovalAllowed = status?.approval?.selfApprovalAllowed ?? false;
+  const isRequester = !!requestedBy && requestedBy.trim().toLowerCase() === currentIdentity;
+  const makerChecker = approvedBy && sodVerified
+    ? { label: 'VERIFIED', tone: 'emerald' as const }
+    : approvalStatus === 'approved'
+      ? { label: 'INVALID', tone: 'red' as const }
+      : { label: 'Awaiting Independent Reviewer', tone: 'amber' as const };
 
   return (
     <section className="bg-background-100 border border-background-200/60 rounded-lg">
@@ -251,8 +270,8 @@ export default function ApprovalGatedRunVerification() {
             <>
               <button
                 onClick={() => void handleApprove()}
-                disabled={sending !== null || loading || !isPrivileged}
-                title={isPrivileged ? undefined : 'Owner or admin role required to approve'}
+                disabled={sending !== null || loading || !isPrivileged || isRequester}
+                title={isRequester ? 'You created this request — a different owner or admin must approve it' : isPrivileged ? undefined : 'Owner or admin role required to approve'}
                 className="inline-flex items-center gap-1.5 text-xs font-label font-semibold bg-emerald-500 hover:bg-emerald-400 text-background-950 rounded-md px-3.5 py-2 transition-colors duration-150 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
               >
                 <i className={`${sending === 'approve' ? 'ri-loader-4-line animate-spin' : 'ri-check-line'} w-4 h-4 flex items-center justify-center`}></i>
@@ -267,10 +286,16 @@ export default function ApprovalGatedRunVerification() {
                 <i className={`${sending === 'reject' ? 'ri-loader-4-line animate-spin' : 'ri-close-line'} w-4 h-4 flex items-center justify-center`}></i>
                 {sending === 'reject' ? 'Rejecting…' : 'Reject'}
               </button>
+              {isRequester && (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-label text-amber-400 whitespace-nowrap">
+                  <i className="ri-user-location-line w-3.5 h-3.5 flex items-center justify-center"></i>
+                  You created this request — a different owner or admin must approve it.
+                </span>
+              )}
             </>
           )}
 
-          {approvalStatus === 'approved' && (
+          {approvalStatus === 'approved' && !contextInvalidated && (
             <button
               onClick={() => void handleDispatch()}
               disabled={sending !== null || loading || !isPrivileged}
@@ -305,9 +330,47 @@ export default function ApprovalGatedRunVerification() {
           </div>
         )}
 
+        {selfApprovalBlocked && (
+          <div className="mt-2 bg-red-500/10 border border-red-500/25 rounded-md px-3 py-2.5">
+            <div className="flex items-center gap-2.5 mb-1">
+              <i className="ri-forbid-line text-red-400 w-4 h-4 flex items-center justify-center shrink-0"></i>
+              <p className="text-xs text-red-300/90 font-semibold">Self-Approval Blocked</p>
+            </div>
+            <p className="text-[11px] text-red-400/70">The requester cannot approve their own runtime request. A different owner or admin must review it. HAL Dispatch: BLOCKED.</p>
+          </div>
+        )}
+
         {status && status.run && (
           <div className="mt-3 space-y-2">
             <ResultBanner status={status} />
+
+            {/* PROMPT 21 — separation of duties governance */}
+            <div className="bg-background-50 border border-background-200/60 rounded-md px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                <h4 className="text-[11px] font-label font-semibold text-foreground-500 uppercase tracking-wide">Separation of Duties</h4>
+                <span className={`inline-flex items-center gap-1.5 text-[10px] font-label rounded-full px-2 py-0.5 whitespace-nowrap ${makerChecker.tone === 'emerald' ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/25' : makerChecker.tone === 'red' ? 'text-red-400 bg-red-500/10 border border-red-500/25' : 'text-amber-400 bg-amber-500/10 border border-amber-500/25'}`}>
+                  <i className={`${makerChecker.tone === 'emerald' ? 'ri-shield-check-line' : makerChecker.tone === 'red' ? 'ri-shield-cross-line' : 'ri-user-search-line'} w-3 h-3 flex items-center justify-center`}></i>
+                  {makerChecker.label}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <DetailStat label="Requested by" value={requestedBy || '—'} />
+                <DetailStat label="Approved by" value={approvedBy || '—'} />
+              </div>
+              <div className="flex items-center justify-between gap-2 mt-1.5 flex-wrap">
+                <span className="text-xs text-foreground-500">Maker / Checker Status</span>
+                <span className={`text-xs font-semibold ${makerChecker.tone === 'emerald' ? 'text-emerald-400' : makerChecker.tone === 'red' ? 'text-red-400' : 'text-amber-400'}`}>{makerChecker.label}</span>
+              </div>
+              <p className="text-[10px] text-foreground-600 mt-1.5">
+                Separation of duties {sodRequired ? 'required' : 'not required'} · Self-approval {selfApprovalAllowed ? 'allowed' : 'forbidden'}
+              </p>
+              {isRequester && (
+                <p className="text-[11px] text-amber-400 mt-1.5 flex items-center gap-1.5">
+                  <i className="ri-user-location-line w-3.5 h-3.5 flex items-center justify-center shrink-0"></i>
+                  You created this request. A different owner or admin must approve it.
+                </p>
+              )}
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               <DetailStat label="Task" value={status.task?.taskKey || APPROVAL_GATED_TASK_KEY_PREFIX} mono />
@@ -315,8 +378,8 @@ export default function ApprovalGatedRunVerification() {
               <DetailStat label="Approval ID" value={approvalKey || '—'} mono />
               <DetailStat
                 label="Approval status"
-                value={approvalStatus || '—'}
-                tone={approvalStatus === 'approved' || approvalStatus === 'completed' ? 'emerald' : approvalStatus === 'rejected' ? 'red' : undefined}
+                value={contextInvalidated ? 'Invalidated' : approvalStatus || '—'}
+                tone={contextInvalidated ? 'red' : approvalStatus === 'approved' || approvalStatus === 'completed' ? 'emerald' : approvalStatus === 'rejected' ? 'red' : undefined}
               />
               <DetailStat label="Approver" value={status.approval?.decisionActor || '—'} />
               <DetailStat label="Approval time" value={formatTime(status.approval?.decisionAt)} />
@@ -337,10 +400,11 @@ export default function ApprovalGatedRunVerification() {
               />
               <DetailStat
                 label="Context status"
-                value={!contextBound ? 'N/A' : contextMatched ? 'MATCHED' : 'CHANGED'}
-                tone={!contextBound ? undefined : contextMatched ? 'emerald' : 'red'}
+                value={contextInvalidated ? 'INVALIDATED' : !contextBound ? 'N/A' : contextMatched ? 'MATCHED' : 'CHANGED'}
+                tone={contextInvalidated ? 'red' : !contextBound ? undefined : contextMatched ? 'emerald' : 'red'}
               />
               <DetailStat label="Context fingerprint" value={contextFingerprint || '—'} mono />
+              <DetailStat label="Context invalidated" value={contextInvalidatedAt ? formatTime(contextInvalidatedAt) : '—'} />
               <DetailStat label="Run status" value={status.run.status || '—'} tone={state === 'completed' ? 'emerald' : state === 'failed' || state === 'rejected' ? 'red' : undefined} />
               <DetailStat label="Task status" value={status.task?.status || '—'} />
               <DetailStat label="Current step" value={`${status.run.currentStep ?? 0} / ${totalSteps}`} />
@@ -474,6 +538,18 @@ function ResultBanner({ status }: { status: ApprovalGatedRunStatusResult }) {
         <div className="min-w-0">
           <p className="text-xs text-red-300/90 font-semibold">Approval Expired</p>
           <p className="text-[11px] text-red-400/70 mt-0.5">The 5-minute approval window elapsed — this approval can no longer be approved or dispatched. A fresh human approval is required.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (state === 'invalidated') {
+    return (
+      <div className="flex items-center gap-2.5 bg-red-500/10 border border-red-500/25 rounded-md px-3 py-2.5">
+        <i className="ri-error-warning-line text-red-400 w-4 h-4 flex items-center justify-center shrink-0"></i>
+        <div className="min-w-0">
+          <p className="text-xs text-red-300/90 font-semibold">Approval Context Changed — New Approval Required</p>
+          <p className="text-[11px] text-red-400/70 mt-0.5">This approval was permanently invalidated after its authorization context changed. Context Binding: BOUND · Context Status: INVALIDATED · HAL Dispatch: BLOCKED. A fresh approval-gated run and human approval are required.</p>
         </div>
       </div>
     );

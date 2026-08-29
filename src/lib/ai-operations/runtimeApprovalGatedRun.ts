@@ -59,7 +59,8 @@ export type ApprovalGatedState =
   | 'completed'
   | 'failed'
   | 'rejected'
-  | 'expired';
+  | 'expired'
+  | 'invalidated';
 
 export interface ApprovalGatedStep {
   stepNumber: number;
@@ -111,7 +112,14 @@ export interface ApprovalGatedRunStatusResult {
     isExpired: boolean;
     approvalContextBound: boolean;
     approvalContextMatched: boolean;
+    contextInvalidated: boolean;
+    contextInvalidatedAt: string | null;
     contextFingerprint: string | null;
+    requestedBy: string | null;
+    approvedBy: string | null;
+    separationOfDutiesRequired: boolean;
+    separationOfDutiesVerified: boolean;
+    selfApprovalAllowed: boolean;
   } | null;
   steps: ApprovalGatedStep[];
   signedResult: ApprovalGatedSignedResult | null;
@@ -166,7 +174,9 @@ function sanitiseError(err: unknown): string {
     if (/approval_not_approved/i.test(detail)) return 'Dispatch requires an explicit human approval first.';
     if (/approval_not_pending/i.test(detail)) return 'This approval is no longer pending a decision.';
     if (/approval_expired/i.test(detail)) return 'This approval has expired and can no longer be approved or dispatched. A fresh approval is required.';
-    if (/approval_context_changed/i.test(detail)) return 'The approved authorization context changed after approval. A fresh human approval is required.';
+    if (/approval_context_changed/i.test(detail)) return 'The approved authorization context changed after approval. This approval is permanently invalid — a fresh human approval is required.';
+    if (/self_approval_forbidden/i.test(detail)) return 'The requester cannot approve their own runtime request. A different owner or admin must review it.';
+    if (/separation_of_duties_invalid/i.test(detail)) return 'This approval lacks valid maker/checker separation-of-duties evidence. A fresh approval is required.';
     if (/approval_expired_at_dispatch|approval_not_before_dispatch|approval_decision_missing/i.test(detail)) return 'The approval was not valid at dispatch time — signed evidence was rejected.';
     if (/agent_not_registered|autonomy|tool_missing|tool_not_safe|tool_access|kill_switch/i.test(detail)) return 'The dedicated agent, callable tool or isolated permission is not in the required safe state.';
     if (/network|fetch|failed to fetch/i.test(detail)) return 'Unable to reach the approval-gated run control endpoint.';
@@ -276,12 +286,14 @@ export const APPROVAL_GATED_STATE_META: Record<
   failed: { label: 'Failed', tone: 'red' },
   rejected: { label: 'Rejected', tone: 'red' },
   expired: { label: 'Expired', tone: 'red' },
+  invalidated: { label: 'Invalidated', tone: 'red' },
 };
 
 /** Derive the lifecycle state from an approval-gated status payload. */
 export function deriveApprovalGatedState(result: ApprovalGatedRunStatusResult): ApprovalGatedState {
   if (!result.run) return 'not_started';
   if (result.signedResult?.verified === true) return 'completed';
+  if (result.approval?.contextInvalidated === true) return 'invalidated';
   if (result.approval?.isExpired === true) return 'expired';
   const runStatus = result.run.status;
   const approvalStatus = result.approval?.status;
@@ -296,7 +308,7 @@ export function deriveApprovalGatedState(result: ApprovalGatedRunStatusResult): 
 
 /** Terminal states — polling must stop once reached (never auto-retry). */
 export function isApprovalGatedTerminal(state: ApprovalGatedState): boolean {
-  return state === 'completed' || state === 'failed' || state === 'rejected' || state === 'expired';
+  return state === 'completed' || state === 'failed' || state === 'rejected' || state === 'expired' || state === 'invalidated';
 }
 
 /** Human-friendly latency label. */
