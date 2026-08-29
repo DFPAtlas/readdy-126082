@@ -36,6 +36,16 @@ function formatTime(iso: string | null | undefined): string {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function formatTimeRemaining(expiresAt: string | null, isExpired: boolean, nowMs: number): string {
+  if (!expiresAt) return '—';
+  const ms = new Date(expiresAt).getTime() - nowMs;
+  if (isExpired || ms <= 0) return 'Expired';
+  const sec = Math.floor(ms / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s.toString().padStart(2, '0')}s`;
+}
+
 export default function ApprovalGatedRunVerification() {
   const { role } = useAuth();
   const { nodes } = useRuntimeBridge();
@@ -47,6 +57,7 @@ export default function ApprovalGatedRunVerification() {
   const [sending, setSending] = useState<'create' | 'approve' | 'reject' | 'dispatch' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollActiveRef = useRef(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     void refreshStatus();
@@ -54,6 +65,13 @@ export default function ApprovalGatedRunVerification() {
       pollActiveRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!status?.run) return;
+    if (isApprovalGatedTerminal(deriveApprovalGatedState(status))) return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [status]);
 
   async function refreshStatus() {
     setLoading(true);
@@ -153,6 +171,11 @@ export default function ApprovalGatedRunVerification() {
   const completedSteps = (status?.steps ?? []).filter((s) => s.status === 'completed').length;
   const totalSteps = status?.run?.totalSteps ?? APPROVAL_GATED_STEPS.length;
   const approvalStatus = status?.approval?.status ?? null;
+  const expiresAt = status?.approval?.expiresAt ?? null;
+  const isExpired = status?.approval?.isExpired ?? false;
+  const contextBound = status?.approval?.approvalContextBound ?? false;
+  const contextMatched = status?.approval?.approvalContextMatched ?? false;
+  const contextFingerprint = status?.approval?.contextFingerprint ?? null;
 
   return (
     <section className="bg-background-100 border border-background-200/60 rounded-lg">
@@ -297,6 +320,27 @@ export default function ApprovalGatedRunVerification() {
               />
               <DetailStat label="Approver" value={status.approval?.decisionActor || '—'} />
               <DetailStat label="Approval time" value={formatTime(status.approval?.decisionAt)} />
+              <DetailStat
+                label="Approval expires"
+                value={formatTime(expiresAt)}
+                tone={isExpired ? 'red' : undefined}
+              />
+              <DetailStat
+                label="Time remaining"
+                value={formatTimeRemaining(expiresAt, isExpired, nowMs)}
+                tone={isExpired ? 'red' : 'amber'}
+              />
+              <DetailStat
+                label="Context binding"
+                value={contextBound ? 'BOUND' : 'NOT BOUND'}
+                tone={contextBound ? 'emerald' : 'amber'}
+              />
+              <DetailStat
+                label="Context status"
+                value={!contextBound ? 'N/A' : contextMatched ? 'MATCHED' : 'CHANGED'}
+                tone={!contextBound ? undefined : contextMatched ? 'emerald' : 'red'}
+              />
+              <DetailStat label="Context fingerprint" value={contextFingerprint || '—'} mono />
               <DetailStat label="Run status" value={status.run.status || '—'} tone={state === 'completed' ? 'emerald' : state === 'failed' || state === 'rejected' ? 'red' : undefined} />
               <DetailStat label="Task status" value={status.task?.status || '—'} />
               <DetailStat label="Current step" value={`${status.run.currentStep ?? 0} / ${totalSteps}`} />
@@ -419,6 +463,30 @@ function ResultBanner({ status }: { status: ApprovalGatedRunStatusResult }) {
       <div className="flex items-center gap-2.5 bg-red-500/10 border border-red-500/25 rounded-md px-3 py-2.5">
         <i className="ri-close-circle-line text-red-400 w-4 h-4 flex items-center justify-center shrink-0"></i>
         <p className="text-xs text-red-300/90">The approved run did not verify — the signed evidence or cloud-side revalidation failed. No normal execution occurred.</p>
+      </div>
+    );
+  }
+
+  if (state === 'expired') {
+    return (
+      <div className="flex items-center gap-2.5 bg-red-500/10 border border-red-500/25 rounded-md px-3 py-2.5">
+        <i className="ri-time-line text-red-400 w-4 h-4 flex items-center justify-center shrink-0"></i>
+        <div className="min-w-0">
+          <p className="text-xs text-red-300/90 font-semibold">Approval Expired</p>
+          <p className="text-[11px] text-red-400/70 mt-0.5">The 5-minute approval window elapsed — this approval can no longer be approved or dispatched. A fresh human approval is required.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status.approval?.approvalContextBound === true && status.approval?.approvalContextMatched === false) {
+    return (
+      <div className="flex items-center gap-2.5 bg-amber-500/10 border border-amber-500/25 rounded-md px-3 py-2.5">
+        <i className="ri-alert-line text-amber-400 w-4 h-4 flex items-center justify-center shrink-0"></i>
+        <div className="min-w-0">
+          <p className="text-xs text-amber-300/90 font-semibold">Approval Context Changed — New Approval Required</p>
+          <p className="text-[11px] text-amber-400/70 mt-0.5">The authorized agent/tool/permission changed after approval. Dispatch is blocked and a fresh human approval is required. HAL dispatch remains BLOCKED.</p>
+        </div>
       </div>
     );
   }

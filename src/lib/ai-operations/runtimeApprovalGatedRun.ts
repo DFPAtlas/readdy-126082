@@ -58,7 +58,8 @@ export type ApprovalGatedState =
   | 'dispatched'
   | 'completed'
   | 'failed'
-  | 'rejected';
+  | 'rejected'
+  | 'expired';
 
 export interface ApprovalGatedStep {
   stepNumber: number;
@@ -106,6 +107,11 @@ export interface ApprovalGatedRunStatusResult {
     decisionActor: string | null;
     decisionAt: string | null;
     approvalCount: number;
+    expiresAt: string | null;
+    isExpired: boolean;
+    approvalContextBound: boolean;
+    approvalContextMatched: boolean;
+    contextFingerprint: string | null;
   } | null;
   steps: ApprovalGatedStep[];
   signedResult: ApprovalGatedSignedResult | null;
@@ -159,6 +165,9 @@ function sanitiseError(err: unknown): string {
     if (/already_dispatched/i.test(detail)) return 'This approval has already been dispatched — an approved approval never authorizes a second dispatch.';
     if (/approval_not_approved/i.test(detail)) return 'Dispatch requires an explicit human approval first.';
     if (/approval_not_pending/i.test(detail)) return 'This approval is no longer pending a decision.';
+    if (/approval_expired/i.test(detail)) return 'This approval has expired and can no longer be approved or dispatched. A fresh approval is required.';
+    if (/approval_context_changed/i.test(detail)) return 'The approved authorization context changed after approval. A fresh human approval is required.';
+    if (/approval_expired_at_dispatch|approval_not_before_dispatch|approval_decision_missing/i.test(detail)) return 'The approval was not valid at dispatch time — signed evidence was rejected.';
     if (/agent_not_registered|autonomy|tool_missing|tool_not_safe|tool_access|kill_switch/i.test(detail)) return 'The dedicated agent, callable tool or isolated permission is not in the required safe state.';
     if (/network|fetch|failed to fetch/i.test(detail)) return 'Unable to reach the approval-gated run control endpoint.';
     if (detail) return detail;
@@ -266,14 +275,17 @@ export const APPROVAL_GATED_STATE_META: Record<
   completed: { label: 'Completed', tone: 'emerald' },
   failed: { label: 'Failed', tone: 'red' },
   rejected: { label: 'Rejected', tone: 'red' },
+  expired: { label: 'Expired', tone: 'red' },
 };
 
 /** Derive the lifecycle state from an approval-gated status payload. */
 export function deriveApprovalGatedState(result: ApprovalGatedRunStatusResult): ApprovalGatedState {
   if (!result.run) return 'not_started';
   if (result.signedResult?.verified === true) return 'completed';
+  if (result.approval?.isExpired === true) return 'expired';
   const runStatus = result.run.status;
   const approvalStatus = result.approval?.status;
+  if (approvalStatus === 'expired') return 'expired';
   if (runStatus === 'failed') return 'failed';
   if (runStatus === 'cancelled' || approvalStatus === 'rejected') return 'rejected';
   if (runStatus === 'working') return 'dispatched';
@@ -284,7 +296,7 @@ export function deriveApprovalGatedState(result: ApprovalGatedRunStatusResult): 
 
 /** Terminal states — polling must stop once reached (never auto-retry). */
 export function isApprovalGatedTerminal(state: ApprovalGatedState): boolean {
-  return state === 'completed' || state === 'failed' || state === 'rejected';
+  return state === 'completed' || state === 'failed' || state === 'rejected' || state === 'expired';
 }
 
 /** Human-friendly latency label. */

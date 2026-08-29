@@ -10,69 +10,13 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // probe (Phase 3 Prompt 14), the controlled tool access denial probe
 // (Phase 3 Prompt 15), the controlled tool access grant probe (Phase 3
 // Prompt 16), the controlled read-only tool probe (Phase 3 Prompt 17), the
-// controlled runtime-backed diagnostic run (Phase 3 Prompt 18), and the
-// controlled human approval-gated diagnostic run (Phase 3 Prompt 19).
+// controlled runtime-backed diagnostic run (Phase 3 Prompt 18), the
+// controlled human approval-gated diagnostic run (Phase 3 Prompt 19), and the
+// approval expiry + context binding extension (Phase 3 Prompt 20).
 //
-// This is TRANSPORT TESTING + SINGLE FIXED DIAGNOSTIC PINGS + cloud-side
-// authorization checks + ONE allowlisted read-only tool invocation + ONE fixed
-// persisted diagnostic task/run lifecycle + ONE fixed approval-gated task/run/
-// approval lifecycle. It queues a safe dry-run transport probe, OR one fixed
-// harmless Ollama generation, OR one fixed harmless n8n diagnostic workflow, OR
-// one fixed n8n → Ollama diagnostic chain, OR one fixed registered-agent → model
-// dry-run, OR one fixed built-in read-only runtime health tool (n8n /healthz +
-// Ollama /api/tags, GET only), OR creates one fixed diagnostic task + run + six
-// steps that dispatch that same read-only tool, OR creates one fixed approval-
-// gated task + run + six steps + ONE approval that blocks HAL dispatch until an
-// explicit human approval AND a separate manual dispatch, through the existing
-// private runtime bridge, and reads back signed evidence. It also verifies
-// (cloud-side only, never contacting HAL) that the fixed diagnostic agent is
-// denied access to a registry-only diagnostic tool (denial probe) and,
-// separately, that an explicit read-only grant for that same diagnostic tool is
-// resolved as AUTHORIZED without any tool execution (grant probe). It NEVER
-// executes an arbitrary n8n workflow, performs arbitrary inference, runs an
-// arbitrary agent, creates an arbitrary run/task, calls a tool, retrieves
-// knowledge, sends notifications, runs schedules, reads business data, or
-// mutates data.
-//
-// The probes are STRICTLY constrained (fail-closed):
-//   * Ollama: only prompt_id = dfp_ollama_ping_v1, model = qwen2.5-coder:7b.
-//   * n8n:    only probe_id = dfp_n8n_ping_v1, one fixed diagnostic workflow.
-//   * chain:  only probe_id = dfp_runtime_chain_v1 (n8n then Ollama, fixed).
-//   * agent:  only probe_id = dfp_agent_dry_run_v1, diagnostic agent
-//             dfp-runtime-diagnostic-agent → qwen2.5-coder:7b (fixed, zero tools).
-//   * denial: only probe_id = dfp_tool_access_denial_v1, fixed diagnostic agent
-//             + registry-only diagnostic tool, expected DENIED
-//             (tool_permission_missing). Cloud-side only — no HAL/n8n/Ollama.
-//   * grant:  only probe_id = dfp_tool_access_grant_v1, fixed diagnostic agent
-//             + registry-only diagnostic tool, expected AUTHORIZED
-//             (explicit_tool_permission_present), read-only, scope-isolated.
-//             Cloud-side only — no HAL/n8n/Ollama, no tool execution.
-//   * readonly tool: only probe_id = dfp_readonly_tool_v1, dedicated agent
-//             dfp-runtime-readonly-tool-agent → built-in dfp-runtime-health-read-
-//             tool (execute grant), operation read_runtime_health_snapshot.
-//             Fixed local read-only health read only — no business data, no
-//             mutation, no arbitrary HTTP.
-//   * diagnostic run: only probe_id = dfp_diagnostic_run_v1, fixed task
-//             dfp-runtime-health-diagnostic-task → run → six steps → the same
-//             read-only tool dispatch. Sandbox diagnostic only — no arbitrary
-//             task/agent/tool/payload, no business data, no mutation.
-//   * approval-gated run: only probe_id = dfp_approval_run_v1, fixed task
-//             dfp-runtime-health-approval-task → run → six steps → ONE approval.
-//             NO HAL dispatch until explicit human approval + manual dispatch.
-//             Sandbox diagnostic only — approval is a REAL execution gate.
-//   * probe_mode is always "sandbox_diagnostic" (or "authorization_diagnostic"
-//     for the denial and grant probes).
-//   * Prompt text, model name, workflow reference, agent identity, tool identity,
-//     task identity, operation and payload are generated SERVER-SIDE only. The
-//     browser can NEVER supply them — those inputs are ignored.
-//
-// SECURITY:
-//   * verify_jwt = true -> only authenticated users reach this.
+// SECURITY: verify_jwt = true -> only authenticated users reach this.
 //   * internal_role() gate: owner/admin may queue/run/approve/reject/dispatch;
 //     any internal role (including viewer) may read status only.
-//   * Only twenty-three allowlisted operations exist. No generic queue-message endpoint.
-//   * Probe payloads are strictly limited to safe metadata — no URLs, commands,
-//     workflow IDs, arbitrary prompts, SQL, or file paths.
 // ============================================================================
 
 const CORS = {
@@ -117,8 +61,6 @@ const ACK_MESSAGE_TYPE = "runtime_transport_probe_ack";
 const OLLAMA_PROBE_MESSAGE_TYPE = "ollama_inference_probe";
 const OLLAMA_PROBE_RESULT_MESSAGE_TYPE = "ollama_inference_probe_result";
 
-// The ONLY permitted Ollama diagnostic values — fixed server-side. The browser
-// can never override these.
 const OLLAMA_PROBE_PROMPT_ID = "dfp_ollama_ping_v1";
 const OLLAMA_PROBE_MODEL = "qwen2.5-coder:7b";
 const OLLAMA_PROBE_MODE = "sandbox_diagnostic";
@@ -126,33 +68,24 @@ const OLLAMA_PROBE_MODE = "sandbox_diagnostic";
 const N8N_SANDBOX_PROBE_MESSAGE_TYPE = "n8n_sandbox_probe";
 const N8N_SANDBOX_PROBE_RESULT_MESSAGE_TYPE = "n8n_sandbox_probe_result";
 
-// The ONLY permitted n8n diagnostic values — fixed server-side. The browser can
-// never override these.
 const N8N_SANDBOX_PROBE_ID = "dfp_n8n_ping_v1";
 const N8N_SANDBOX_PROBE_MODE = "sandbox_diagnostic";
 const N8N_SANDBOX_PROBE_WORKFLOW_ALIAS = "DFP Runtime Sandbox Ping";
 
-// --- Controlled multi-runtime chain probe (Prompt 13) -------------------------
 const CHAIN_PROBE_MESSAGE_TYPE = "runtime_chain_probe";
 const CHAIN_PROBE_RESULT_MESSAGE_TYPE = "runtime_chain_probe_result";
 
-// The ONLY permitted chain diagnostic values — fixed server-side. The browser
-// can never override these.
 const CHAIN_PROBE_ID = "dfp_runtime_chain_v1";
 const CHAIN_PROBE_MODE = "sandbox_diagnostic";
 
-// --- Controlled registered-agent dry-run probe (Prompt 14) --------------------
 const AGENT_DRY_RUN_PROBE_MESSAGE_TYPE = "agent_dry_run_probe";
 const AGENT_DRY_RUN_PROBE_RESULT_MESSAGE_TYPE = "agent_dry_run_probe_result";
 
-// The ONLY permitted agent dry-run diagnostic values — fixed server-side. The
-// browser can never override these.
 const AGENT_DRY_RUN_PROBE_ID = "dfp_agent_dry_run_v1";
 const AGENT_DRY_RUN_PROBE_MODE = "sandbox_diagnostic";
 const AGENT_DRY_RUN_AGENT_KEY = "dfp-runtime-diagnostic-agent";
 const AGENT_DRY_RUN_MODEL = "qwen2.5-coder:7b";
 
-// --- Controlled tool access denial probe (Prompt 15) --------------------------
 const TOOL_ACCESS_DENIAL_PROBE_ID = "dfp_tool_access_denial_v1";
 const TOOL_ACCESS_DENIAL_PROBE_MODE = "authorization_diagnostic";
 const TOOL_ACCESS_DENIAL_AGENT_KEY = "dfp-runtime-diagnostic-agent";
@@ -160,20 +93,15 @@ const TOOL_ACCESS_DENIAL_TOOL_KEY = "dfp-runtime-diagnostic-tool";
 const TOOL_ACCESS_DENIAL_EXPECTED_DECISION = "denied";
 const TOOL_ACCESS_DENIAL_EXPECTED_REASON = "tool_permission_missing";
 
-// --- Controlled tool access grant probe (Prompt 16) ----------------------------
 const TOOL_ACCESS_GRANT_PROBE_ID = "dfp_tool_access_grant_v1";
 const TOOL_ACCESS_GRANT_PROBE_MODE = "authorization_diagnostic";
 const TOOL_ACCESS_GRANT_AGENT_KEY = "dfp-runtime-diagnostic-agent";
 const TOOL_ACCESS_GRANT_TOOL_KEY = "dfp-runtime-diagnostic-tool";
 const TOOL_ACCESS_GRANT_EXPECTED_DECISION = "authorized";
 const TOOL_ACCESS_GRANT_EXPECTED_REASON = "explicit_tool_permission_present";
-// Narrow / read-only-equivalent access levels (non-executing) vs broad/executing.
-// Prompt 16B — EXACT read only. Any non-read level (restricted/write/execute/
-// read_write) is blocked with reason permission_too_broad.
 const TOOL_ACCESS_GRANT_NARROW_LEVELS = ["read"];
 const TOOL_ACCESS_GRANT_EXECUTING_LEVELS = ["write", "execute", "read_write"];
 
-// --- Controlled read-only tool probe (Prompt 17) -------------------------------
 const READONLY_TOOL_PROBE_MESSAGE_TYPE = "readonly_tool_probe";
 const READONLY_TOOL_PROBE_RESULT_MESSAGE_TYPE = "readonly_tool_probe_result";
 const READONLY_TOOL_PROBE_ID = "dfp_readonly_tool_v1";
@@ -181,17 +109,8 @@ const READONLY_TOOL_PROBE_MODE = "sandbox_diagnostic";
 const READONLY_TOOL_PROBE_AGENT_KEY = "dfp-runtime-readonly-tool-agent";
 const READONLY_TOOL_PROBE_TOOL_KEY = "dfp-runtime-health-read-tool";
 const READONLY_TOOL_PROBE_TOOL_OPERATION = "read_runtime_health_snapshot";
-// Invocation requires the execute access level (read is non-invoking per Prompt
-// 16). This dedicated agent holds exactly one isolated execute grant.
 const READONLY_TOOL_PROBE_PERMISSION = "execute";
 
-// --- Controlled runtime-backed diagnostic run (Prompt 18) ----------------------
-// The FIRST real AI Operations task/run lifecycle. A fixed diagnostic task
-// (dfp-runtime-health-diagnostic-task) → run → six deterministic steps → one
-// fixed read-only tool dispatch through HAL → signed result → run verification →
-// audit close. Reuses the Prompt 17 dedicated identity and callable tool. No
-// arbitrary task/agent/tool/payload, no business data, no mutation, no model
-// inference. Normal execution stays BLOCKED.
 const DIAGNOSTIC_RUN_QUEUE_MESSAGE_TYPE = "diagnostic_run_tool_probe";
 const DIAGNOSTIC_RUN_RESULT_MESSAGE_TYPE = "diagnostic_run_tool_probe_result";
 const DIAGNOSTIC_RUN_PROBE_ID = "dfp_diagnostic_run_v1";
@@ -200,7 +119,6 @@ const DIAGNOSTIC_RUN_TASK_KEY = "dfp-runtime-health-diagnostic-task";
 const DIAGNOSTIC_RUN_TASK_NAME = "DFP Runtime Health Diagnostic Task";
 const DIAGNOSTIC_RUN_TASK_TYPE = "runtime_health_diagnostic";
 const DIAGNOSTIC_RUN_KEY_PREFIX = "dfp-diagnostic-run-";
-// Reuses the Prompt 17 dedicated identity + callable tool.
 const DIAGNOSTIC_RUN_AGENT_KEY = "dfp-runtime-readonly-tool-agent";
 const DIAGNOSTIC_RUN_TOOL_KEY = "dfp-runtime-health-read-tool";
 const DIAGNOSTIC_RUN_TOOL_OPERATION = "read_runtime_health_snapshot";
@@ -214,15 +132,6 @@ const DIAGNOSTIC_RUN_STEPS = [
   "close_diagnostic_run",
 ];
 
-// --- Controlled human approval-gated diagnostic run (Prompt 19) ----------------
-// The FIRST human-approval-gated runtime-backed diagnostic lifecycle. A fixed
-// approval-gated diagnostic task (dfp-runtime-health-approval-task) → run → six
-// deterministic steps → ONE approval. NO HAL dispatch occurs until an explicit
-// human approval exists AND a separate manual dispatch is issued. Reuses the
-// Prompt 17 dedicated identity + callable tool. Approval is a REAL execution
-// gate: create (no HAL) → approve (no HAL) → dispatch (one HAL message) → signed
-// result → verify → close. No arbitrary task/agent/tool/payload, no business
-// data, no mutation. Normal execution stays BLOCKED.
 const APPROVAL_GATED_QUEUE_MESSAGE_TYPE = "approval_gated_diagnostic_probe";
 const APPROVAL_GATED_RESULT_MESSAGE_TYPE = "approval_gated_diagnostic_probe_result";
 const APPROVAL_GATED_PROBE_ID = "dfp_approval_run_v1";
@@ -233,7 +142,6 @@ const APPROVAL_GATED_TASK_TYPE = "runtime_health_approval_diagnostic";
 const APPROVAL_GATED_RUN_KEY_PREFIX = "dfp-approval-run-";
 const APPROVAL_GATED_APPROVAL_KEY_PREFIX = "dfp-approval-";
 const APPROVAL_GATED_APPROVAL_TYPE = "runtime_diagnostic_execution";
-// Reuses the Prompt 17 dedicated identity + callable tool.
 const APPROVAL_GATED_AGENT_KEY = "dfp-runtime-readonly-tool-agent";
 const APPROVAL_GATED_TOOL_KEY = "dfp-runtime-health-read-tool";
 const APPROVAL_GATED_TOOL_OPERATION = "read_runtime_health_snapshot";
@@ -246,6 +154,9 @@ const APPROVAL_GATED_STEPS = [
   "dispatch_readonly_tool",
   "verify_and_close",
 ];
+
+const APPROVAL_GATED_VALIDITY_MS = 5 * 60_000; // fixed 5-minute approval validity window (Prompt 20)
+const APPROVAL_CONTEXT_VERSION = "v1";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -293,8 +204,6 @@ async function auditEvent(
   });
 }
 
-// Lazily expire any pending/delivered probe whose expires_at has passed.
-// Idempotent — only transitions a row that is still pending/delivered.
 async function expireProbeIfNeeded(
   admin: ReturnType<typeof createClient>,
   probe: Record<string, unknown>,
@@ -315,8 +224,6 @@ async function expireProbeIfNeeded(
   return probe;
 }
 
-// Resolve the most reachable, freshly-heartbeating bridge node. Shared by all
-// queue operations.
 async function resolveNode(
   admin: ReturnType<typeof createClient>,
   nodeKeyParam: string,
@@ -339,7 +246,6 @@ async function resolveNode(
   return node;
 }
 
-// Resolve the fixed diagnostic agent from the existing registry (fail closed).
 async function resolveDiagnosticAgent(
   admin: ReturnType<typeof createClient>,
 ): Promise<Record<string, unknown> | null> {
@@ -353,8 +259,6 @@ async function resolveDiagnosticAgent(
   return data && data.length > 0 ? data[0] : null;
 }
 
-// Resolve the diagnostic agent's model assignment through the existing registry
-// and confirm it resolves to the fixed local model. Fail closed on any mismatch.
 async function resolveDiagnosticModelAssignment(
   admin: ReturnType<typeof createClient>,
   agentId: string,
@@ -386,7 +290,6 @@ async function resolveDiagnosticModelAssignment(
   return { ok: true, modelReference: AGENT_DRY_RUN_MODEL, detail: null };
 }
 
-// Resolve the fixed registry-only diagnostic tool (fail closed).
 async function resolveDiagnosticTool(
   admin: ReturnType<typeof createClient>,
 ): Promise<Record<string, unknown> | null> {
@@ -399,8 +302,6 @@ async function resolveDiagnosticTool(
   return data && data.length > 0 ? data[0] : null;
 }
 
-// Resolve any ACTIVE agent→tool access grant between the diagnostic agent and
-// the diagnostic tool. Returns the grant row if present, else null.
 async function resolveDiagnosticToolAccess(
   admin: ReturnType<typeof createClient>,
   agentId: string,
@@ -416,7 +317,6 @@ async function resolveDiagnosticToolAccess(
   return data && data.length > 0 ? data[0] : null;
 }
 
-// Resolve the master kill switch control (must remain ON with execution blocked).
 async function resolveMasterKillSwitch(
   admin: ReturnType<typeof createClient>,
 ): Promise<Record<string, unknown> | null> {
@@ -428,8 +328,6 @@ async function resolveMasterKillSwitch(
   return data && data.length > 0 ? data[0] : null;
 }
 
-// Record safe denial-probe audit evidence. Only safe identifiers — no secrets,
-// no endpoints, no credentials, no prompt/business data.
 async function recordDenialProbeEvent(
   admin: ReturnType<typeof createClient>,
   e: {
@@ -472,8 +370,6 @@ async function recordDenialProbeEvent(
   });
 }
 
-// Record safe grant-probe audit evidence. Only safe identifiers — no secrets,
-// no endpoints, no credentials, no prompt/business data.
 async function recordGrantProbeEvent(
   admin: ReturnType<typeof createClient>,
   e: {
@@ -522,7 +418,6 @@ async function recordGrantProbeEvent(
   });
 }
 
-// Resolve the active agent→tool access grants (full rows with access_level).
 async function resolveDiagnosticToolAccessDetail(
   admin: ReturnType<typeof createClient>,
   agentId: string,
@@ -537,7 +432,6 @@ async function resolveDiagnosticToolAccessDetail(
   return data ?? [];
 }
 
-// Resolve ALL active tool grants for an agent (for the negative isolation check).
 async function resolveAgentActiveGrants(
   admin: ReturnType<typeof createClient>,
   agentId: string,
@@ -550,7 +444,6 @@ async function resolveAgentActiveGrants(
   return data ?? [];
 }
 
-// Resolve the dedicated read-only tool execution agent (Prompt 17). Fail closed.
 async function resolveReadonlyToolAgent(
   admin: ReturnType<typeof createClient>,
 ): Promise<Record<string, unknown> | null> {
@@ -564,8 +457,6 @@ async function resolveReadonlyToolAgent(
   return data && data.length > 0 ? data[0] : null;
 }
 
-// Resolve the fixed callable read-only diagnostic tool (Prompt 17). It must have
-// no credential and no endpoint (built-in HAL tool only).
 async function resolveReadonlyTool(
   admin: ReturnType<typeof createClient>,
 ): Promise<Record<string, unknown> | null> {
@@ -578,7 +469,6 @@ async function resolveReadonlyTool(
   return data && data.length > 0 ? data[0] : null;
 }
 
-// Resolve the approval-gated approval by approval_key or run_key (fail closed).
 async function resolveApprovalGatedApprovalByRefs(
   admin: ReturnType<typeof createClient>,
   approvalKeyParam: string,
@@ -608,6 +498,84 @@ async function resolveApprovalGatedApprovalByRefs(
     return data && data.length > 0 ? data[0] : null;
   }
   return null;
+}
+
+// ===========================================================================
+// PROMPT 20 — approval expiry + context binding helpers.
+// ===========================================================================
+
+function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(obj).sort()) out[k] = sortKeysDeep(obj[k]);
+    return out;
+  }
+  return value;
+}
+
+function buildApprovalContext(params: {
+  agentId: string;
+  toolId: string;
+  grantId: string;
+}): Record<string, unknown> {
+  return {
+    approval_context_version: APPROVAL_CONTEXT_VERSION,
+    probe_id: APPROVAL_GATED_PROBE_ID,
+    probe_mode: APPROVAL_GATED_PROBE_MODE,
+    environment: "sandbox",
+    risk: "low",
+    agent_id: params.agentId,
+    agent_key: APPROVAL_GATED_AGENT_KEY,
+    tool_id: params.toolId,
+    tool_key: APPROVAL_GATED_TOOL_KEY,
+    tool_operation: APPROVAL_GATED_TOOL_OPERATION,
+    tool_permission_id: params.grantId,
+    access_level: APPROVAL_GATED_PERMISSION,
+  };
+}
+
+async function computeApprovalContextHash(context: Record<string, unknown>): Promise<string> {
+  return sha256Hex(JSON.stringify(sortKeysDeep(context)));
+}
+
+async function currentApprovalContextHash(
+  admin: ReturnType<typeof createClient>,
+): Promise<{ ok: boolean; hash: string | null }> {
+  const agent = await resolveReadonlyToolAgent(admin);
+  if (!agent || str(agent.autonomy_level) !== "none") return { ok: false, hash: null };
+  const tool = await resolveReadonlyTool(admin);
+  if (!tool || str(tool.credential_reference) || str(tool.endpoint_reference)) return { ok: false, hash: null };
+  const { data: grantRows } = await admin
+    .from("ai_tool_agent_access")
+    .select("id, connection_id, access_level")
+    .eq("agent_id", agent.id)
+    .eq("is_active", true);
+  const grants = grantRows ?? [];
+  if (grants.length !== 1) return { ok: false, hash: null };
+  const grant = grants[0];
+  if (grant.connection_id !== tool.id || str(grant.access_level) !== APPROVAL_GATED_PERMISSION) {
+    return { ok: false, hash: null };
+  }
+  const context = buildApprovalContext({
+    agentId: str(agent.id),
+    toolId: str(tool.id),
+    grantId: str(grant.id),
+  });
+  const hash = await computeApprovalContextHash(context);
+  return { ok: true, hash };
+}
+
+async function revalidateApprovalContext(
+  admin: ReturnType<typeof createClient>,
+  approval: Record<string, unknown>,
+): Promise<{ ok: boolean; detail: string | null }> {
+  const stored = str((approval.conditions as Record<string, unknown> | null)?.approval_context_hash);
+  if (!stored) return { ok: false, detail: "approval_context_changed" };
+  const cur = await currentApprovalContextHash(admin);
+  if (!cur.ok || cur.hash !== stored) return { ok: false, detail: "approval_context_changed" };
+  return { ok: true, detail: null };
 }
 
 serve(async (req: Request) => {
@@ -1278,14 +1246,6 @@ serve(async (req: Request) => {
       return json({ error: "Diagnostic agent model assignment is invalid.", detail: modelRes.detail ?? "model_assignment_invalid" }, 409);
     }
 
-    // Prompt 16A — strict tool-grant isolation gate for Prompt 14.
-    // Prompt 14 may proceed only when the diagnostic agent has either:
-    //   A. ZERO active tool grants, OR
-    //   B. EXACTLY ONE active grant matching the exact Prompt 16 diagnostic grant
-    //      (dfp-runtime-diagnostic-agent → dfp-runtime-diagnostic-tool, access_level="read").
-    // Anything else fails closed. No tool is executed; no HAL/n8n/Ollama is contacted.
-
-    // 1) Resolve the fixed diagnostic tool and confirm it remains non-executable.
     const diagTool = await resolveDiagnosticTool(admin);
     if (!diagTool) {
       await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
@@ -1298,7 +1258,6 @@ serve(async (req: Request) => {
       return json({ error: "Diagnostic tool unexpectedly has an executable configuration.", detail: "diagnostic_tool_not_safe" }, 409);
     }
 
-    // 2) Query ALL active tool grants for the diagnostic agent (fail-closed).
     const { data: agentGrantRows } = await admin
       .from("ai_tool_agent_access")
       .select("id, connection_id, access_level")
@@ -1306,21 +1265,18 @@ serve(async (req: Request) => {
       .eq("is_active", true);
     const agentGrants = agentGrantRows ?? [];
 
-    // Multiple or duplicate active grants → reject.
     if (agentGrants.length > 1) {
       await auditEvent(admin, "agent_dry_run_probe_rejected", "rejected", "high", actor,
         `Agent dry-run queue rejected: diagnostic agent holds multiple active tool grants. No agent dry-run queued.`);
       return json({ error: "Diagnostic agent must hold at most one active tool grant.", detail: "tool_access_scope_invalid" }, 409);
     }
 
-    // Exactly one active grant → allow ONLY the exact Prompt 16 read grant.
     if (agentGrants.length === 1) {
       const grant = agentGrants[0];
       const isExactDiagGrant =
         grant.connection_id === diagTool.id && str(grant.access_level) === "read";
 
       if (!isExactDiagGrant) {
-        // Unrelated tool grant → scope invalid; matching tool but broader level → executing/broad.
         const detail =
           grant.connection_id !== diagTool.id
             ? "tool_access_scope_invalid"
@@ -1827,8 +1783,6 @@ serve(async (req: Request) => {
       }, 409);
     }
 
-    // Negative isolation check — the agent must hold no OTHER active grant, and
-    // no broad/wildcard grant. Registry inspection only (no tool calls).
     const allGrants = await resolveAgentActiveGrants(admin, agent.id as string);
     const unrelatedGrants = allGrants.filter((g) => g.connection_id !== tool.id);
     if (unrelatedGrants.length > 0) {
@@ -1991,7 +1945,6 @@ serve(async (req: Request) => {
       }, 404);
     }
 
-    // 1) Dedicated agent must exist, be active, and have autonomy none.
     const agent = await resolveReadonlyToolAgent(admin);
     if (!agent) {
       await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high", actor,
@@ -2004,7 +1957,6 @@ serve(async (req: Request) => {
       return json({ error: "Dedicated read-only tool agent autonomy is not none.", detail: "agent_autonomy_invalid" }, 409);
     }
 
-    // 2) Fixed callable tool must exist with no credential and no endpoint.
     const tool = await resolveReadonlyTool(admin);
     if (!tool) {
       await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high", actor,
@@ -2017,8 +1969,6 @@ serve(async (req: Request) => {
       return json({ error: "Callable tool unexpectedly has an executable credential/endpoint configuration.", detail: "tool_not_safe" }, 409);
     }
 
-    // 3) Exactly one active grant for this agent, pointing to this tool only, with
-    //    the exact invocation permission (execute). No unrelated grants allowed.
     const { data: agentGrantRows } = await admin
       .from("ai_tool_agent_access")
       .select("id, connection_id, access_level")
@@ -2040,7 +1990,6 @@ serve(async (req: Request) => {
       return json({ error: "Dedicated agent grant is not the exact isolated execute permission for the callable tool.", detail: "tool_access_scope_invalid" }, 409);
     }
 
-    // 4) Master kill switch must remain ON with execution blocked.
     const master = await resolveMasterKillSwitch(admin);
     if (!master || master.enabled !== true || master.execution_allowed !== false) {
       await auditEvent(admin, "readonly_tool_probe_rejected", "rejected", "high", actor,
@@ -2196,19 +2145,10 @@ serve(async (req: Request) => {
 
   // ===========================================================================
   // QUEUE_DIAGNOSTIC_RUN — owner/admin only.
-  //   Creates the FIRST persisted AI Operations task/run lifecycle. Strict
-  //   isolation validation before queueing: caller owner/admin, master kill
-  //   switch ON / execution blocked, fresh HAL heartbeat, fixed agent active +
-  //   autonomy none, fixed callable tool with no credential/endpoint, exactly one
-  //   active execute grant to this tool only, and no other active diagnostic run
-  //   of this type. Then creates one task + one run + six deterministic steps and
-  //   queues ONE fixed HAL message (diagnostic_run_tool_probe). No tool is invoked
-  //   here — the outbound message instructs HAL to run the fixed read-only tool.
   // ===========================================================================
   if (operation === "queue_diagnostic_run") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to queue a diagnostic run." }, 403);
 
-    // 2) Master kill switch must remain ON with execution blocked.
     const master = await resolveMasterKillSwitch(admin);
     if (!master || master.enabled !== true || master.execution_allowed !== false) {
       await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
@@ -2216,7 +2156,6 @@ serve(async (req: Request) => {
       return json({ error: "Master kill switch is not in the required ON / execution-blocked state.", detail: "kill_switch_state_invalid" }, 409);
     }
 
-    // 5) HAL bridge must be fresh/reachable.
     const node = await resolveNode(admin, str(body.node_key));
     if (!node) {
       return json({
@@ -2225,7 +2164,6 @@ serve(async (req: Request) => {
       }, 404);
     }
 
-    // 6) Fixed agent must exist, be active, and have autonomy none.
     const agent = await resolveReadonlyToolAgent(admin);
     if (!agent) {
       await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
@@ -2238,7 +2176,6 @@ serve(async (req: Request) => {
       return json({ error: "Dedicated diagnostic agent autonomy is not none.", detail: "agent_autonomy_invalid" }, 409);
     }
 
-    // 7) Fixed callable tool must exist with no credential and no endpoint.
     const tool = await resolveReadonlyTool(admin);
     if (!tool) {
       await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
@@ -2251,7 +2188,6 @@ serve(async (req: Request) => {
       return json({ error: "Callable diagnostic tool unexpectedly has an executable configuration.", detail: "tool_not_safe" }, 409);
     }
 
-    // 11–13) Exactly one active execute grant for this agent → this tool only.
     const { data: agentGrantRows } = await admin
       .from("ai_tool_agent_access")
       .select("id, connection_id, access_level")
@@ -2273,7 +2209,6 @@ serve(async (req: Request) => {
       return json({ error: "Dedicated agent grant is not the exact isolated execute permission for the callable tool.", detail: "tool_access_scope_invalid" }, 409);
     }
 
-    // 15) No other active diagnostic run of this exact type already running.
     const { data: activeRuns } = await admin
       .from("ai_runs")
       .select("id, run_key")
@@ -2290,7 +2225,6 @@ serve(async (req: Request) => {
     const runKey = `${DIAGNOSTIC_RUN_KEY_PREFIX}${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const probeKey = uid("DRP");
 
-    // 1) CREATE TASK RECORD (existing ai_tasks schema).
     const taskInsert = {
       task_key: DIAGNOSTIC_RUN_TASK_KEY,
       name: DIAGNOSTIC_RUN_TASK_NAME,
@@ -2323,7 +2257,6 @@ serve(async (req: Request) => {
     }
     const taskId = taskIns.data[0].id as string;
 
-    // 2) CREATE RUN RECORD (existing ai_runs schema).
     const runInsert = {
       run_key: runKey,
       task_id: taskId,
@@ -2359,8 +2292,6 @@ serve(async (req: Request) => {
     }
     const runId = runIns.data[0].id as string;
 
-    // 3) CREATE DETERMINISTIC RUN STEPS. Steps 1–4 are validated/dispatched
-    //    synchronously at queue time; steps 5–6 await the signed result.
     const stepRows = DIAGNOSTIC_RUN_STEPS.map((name, idx) => ({
       run_id: runId,
       step_number: idx + 1,
@@ -2385,7 +2316,6 @@ serve(async (req: Request) => {
       updated_at: new Date().toISOString(),
     }).eq("id", runId);
 
-    // 4) QUEUE ONE FIXED HAL MESSAGE (diagnostic_run_tool_probe).
     const safePayload = {
       probe_key: probeKey,
       probe_id: DIAGNOSTIC_RUN_PROBE_ID,
@@ -2566,19 +2496,10 @@ serve(async (req: Request) => {
 
   // ===========================================================================
   // CREATE_APPROVAL_GATED_RUN — owner/admin only.
-  //   Creates the FIRST human-approval-gated diagnostic lifecycle. Strict
-  //   isolation validation before creating: caller owner/admin, master kill
-  //   switch ON / execution blocked, fresh HAL heartbeat, fixed agent active +
-  //   autonomy none, fixed callable tool with no credential/endpoint, exactly one
-  //   active execute grant to this tool only. Then creates one task + one run +
-  //   six deterministic steps + ONE approval. It queues NO HAL message — HAL
-  //   dispatch is blocked until an explicit human approval + a separate manual
-  //   dispatch. Approval is a REAL execution gate.
   // ===========================================================================
   if (operation === "create_approval_gated_run") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to create an approval-gated run." }, 403);
 
-    // 1) Master kill switch must remain ON with execution blocked.
     const master = await resolveMasterKillSwitch(admin);
     if (!master || master.enabled !== true || master.execution_allowed !== false) {
       await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high", actor,
@@ -2586,7 +2507,6 @@ serve(async (req: Request) => {
       return json({ error: "Master kill switch is not in the required ON / execution-blocked state.", detail: "kill_switch_state_invalid" }, 409);
     }
 
-    // 5) HAL bridge must be fresh/reachable.
     const node = await resolveNode(admin, str(body.node_key));
     if (!node) {
       return json({
@@ -2595,7 +2515,6 @@ serve(async (req: Request) => {
       }, 404);
     }
 
-    // 6) Fixed agent must exist, be active, and have autonomy none.
     const agent = await resolveReadonlyToolAgent(admin);
     if (!agent) {
       await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high", actor,
@@ -2608,7 +2527,6 @@ serve(async (req: Request) => {
       return json({ error: "Dedicated diagnostic agent autonomy is not none.", detail: "agent_autonomy_invalid" }, 409);
     }
 
-    // 7) Fixed callable tool must exist with no credential and no endpoint.
     const tool = await resolveReadonlyTool(admin);
     if (!tool) {
       await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high", actor,
@@ -2621,7 +2539,6 @@ serve(async (req: Request) => {
       return json({ error: "Callable diagnostic tool unexpectedly has an executable configuration.", detail: "tool_not_safe" }, 409);
     }
 
-    // 11–13) Exactly one active execute grant for this agent → this tool only.
     const { data: agentGrantRows } = await admin
       .from("ai_tool_agent_access")
       .select("id, connection_id, access_level")
@@ -2649,7 +2566,23 @@ serve(async (req: Request) => {
     const taskKey = `${APPROVAL_GATED_TASK_KEY_PREFIX}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const approvalKey = `${APPROVAL_GATED_APPROVAL_KEY_PREFIX}${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
-    // 1) CREATE TASK RECORD (existing ai_tasks schema).
+    // Prompt 20: build the immutable server-side approval context + SHA-256 hash.
+    const approvalContext = buildApprovalContext({
+      agentId: str(agent.id),
+      toolId: str(tool.id),
+      grantId: str(grant.id),
+    });
+    const approvalContextHash = await computeApprovalContextHash(approvalContext);
+    const approvalContextConditions = {
+      approval_context_version: APPROVAL_CONTEXT_VERSION,
+      approval_context_hash: approvalContextHash,
+      probe_id: APPROVAL_GATED_PROBE_ID,
+      agent_key: APPROVAL_GATED_AGENT_KEY,
+      tool_key: APPROVAL_GATED_TOOL_KEY,
+      tool_operation: APPROVAL_GATED_TOOL_OPERATION,
+      access_level: APPROVAL_GATED_PERMISSION,
+    };
+
     const taskInsert = {
       task_key: taskKey,
       name: APPROVAL_GATED_TASK_NAME,
@@ -2683,7 +2616,6 @@ serve(async (req: Request) => {
     }
     const taskId = taskIns.data[0].id as string;
 
-    // 2) CREATE RUN RECORD (existing ai_runs schema). Status awaiting_approval.
     const runInsert = {
       run_key: runKey,
       task_id: taskId,
@@ -2720,8 +2652,6 @@ serve(async (req: Request) => {
     }
     const runId = runIns.data[0].id as string;
 
-    // 3) CREATE SIX DETERMINISTIC RUN STEPS. Steps 1–3 completed synchronously;
-    //    step 4 awaits human approval; steps 5–6 await approval + dispatch + result.
     const stepRows = APPROVAL_GATED_STEPS.map((name, idx) => ({
       run_id: runId,
       step_number: idx + 1,
@@ -2741,7 +2671,6 @@ serve(async (req: Request) => {
       return json({ error: "Failed to create the approval-gated run steps.", detail: "steps_create_failed" }, 500);
     }
 
-    // 4) CREATE ONE APPROVAL (existing ai_approvals schema). Status pending.
     const approvalInsert = {
       approval_key: approvalKey,
       title: APPROVAL_GATED_TASK_NAME,
@@ -2757,6 +2686,7 @@ serve(async (req: Request) => {
       status: "pending",
       requested_by: actor,
       requested_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + APPROVAL_GATED_VALIDITY_MS).toISOString(),
       required_team: "Group AI Operations",
       minimum_approvers: 1,
       current_approval_count: 0,
@@ -2768,6 +2698,7 @@ serve(async (req: Request) => {
       verification_required: true,
       uat_required: false,
       audit_required: true,
+      conditions: approvalContextConditions,
       notes: JSON.stringify({
         probe_id: APPROVAL_GATED_PROBE_ID,
         agent_key: APPROVAL_GATED_AGENT_KEY,
@@ -2786,10 +2717,8 @@ serve(async (req: Request) => {
     }
     const approvalId = approvalIns.data[0].id as string;
 
-    // Link the run back to the approval.
     await admin.from("ai_runs").update({ approval_id: approvalId, updated_at: now.toISOString() }).eq("id", runId);
 
-    // 5) APPROVAL HISTORY: requested (append-only).
     await admin.from("ai_approval_history").insert({
       approval_id: approvalId,
       event_type: "requested",
@@ -2805,14 +2734,29 @@ serve(async (req: Request) => {
       created_at: now.toISOString(),
     });
 
-    // 6) NO HAL MESSAGE — the gate. HAL dispatch is explicitly BLOCKED here.
+    await admin.from("ai_approval_history").insert({
+      approval_id: approvalId,
+      event_type: "context_bound",
+      previous_status: "pending",
+      new_status: "pending",
+      decision: null,
+      actor_reference: actor,
+      actor_role: role,
+      reason: "Immutable approval authorization context bound (server-side registry IDs + SHA-256 hash).",
+      conditions: approvalContextConditions,
+      approval_count_before: 0,
+      approval_count_after: 0,
+      created_at: now.toISOString(),
+    });
 
-    // 7) AUDIT.
     await auditEvent(admin, "approval_gated_run_created", "success", "low", actor,
       `Approval-gated run ${runKey} created (task=${taskKey}, approval=${approvalKey}, agent=${APPROVAL_GATED_AGENT_KEY}, tool=${APPROVAL_GATED_TOOL_KEY}). Awaiting human approval — HAL dispatch BLOCKED.`,
       correlationId);
     await auditEvent(admin, "approval_requested", "success", "low", actor,
       `Approval ${approvalKey} requested for approval-gated run ${runKey}. No HAL dispatch occurred.`,
+      correlationId);
+    await auditEvent(admin, "approval_context_bound", "success", "low", actor,
+      `Approval ${approvalKey} context bound (fingerprint=${approvalContextHash.slice(0, 8)}). Immutable server-side authorization context.`,
       correlationId);
 
     return json({
@@ -2833,6 +2777,8 @@ serve(async (req: Request) => {
       status: "awaiting_approval",
       halDispatch: "BLOCKED",
       totalSteps: APPROVAL_GATED_STEPS.length,
+      expiresAt: new Date(now.getTime() + APPROVAL_GATED_VALIDITY_MS).toISOString(),
+      contextFingerprint: approvalContextHash.slice(0, 8),
       executionEnabled: false,
       message: "Approval-gated run created. HAL dispatch is BLOCKED until explicit human approval and a separate manual dispatch.",
     });
@@ -2860,7 +2806,7 @@ serve(async (req: Request) => {
 
     const { data: runRows } = await admin
       .from("ai_runs")
-      .select("id, run_key, task_id, status")
+      .select("id, run_key, task_id, status, correlation_id")
       .eq("id", runId)
       .limit(1);
     const run = runRows && runRows.length > 0 ? runRows[0] : null;
@@ -2869,6 +2815,54 @@ serve(async (req: Request) => {
     }
     if (str(run.status) !== "awaiting_approval") {
       return json({ error: "Run is not awaiting approval.", detail: "run_not_awaiting_approval" }, 409);
+    }
+
+    // Prompt 20: expiry gate — a pending approval expires after 5 minutes.
+    const approvalExpiresAt = str(approval.expires_at);
+    if (approvalExpiresAt && Date.now() > new Date(approvalExpiresAt).getTime()) {
+      const expireNow = new Date().toISOString();
+      await admin.from("ai_approvals").update({ status: "expired", updated_at: expireNow }).eq("id", approval.id);
+      await admin.from("ai_approval_history").insert({
+        approval_id: approval.id,
+        event_type: "expired",
+        previous_status: "pending",
+        new_status: "expired",
+        decision: null,
+        actor_reference: actor,
+        actor_role: role,
+        reason: "Approval expired before a human decision — it can no longer be approved.",
+        conditions: approval.conditions ?? null,
+        approval_count_before: 0,
+        approval_count_after: 0,
+        created_at: expireNow,
+      });
+      await admin.from("ai_run_steps").update({
+        status: "failed",
+        error_summary: "Approval expired before a human decision.",
+        completed_at: expireNow,
+      }).eq("run_id", runId).eq("step_number", 4);
+      await admin.from("ai_runs").update({
+        status: "cancelled",
+        error_summary: "Approval expired before a human decision.",
+        completed_at: expireNow,
+        updated_at: expireNow,
+      }).eq("id", runId);
+      if (run.task_id) {
+        await admin.from("ai_tasks").update({ status: "failed", updated_at: expireNow }).eq("id", run.task_id);
+      }
+      await auditEvent(admin, "approval_expired", "expired", "low", actor,
+        `Approval ${str(approval.approval_key)} expired before a human decision (run ${str(run.run_key)}). No HAL dispatch occurred.`,
+        str(run.correlation_id) || null);
+      return json({ error: "This approval has expired and can no longer be approved.", detail: "approval_expired" }, 409);
+    }
+
+    // Prompt 20: context revalidation — the authorization context must still match.
+    const ctxCheck = await revalidateApprovalContext(admin, approval);
+    if (!ctxCheck.ok) {
+      await auditEvent(admin, "approval_context_changed", "blocked", "high", actor,
+        `Approval ${str(approval.approval_key)} context changed since creation (${ctxCheck.detail}). Approve blocked — a fresh approval is required.`,
+        str(run.correlation_id) || null);
+      return json({ error: "The approved authorization context has changed since the approval was created. A fresh human approval is required.", detail: "approval_context_changed" }, 409);
     }
 
     const decisionAt = new Date().toISOString();
@@ -2898,14 +2892,14 @@ serve(async (req: Request) => {
       created_at: decisionAt,
     });
 
-    // Step 4 (require_human_approval) → completed. NO HAL dispatch.
     await admin.from("ai_run_steps").update({
       status: "completed",
       completed_at: decisionAt,
     }).eq("run_id", runId).eq("step_number", 4);
 
     await auditEvent(admin, "approval_granted", "success", "low", actor,
-      `Approval ${str(approval.approval_key)} granted by ${actor} for run ${str(run.run_key)}. HAL still NOT dispatched — awaiting manual dispatch.`);
+      `Approval ${str(approval.approval_key)} granted by ${actor} for run ${str(run.run_key)}. HAL still NOT dispatched — awaiting manual dispatch.`,
+      str(run.correlation_id) || null);
 
     return json({
       accepted: true,
@@ -2941,7 +2935,7 @@ serve(async (req: Request) => {
 
     const { data: runRows } = await admin
       .from("ai_runs")
-      .select("id, run_key, task_id, status")
+      .select("id, run_key, task_id, status, correlation_id")
       .eq("id", runId)
       .limit(1);
     const run = runRows && runRows.length > 0 ? runRows[0] : null;
@@ -2996,9 +2990,11 @@ serve(async (req: Request) => {
     }
 
     await auditEvent(admin, "approval_rejected", "rejected", "low", actor,
-      `Approval ${str(approval.approval_key)} rejected by ${actor}. Run ${str(run.run_key)} cancelled. No HAL dispatch, no retry.`);
+      `Approval ${str(approval.approval_key)} rejected by ${actor}. Run ${str(run.run_key)} cancelled. No HAL dispatch, no retry.`,
+      str(run.correlation_id) || null);
     await auditEvent(admin, "approval_gated_run_failed", "failed", "low", actor,
-      `Approval-gated run ${str(run.run_key)} cancelled after human rejection. No HAL dispatch occurred.`);
+      `Approval-gated run ${str(run.run_key)} cancelled after human rejection. No HAL dispatch occurred.`,
+      str(run.correlation_id) || null);
 
     return json({
       accepted: true,
@@ -3013,9 +3009,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // DISPATCH_APPROVED_DIAGNOSTIC_RUN — owner/admin only. May proceed ONLY when
-  //   the approval is approved and not yet consumed, the run is not terminal,
-  //   and all runtime gates still hold. Queues EXACTLY ONE HAL message.
+  // DISPATCH_APPROVED_DIAGNOSTIC_RUN — owner/admin only.
   // ===========================================================================
   if (operation === "dispatch_approved_diagnostic_run") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to dispatch an approved diagnostic run." }, 403);
@@ -3025,7 +3019,6 @@ serve(async (req: Request) => {
       return json({ error: "Approval-gated approval not found.", detail: "approval_not_found" }, 404);
     }
 
-    // 1) Approval must be approved (not pending/rejected/completed).
     if (str(approval.status) !== "approved") {
       return json({ error: "Dispatch requires an explicit approved approval.", detail: "approval_not_approved" }, 409);
     }
@@ -3045,12 +3038,10 @@ serve(async (req: Request) => {
       return json({ error: "Approval run not found.", detail: "run_not_found" }, 409);
     }
 
-    // 5) Run must not be completed/failed/cancelled.
     if (str(run.status) === "completed" || str(run.status) === "failed" || str(run.status) === "cancelled") {
       return json({ error: "Run is already in a terminal state.", detail: "run_terminal" }, 409);
     }
 
-    // Approval must not already be consumed — no existing outbound dispatch.
     const corr = str(run.correlation_id);
     const { data: existingDispatch } = await admin
       .from("ai_runtime_bridge_messages")
@@ -3061,11 +3052,53 @@ serve(async (req: Request) => {
       .limit(1);
     if (existingDispatch && existingDispatch.length > 0) {
       await auditEvent(admin, "approval_reuse_blocked", "blocked", "high", actor,
-        `Dispatch blocked: approval-gated run ${str(run.run_key)} already has a dispatched HAL message. An approved approval never authorizes a second dispatch.`);
+        `Dispatch blocked: approval-gated run ${str(run.run_key)} already has a dispatched HAL message. An approved approval never authorizes a second dispatch.`,
+        corr);
       return json({ error: "This approval has already been dispatched.", detail: "already_dispatched" }, 409);
     }
 
-    // 6) Master kill switch must remain ON with execution blocked.
+    // Prompt 20: expiry gate — an approved approval expires after 5 minutes.
+    const approvalExpiresAt = str(approval.expires_at);
+    if (approvalExpiresAt && Date.now() > new Date(approvalExpiresAt).getTime()) {
+      const expireNow = new Date().toISOString();
+      await admin.from("ai_approvals").update({ status: "expired", updated_at: expireNow }).eq("id", approval.id);
+      await admin.from("ai_approval_history").insert({
+        approval_id: approval.id,
+        event_type: "expired",
+        previous_status: "approved",
+        new_status: "expired",
+        decision: "approve",
+        actor_reference: actor,
+        actor_role: role,
+        reason: "Approved approval expired before dispatch — dispatch blocked.",
+        conditions: approval.conditions ?? null,
+        approval_count_before: 1,
+        approval_count_after: 1,
+        created_at: expireNow,
+      });
+      await admin.from("ai_run_steps").update({
+        status: "failed",
+        error_summary: "Approval expired before dispatch.",
+        completed_at: expireNow,
+      }).eq("run_id", runId).eq("step_number", 5);
+      await admin.from("ai_runs").update({
+        status: "cancelled",
+        error_summary: "Approval expired before dispatch.",
+        completed_at: expireNow,
+        updated_at: expireNow,
+      }).eq("id", runId);
+      if (run.task_id) {
+        await admin.from("ai_tasks").update({ status: "failed", updated_at: expireNow }).eq("id", run.task_id);
+      }
+      await auditEvent(admin, "approval_expired", "expired", "low", actor,
+        `Approved approval ${str(approval.approval_key)} expired before dispatch (run ${str(run.run_key)}). Dispatch blocked.`,
+        corr);
+      await auditEvent(admin, "approval_dispatch_expired_blocked", "blocked", "low", actor,
+        `Dispatch blocked: approval-gated run ${str(run.run_key)} approval expired before dispatch. No HAL message was inserted.`,
+        corr);
+      return json({ error: "This approval has expired and can no longer be dispatched.", detail: "approval_expired" }, 409);
+    }
+
     const master = await resolveMasterKillSwitch(admin);
     if (!master || master.enabled !== true || master.execution_allowed !== false) {
       await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high", actor,
@@ -3073,7 +3106,6 @@ serve(async (req: Request) => {
       return json({ error: "Master kill switch is not in the required ON / execution-blocked state.", detail: "kill_switch_state_invalid" }, 409);
     }
 
-    // 8) Fresh HAL heartbeat.
     const node = await resolveNode(admin, str(body.node_key));
     if (!node) {
       return json({
@@ -3082,7 +3114,6 @@ serve(async (req: Request) => {
       }, 404);
     }
 
-    // 9–12) Fixed agent + tool + isolated execute permission still valid.
     const agent = await resolveReadonlyToolAgent(admin);
     if (!agent) {
       await auditEvent(admin, "approval_gated_run_rejected", "rejected", "high", actor,
@@ -3125,7 +3156,21 @@ serve(async (req: Request) => {
       return json({ error: "Dedicated agent grant is not the exact isolated execute permission for the callable tool.", detail: "tool_access_scope_invalid" }, 409);
     }
 
-    // Resolve the task key for the fixed task_reference.
+    // Prompt 20: context hash must still match the approved authorization context.
+    const dispatchContext = buildApprovalContext({
+      agentId: str(agent.id),
+      toolId: str(tool.id),
+      grantId: str(dispatchGrant.id),
+    });
+    const dispatchContextHash = await computeApprovalContextHash(dispatchContext);
+    const storedContextHash = str((approval.conditions as Record<string, unknown> | null)?.approval_context_hash);
+    if (!storedContextHash || dispatchContextHash !== storedContextHash) {
+      await auditEvent(admin, "approval_context_changed", "blocked", "high", actor,
+        `Dispatch blocked: approval ${str(approval.approval_key)} context changed since approval (run ${str(run.run_key)}). A fresh human approval is required.`,
+        corr);
+      return json({ error: "The approved authorization context has changed since approval. A fresh human approval is required.", detail: "approval_context_changed" }, 409);
+    }
+
     let taskKey = "";
     if (run.task_id) {
       const { data: taskRows } = await admin.from("ai_tasks").select("task_key").eq("id", run.task_id).limit(1);
@@ -3135,7 +3180,6 @@ serve(async (req: Request) => {
     const now = new Date();
     const probeKey = uid("AGP");
 
-    // Queue EXACTLY ONE fixed HAL message.
     const safePayload = {
       probe_key: probeKey,
       probe_id: APPROVAL_GATED_PROBE_ID,
@@ -3169,7 +3213,6 @@ serve(async (req: Request) => {
       created_at: now.toISOString(),
     });
 
-    // Step 5 (dispatch_readonly_tool) → completed; run → working.
     await admin.from("ai_run_steps").update({
       status: "completed",
       completed_at: now.toISOString(),
@@ -3248,8 +3291,8 @@ serve(async (req: Request) => {
     if (run) {
       const approvalId = run.approval_id;
       const appQuery = approvalId
-        ? admin.from("ai_approvals").select("id, approval_key, status, decision, decision_actor, decision_at, current_approval_count").eq("id", approvalId).limit(1)
-        : admin.from("ai_approvals").select("id, approval_key, status, decision, decision_actor, decision_at, current_approval_count").eq("run_id", run.id).limit(1);
+        ? admin.from("ai_approvals").select("id, approval_key, status, decision, decision_actor, decision_at, current_approval_count, expires_at, conditions").eq("id", approvalId).limit(1)
+        : admin.from("ai_approvals").select("id, approval_key, status, decision, decision_actor, decision_at, current_approval_count, expires_at, conditions").eq("run_id", run.id).limit(1);
       const { data: appRows } = await appQuery;
       approval = appRows && appRows.length > 0 ? appRows[0] : null;
 
@@ -3290,7 +3333,19 @@ serve(async (req: Request) => {
       }
     }
 
-    // Derive HAL dispatch state.
+    // Prompt 20: expiry + context-binding status.
+    const approvalExpiresAt = approval ? str(approval.expires_at) : null;
+    const approvalIsExpired = approvalExpiresAt ? Date.now() > new Date(approvalExpiresAt).getTime() : false;
+    const approvalConditions = (approval?.conditions as Record<string, unknown> | null) ?? {};
+    const approvalContextHash = str(approvalConditions.approval_context_hash);
+    const approvalContextBound = !!approvalContextHash;
+    let approvalContextMatched = false;
+    if (approvalContextBound) {
+      const cur = await currentApprovalContextHash(admin);
+      approvalContextMatched = cur.ok && cur.hash === approvalContextHash;
+    }
+    const contextFingerprint = approvalContextHash ? approvalContextHash.slice(0, 8) : null;
+
     let halDispatch = "BLOCKED";
     if (approval && str(approval.status) === "approved") halDispatch = "NOT_YET_SENT";
     if (run && str(run.status) === "working") halDispatch = "SENT";
@@ -3325,6 +3380,11 @@ serve(async (req: Request) => {
         decisionActor: str(approval.decision_actor) || null,
         decisionAt: str(approval.decision_at) || null,
         approvalCount: approval.current_approval_count ?? 0,
+        expiresAt: approvalExpiresAt,
+        isExpired: approvalIsExpired,
+        approvalContextBound,
+        approvalContextMatched,
+        contextFingerprint,
       } : null,
       steps,
       signedResult,

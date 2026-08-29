@@ -3,51 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ============================================================================
 // runtime-bridge — secure OUTBOUND-FIRST private-runtime bridge API for DFP AI
-// Operations (Phase 3 Prompt 08 + 09C + 10 + 11A + 12 + 13 + 14 + 17 + 18 + 19).
-//
-// The trusted server-side endpoint that a local trusted runtime machine (the
-// `dfp-runtime-bridge` local service) calls OUTBOUND over HTTPS. The cloud never
-// requires direct inbound TCP access to n8n / Ollama / Docker / private LAN.
-// This phase is CONNECTIVITY + HEARTBEAT + SAFE HEALTH RELAY + SANITISED OLLAMA
-// CATALOGUE RELAY + DRY-RUN TRANSPORT PROBE (Prompt 10) + CONTROLLED OLLAMA
-// SANDBOX INFERENCE PROBE (Prompt 11A) + CONTROLLED N8N SANDBOX WORKFLOW PROBE
-// (Prompt 12) + CONTROLLED MULTI-RUNTIME CHAIN PROBE (Prompt 13) + CONTROLLED
-// REGISTERED-AGENT DRY-RUN PROBE (Prompt 14) + CONTROLLED READ-ONLY TOOL PROBE
-// (Prompt 17) + CONTROLLED RUNTIME-BACKED DIAGNOSTIC RUN (Prompt 18) +
-// CONTROLLED HUMAN APPROVAL-GATED DIAGNOSTIC RUN (Prompt 19).
-//
-// It NEVER:
-//   * executes an agent or a business n8n workflow (the ONLY n8n execution is
-//     the single fixed `DFP Runtime Sandbox Ping` diagnostic, Prompt 12/13)
-//   * performs arbitrary Ollama inference (the ONLY generation allowed is the
-//     single fixed dfp_ollama_ping_v1 sandbox diagnostic + the single fixed
-//     dfp_agent_dry_run_v1 agent dry-run diagnostic, mapped server-side)
-//   * calls a model/tool, retrieves knowledge, sends notifications
-//   * creates arbitrary runs or mutates orchestration execution state (the ONLY
-//     run lifecycles touched are the single fixed diagnostic run (Prompt 18) and
-//     the single fixed approval-gated diagnostic run (Prompt 19))
-//   * runs schedules or performs remediation
-//   * proxies arbitrary URLs/IPs/ports/files/shell commands
-//   * mutates the ai_operations_models registry automatically
-//   * reads business/customer data or mutates anything (the ONLY callable tool
-//     is the fixed read-only runtime health snapshot, Prompt 17)
-//
-// Machine authentication (fail-closed, no internal-staff JWT):
-//   * Signed headers: X-DFP-Identity, X-DFP-Timestamp, X-DFP-Nonce,
-//     X-DFP-Signature-Version, X-DFP-Signature.
-//   * Canonical HMAC-SHA256 over identity \n timestamp \n nonce \n method \n
-//     path \n payload-hash.
-//   * Signing secret = DFP_RUNTIME_BRIDGE_SIGNING_KEY (server-side only).
-//   * Service identity `dfp-local-runtime-bridge` revalidated server-side;
-//     `execution_enabled` on every node is forced FALSE.
-//   * ±5-minute timestamp window, nonce replay protection, idempotent message_id.
-//
-// Allowlisted operations: handshake, heartbeat, report_health,
-// report_capabilities, report_ollama_catalogue, fetch_control_messages,
-// report_transport_probe_ack, report_ollama_inference_probe,
-// report_n8n_sandbox_probe, report_runtime_chain_probe,
-// report_agent_dry_run_probe, report_readonly_tool_probe,
-// report_diagnostic_run_tool_probe, report_approval_gated_diagnostic_probe.
+// Operations.
 // ============================================================================
 
 const CORS = {
@@ -68,19 +24,16 @@ const MAX_SUMMARY_CHARS = 500;
 const MAX_CATALOGUE_MODELS = 200;
 const MAX_NAME_CHARS = 200;
 const MAX_META_CHARS = 120;
-const PROBE_TTL_MS = 2 * 60_000; // transport probe expires in 2 minutes
+const PROBE_TTL_MS = 2 * 60_000;
 
-// --- Controlled Ollama sandbox inference probe (Prompt 11A) ------------------
 const OLLAMA_PROBE_MESSAGE_TYPE = "ollama_inference_probe";
 const OLLAMA_PROBE_RESULT_MESSAGE_TYPE = "ollama_inference_probe_result";
-// The ONLY permitted probe values (must match the local HAL exactly).
 const OLLAMA_PROBE_PROMPT_ID = "dfp_ollama_ping_v1";
 const OLLAMA_PROBE_MODEL = "qwen2.5-coder:7b";
 const OLLAMA_PROBE_MODE = "sandbox_diagnostic";
 const OLLAMA_PROBE_EXPECTED_OUTPUT = "DFP_OLLAMA_SANDBOX_OK";
 const MAX_OUTPUT_CHARS = 100;
 
-// --- Controlled n8n sandbox workflow probe (Prompt 12) ------------------------
 const N8N_SANDBOX_PROBE_MESSAGE_TYPE = "n8n_sandbox_probe";
 const N8N_SANDBOX_PROBE_RESULT_MESSAGE_TYPE = "n8n_sandbox_probe_result";
 const N8N_SANDBOX_PROBE_ID = "dfp_n8n_ping_v1";
@@ -93,13 +46,11 @@ const N8N_SANDBOX_PROBE_EXPECTED_OUTPUT = JSON.stringify({
 });
 const MAX_N8N_OUTPUT_CHARS = 200;
 
-// --- Controlled multi-runtime chain probe (Prompt 13) -------------------------
 const CHAIN_PROBE_MESSAGE_TYPE = "runtime_chain_probe";
 const CHAIN_PROBE_RESULT_MESSAGE_TYPE = "runtime_chain_probe_result";
 const CHAIN_PROBE_ID = "dfp_runtime_chain_v1";
 const CHAIN_PROBE_MODE = "sandbox_diagnostic";
 
-// --- Controlled registered-agent dry-run probe (Prompt 14) --------------------
 const AGENT_DRY_RUN_PROBE_MESSAGE_TYPE = "agent_dry_run_probe";
 const AGENT_DRY_RUN_PROBE_RESULT_MESSAGE_TYPE = "agent_dry_run_probe_result";
 const AGENT_DRY_RUN_PROBE_ID = "dfp_agent_dry_run_v1";
@@ -109,7 +60,6 @@ const AGENT_DRY_RUN_MODEL = "qwen2.5-coder:7b";
 const AGENT_DRY_RUN_EXPECTED_OUTPUT = "DFP_AGENT_DRY_RUN_OK";
 const MAX_AGENT_OUTPUT_CHARS = 100;
 
-// --- Controlled read-only tool probe (Prompt 17) ------------------------------
 const READONLY_TOOL_PROBE_MESSAGE_TYPE = "readonly_tool_probe";
 const READONLY_TOOL_PROBE_RESULT_MESSAGE_TYPE = "readonly_tool_probe_result";
 const READONLY_TOOL_PROBE_ID = "dfp_readonly_tool_v1";
@@ -120,7 +70,6 @@ const READONLY_TOOL_PROBE_TOOL_OPERATION = "read_runtime_health_snapshot";
 const READONLY_TOOL_PROBE_PERMISSION = "execute";
 const READONLY_TOOL_ALLOWED_SERVICE_STATES = new Set(["healthy", "degraded", "unavailable"]);
 
-// --- Controlled runtime-backed diagnostic run (Prompt 18) ----------------------
 const DIAGNOSTIC_RUN_PROBE_MESSAGE_TYPE = "diagnostic_run_tool_probe";
 const DIAGNOSTIC_RUN_PROBE_RESULT_MESSAGE_TYPE = "diagnostic_run_tool_probe_result";
 const DIAGNOSTIC_RUN_PROBE_ID = "dfp_diagnostic_run_v1";
@@ -128,7 +77,6 @@ const DIAGNOSTIC_RUN_PROBE_MODE = "sandbox_diagnostic";
 const DIAGNOSTIC_RUN_TASK_KEY = "dfp-runtime-health-diagnostic-task";
 const DIAGNOSTIC_RUN_STEP_COUNT = 6;
 
-// --- Controlled human approval-gated diagnostic run (Prompt 19) ----------------
 const APPROVAL_GATED_PROBE_MESSAGE_TYPE = "approval_gated_diagnostic_probe";
 const APPROVAL_GATED_PROBE_RESULT_MESSAGE_TYPE = "approval_gated_diagnostic_probe_result";
 const APPROVAL_GATED_PROBE_ID = "dfp_approval_run_v1";
@@ -153,7 +101,6 @@ const ALLOWED_OPERATIONS = new Set([
   "report_approval_gated_diagnostic_probe",
 ]);
 
-// Allowlisted capabilities only — never shell/arbitrary_http/filesystem/docker.
 const ALLOWED_CAPABILITIES = new Set([
   "n8n_health",
   "n8n_metadata",
@@ -163,7 +110,6 @@ const ALLOWED_CAPABILITIES = new Set([
   "outbound_https",
 ]);
 
-// Allowlisted local service slugs for report_health (no arbitrary targets).
 const ALLOWED_LOCAL_SERVICES = new Set(["n8n", "ollama", "bridge"]);
 
 const ALLOWED_STATUSES = new Set([
@@ -185,8 +131,6 @@ const ALLOWED_CONTROL_MESSAGE_TYPES = new Set([
   "approval_gated_diagnostic_probe",
 ]);
 
-// Control messages that have their own distinct signed-result lifecycle (they
-// must NOT be marked "acknowledged" on fetch — they await a signed result).
 const PROBE_CONTROL_TYPES = new Set([
   "runtime_transport_probe",
   "ollama_inference_probe",
@@ -200,10 +144,8 @@ const PROBE_CONTROL_TYPES = new Set([
 
 const ALLOWED_PROBE_ACK_STATUSES = new Set(["verified", "rejected"]);
 
-// Terminal result statuses the HAL may report for an Ollama/n8n/chain/agent/readonly probe.
 const ALLOWED_RESULT_STATUSES = new Set(["completed", "failed", "rejected"]);
 
-// Safe Ollama catalogue fields — never prompts / content / credentials / raw config.
 const ALLOWED_CATALOGUE_CLASSIFICATIONS = new Set(["local", "remote"]);
 
 const enc = new TextEncoder();
@@ -277,8 +219,6 @@ async function auditEvent(
   });
 }
 
-// --- Sanitised Ollama catalogue helpers (Prompt 09C) --------------------------
-
 function sanitiseCatalogueModel(raw: unknown): Record<string, unknown> | null {
   if (!raw || typeof raw !== "object") return null;
   const m = raw as Record<string, unknown>;
@@ -307,8 +247,6 @@ function normaliseModelName(s: string): string {
   return s.trim().toLowerCase();
 }
 
-/** Deterministic catalogue→registry comparison for audit only. Never mutates
- *  the registry. Returns { present, missing, unregistered }. */
 async function compareCatalogueToRegistry(
   admin: ReturnType<typeof createClient>,
   models: Record<string, unknown>[],
@@ -358,9 +296,6 @@ async function compareCatalogueToRegistry(
   return { present, missing, unregistered };
 }
 
-// Cloud-side revalidation of the diagnostic agent + model assignment. The bridge
-// never trusts HAL-supplied values alone — it re-queries the registry before
-// marking any agent dry-run result verified.
 async function validateDiagnosticAgentAndModel(
   admin: ReturnType<typeof createClient>,
 ): Promise<{ ok: boolean; detail: string | null }> {
@@ -401,9 +336,6 @@ async function validateDiagnosticAgentAndModel(
   return { ok: true, detail: null };
 }
 
-// Cloud-side revalidation of the dedicated read-only tool agent + tool + exact
-// isolated execute permission (Prompt 17). The bridge never trusts HAL-supplied
-// values alone — it re-queries the registries before marking the result verified.
 async function validateReadonlyToolGrant(
   admin: ReturnType<typeof createClient>,
 ): Promise<{ ok: boolean; detail: string | null }> {
@@ -443,9 +375,6 @@ async function validateReadonlyToolGrant(
   return { ok: true, detail: null };
 }
 
-// Cloud-side revalidation of the approval-gated approval (Prompt 19). The bridge
-// never trusts HAL-supplied values alone — it re-checks that the approval is
-// genuinely approved, belongs to the run/task, and was approved before dispatch.
 async function validateApprovalGatedApproval(
   admin: ReturnType<typeof createClient>,
   runReference: string,
@@ -457,7 +386,7 @@ async function validateApprovalGatedApproval(
 
   const { data: approvalRows } = await admin
     .from("ai_approvals")
-    .select("id, approval_key, status, run_id, decision_at")
+    .select("id, approval_key, status, run_id, decision, decision_at, expires_at, conditions")
     .eq("approval_key", approvalReference)
     .limit(1);
   const approval = approvalRows && approvalRows.length > 0 ? approvalRows[0] : null;
@@ -465,6 +394,7 @@ async function validateApprovalGatedApproval(
   if (str(approval.status) !== "approved" && str(approval.status) !== "completed") {
     return { ok: false, detail: "approval_not_approved" };
   }
+  if (str(approval.decision) !== "approve") return { ok: false, detail: "approval_not_decided" };
 
   const { data: runRows } = await admin
     .from("ai_runs")
@@ -485,25 +415,37 @@ async function validateApprovalGatedApproval(
     if (!task || str(task.task_key) !== taskReference) return { ok: false, detail: "approval_task_mismatch" };
   }
 
-  // Approved before dispatch (decision_at <= dispatch message created_at).
+  // Prompt 20: decision timestamp must exist and precede dispatch.
   const decisionAt = str(approval.decision_at);
+  if (!decisionAt) return { ok: false, detail: "approval_decision_missing" };
   const createdAt = str(dispatchCreatedAt);
-  if (decisionAt && createdAt) {
+  if (createdAt) {
     if (new Date(decisionAt).getTime() > new Date(createdAt).getTime()) {
       return { ok: false, detail: "approval_not_before_dispatch" };
     }
   }
 
+  // Prompt 20: dispatch must have occurred before the approval expiry (legacy-safe).
+  const expiresAt = str(approval.expires_at);
+  if (expiresAt && createdAt) {
+    if (new Date(createdAt).getTime() > new Date(expiresAt).getTime()) {
+      return { ok: false, detail: "approval_expired_at_dispatch" };
+    }
+  }
+
+  // Prompt 20: approval context must be bound to the fixed agent/tool/operation (legacy-safe).
+  const conditions = (approval.conditions as Record<string, unknown> | null) ?? {};
+  const contextHash = str(conditions.approval_context_hash);
+  if (contextHash) {
+    if (str(conditions.agent_key) !== READONLY_TOOL_PROBE_AGENT_KEY) return { ok: false, detail: "approval_context_agent_mismatch" };
+    if (str(conditions.tool_key) !== READONLY_TOOL_PROBE_TOOL_KEY) return { ok: false, detail: "approval_context_tool_mismatch" };
+    if (str(conditions.tool_operation) !== READONLY_TOOL_PROBE_TOOL_OPERATION) return { ok: false, detail: "approval_context_operation_mismatch" };
+    if (str(conditions.access_level) !== READONLY_TOOL_PROBE_PERMISSION) return { ok: false, detail: "approval_context_access_mismatch" };
+  }
+
   return { ok: true, detail: null };
 }
 
-// Finalise the fixed diagnostic run lifecycle (Prompt 18). ONLY after a valid
-// signed result. Resolves the run by its run_key, then:
-//   * verified  → mark all steps completed, run completed (+ safe result summary),
-//                 task completed.
-//   * not verified → mark step 5 (verify_signed_result) failed, run failed, task
-//                 failed. No retry, no second tool call.
-// Returns the run id (or null when the run cannot be resolved).
 async function finalizeDiagnosticRun(
   admin: ReturnType<typeof createClient>,
   runKey: string,
@@ -579,12 +521,6 @@ async function finalizeDiagnosticRun(
   return run.id as string;
 }
 
-// Finalise the fixed approval-gated diagnostic run lifecycle (Prompt 19). ONLY
-// after a valid signed result. Resolves the run by run_key, then:
-//   * verified → mark steps 5+6 completed, run completed, task completed.
-//   * not verified → mark step 6 failed, run failed, task failed.
-// The approval is CONSUMED (marked completed) in both cases so an approved
-// approval can never authorize a second dispatch. No retry, no second call.
 async function finalizeApprovalGatedRun(
   admin: ReturnType<typeof createClient>,
   runReference: string,
@@ -658,7 +594,6 @@ async function finalizeApprovalGatedRun(
     }
   }
 
-  // Consume the approval (single-use authorization) in both cases.
   if (approvalReference) {
     const { data: appRows } = await admin
       .from("ai_approvals")
@@ -701,7 +636,6 @@ serve(async (req: Request) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-  // --- Read raw body (size-limited) ------------------------------------------
   const rawBody = await req.text();
   if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
     return json({ error: "Message envelope exceeds the 64 KB size limit." }, 413);
@@ -720,7 +654,6 @@ serve(async (req: Request) => {
   const sigVersion = (req.headers.get("x-dfp-signature-version") ?? "").trim();
   const signature = (req.headers.get("x-dfp-signature") ?? "").trim();
 
-  // --- Fail closed when signing is not configured ----------------------------
   const signingSecret = (Deno.env.get(SIGNING_SECRET_NAME) ?? "").trim();
   if (!signingSecret) {
     return json({ error: "configuration_missing" }, 503);
@@ -735,7 +668,6 @@ serve(async (req: Request) => {
     return json({ error: "stale_timestamp" }, 401);
   }
 
-  // --- Canonical HMAC-SHA256 signature ---------------------------------------
   const payloadHash = await sha256Hex(rawBody);
   const method = "POST";
   const path = new URL(req.url).pathname;
@@ -749,7 +681,6 @@ serve(async (req: Request) => {
 
   const admin = createClient(supabaseUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
 
-  // --- Server-side service-identity validation -------------------------------
   const { data: idRows } = await admin
     .from("ai_runtime_service_identities")
     .select("id, identity_key, identity_type, environment, credential_reference")
@@ -767,7 +698,6 @@ serve(async (req: Request) => {
     return json({ error: "unknown_identity" }, 403);
   }
 
-  // --- Envelope field validation ---------------------------------------------
   const operation = str(body.operation);
   if (!ALLOWED_OPERATIONS.has(operation)) {
     return json({ error: "unknown_operation" }, 422);
@@ -785,7 +715,6 @@ serve(async (req: Request) => {
   const now = new Date();
   const receivedAt = now.toISOString();
 
-  // --- Idempotency -----------------------------------------------------------
   const { data: dupRows } = await admin
     .from("ai_runtime_bridge_messages")
     .select("message_key, message_id, status")
@@ -801,7 +730,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // --- Replay protection -----------------------------------------------------
   const { data: nonceRows } = await admin
     .from("ai_runtime_bridge_messages")
     .select("id")
@@ -1102,7 +1030,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_OLLAMA_CATALOGUE — relay sanitised local Ollama /api/tags catalogue.
+  // REPORT_OLLAMA_CATALOGUE
   // ===========================================================================
   if (operation === "report_ollama_catalogue") {
     const rawModels = Array.isArray(body.models) ? (body.models as unknown[]) : [];
@@ -1634,8 +1562,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_RUNTIME_CHAIN_PROBE — signed combined result for the fixed multi-
-  //   runtime diagnostic chain (Prompt 13).
+  // REPORT_RUNTIME_CHAIN_PROBE
   // ===========================================================================
   if (operation === "report_runtime_chain_probe") {
     const probeKey = str(body.probe_key);
@@ -1793,8 +1720,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_AGENT_DRY_RUN_PROBE — signed result for the fixed registered-agent
-  //   dry-run (Prompt 14).
+  // REPORT_AGENT_DRY_RUN_PROBE
   // ===========================================================================
   if (operation === "report_agent_dry_run_probe") {
     const probeKey = str(body.probe_key);
@@ -1892,11 +1818,7 @@ serve(async (req: Request) => {
       });
     }
 
-    // Exact output verification (no case folding / fuzzy matching).
     const outputVerified = safeOutput.trim() === AGENT_DRY_RUN_EXPECTED_OUTPUT;
-
-    // Cloud independently re-checks the registered diagnostic agent + model
-    // assignment before marking the result verified.
     const recheck = await validateDiagnosticAgentAndModel(admin);
 
     const verified = outputVerified && recheck.ok && resultStatus === "completed";
@@ -1965,15 +1887,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_READONLY_TOOL_PROBE — signed result for the first callable read-only
-  //   tool (Prompt 17). The local HAL reports the sanitised local runtime health
-  //   snapshot (n8n /healthz + Ollama /api/tags, GET only). The cloud validates:
-  //   correct node, original outbound probe exists, correlation matches, probe_id/
-  //   mode/agent_key/tool_key/tool_operation are the fixed values, not expired,
-  //   not already recorded. The cloud INDEPENDENTLY re-checks the dedicated agent,
-  //   tool, and exact isolated execute permission before marking verified. It
-  //   stores ONLY the sanitised snapshot — never raw responses, model names, URLs,
-  //   credentials or business data.
+  // REPORT_READONLY_TOOL_PROBE
   // ===========================================================================
   if (operation === "report_readonly_tool_probe") {
     const probeKey = str(body.probe_key);
@@ -2079,8 +1993,6 @@ serve(async (req: Request) => {
       });
     }
 
-    // Cloud independently re-validates the dedicated agent + tool + exact isolated
-    // execute permission before marking the result verified. Never trust HAL alone.
     const recheck = await validateReadonlyToolGrant(admin);
 
     const verified = resultStatus === "completed" && recheck.ok;
@@ -2151,16 +2063,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_DIAGNOSTIC_RUN_TOOL_PROBE — signed result for the fixed runtime-backed
-  //   diagnostic run (Prompt 18). The local HAL reports the sanitised local
-  //   runtime health snapshot (n8n /healthz + Ollama /api/tags, GET only) plus the
-  //   task/run references. The cloud validates: correct node, original outbound
-  //   probe exists, correlation matches, probe_id/mode/agent/tool/operation are the
-  //   fixed values, task reference matches, not expired, not already recorded.
-  //   The cloud INDEPENDENTLY re-checks the dedicated agent + tool + exact isolated
-  //   execute permission. ONLY after a valid signed result does it finalize the
-  //   run lifecycle: mark steps completed → run completed → task completed (or, on
-  //   failure, step 5 failed → run failed → task failed; no retry, no second call).
+  // REPORT_DIAGNOSTIC_RUN_TOOL_PROBE
   // ===========================================================================
   if (operation === "report_diagnostic_run_tool_probe") {
     const probeKey = str(body.probe_key);
@@ -2279,8 +2182,6 @@ serve(async (req: Request) => {
       });
     }
 
-    // Cloud independently re-validates the dedicated agent + tool + exact isolated
-    // execute permission before marking the result verified. Never trust HAL alone.
     const recheck = await validateReadonlyToolGrant(admin);
 
     const verified = resultStatus === "completed" && recheck.ok;
@@ -2329,7 +2230,6 @@ serve(async (req: Request) => {
       created_at: receivedAt,
     });
 
-    // Finalise the fixed diagnostic run lifecycle ONLY after a valid signed result.
     const finalizedRunId = await finalizeDiagnosticRun(admin, runReference, verified, {
       n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: finalErrorCategory,
     });
@@ -2361,17 +2261,7 @@ serve(async (req: Request) => {
   }
 
   // ===========================================================================
-  // REPORT_APPROVAL_GATED_DIAGNOSTIC_PROBE — signed result for the fixed human
-  //   approval-gated diagnostic run (Prompt 19). The local HAL reports the
-  //   sanitised local runtime health snapshot plus task/run/approval references.
-  //   The cloud validates: correct node, original outbound probe exists,
-  //   correlation matches, probe_id/mode/agent/tool/operation are fixed values,
-  //   task/run/approval references present, not expired, not already recorded.
-  //   The cloud INDEPENDENTLY re-checks: the approval is genuinely approved and
-  //   belongs to the run/task (and was approved before dispatch), plus the
-  //   dedicated agent + tool + exact isolated execute permission. ONLY after a
-  //   valid signed result does it finalize the run lifecycle (steps 5+6 → run →
-  //   task) and CONSUME the approval. No retry, no second call, no reuse.
+  // REPORT_APPROVAL_GATED_DIAGNOSTIC_PROBE
   // ===========================================================================
   if (operation === "report_approval_gated_diagnostic_probe") {
     const probeKey = str(body.probe_key);
@@ -2466,7 +2356,10 @@ serve(async (req: Request) => {
       const expiredRunId = await finalizeApprovalGatedRun(admin, runReference, approvalReference, false, {
         n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: "expired",
       });
-      const expiredExtra = expiredRunId ? { run_id: expiredRunId } : {};
+      const expiredExtra = {
+        ...(expiredRunId ? { run_id: expiredRunId } : {}),
+        correlation_id: str(orig.correlation_id) || null,
+      };
       await auditEvent(admin, "approval_gated_run_failed", "failed", "medium",
         `Approval-gated run ${runReference || "(unknown)"} failed: probe expired before a signed result. No normal execution occurred.`, expiredExtra);
       return json({
@@ -2491,9 +2384,6 @@ serve(async (req: Request) => {
       });
     }
 
-    // Cloud independently re-validates the dedicated agent + tool + exact isolated
-    // execute permission, AND the approval (genuinely approved, belongs to run/
-    // task, approved before dispatch). Never trust HAL alone.
     const grantRecheck = await validateReadonlyToolGrant(admin);
     const approvalRecheck = await validateApprovalGatedApproval(
       admin, runReference, approvalReference, taskReference, str(orig.created_at),
@@ -2548,12 +2438,13 @@ serve(async (req: Request) => {
       created_at: receivedAt,
     });
 
-    // Finalise the approval-gated run lifecycle ONLY after a valid signed result,
-    // and CONSUME the approval (single-use authorization).
     const finalizedRunId = await finalizeApprovalGatedRun(admin, runReference, approvalReference, verified, {
       n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: finalErrorCategory,
     });
-    const runExtra = finalizedRunId ? { run_id: finalizedRunId } : {};
+    const runExtra = {
+      ...(finalizedRunId ? { run_id: finalizedRunId } : {}),
+      correlation_id: str(orig.correlation_id) || null,
+    };
 
     if (verified) {
       await auditEvent(admin, "approval_gated_tool_verified", "success", "low",
