@@ -1,8 +1,19 @@
 import { useParams, Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { useRuns } from '@/pages/ai-operations/runs/RunsContext';
 import { getAlertByRun } from '@/pages/ai-operations/alerts/selectors';
-import { DIAGNOSTIC_RUN_TASK_KEY, DIAGNOSTIC_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeDiagnosticRun';
-import { APPROVAL_GATED_TASK_KEY_PREFIX, APPROVAL_GATED_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeApprovalGatedRun';
+import { DIAGNOSTIC_RUN_TASK_KEY_PREFIX, DIAGNOSTIC_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeDiagnosticRun';
+import {
+  APPROVAL_GATED_TASK_KEY_PREFIX,
+  APPROVAL_GATED_RUN_KEY_PREFIX,
+  getApprovalGatedRunStatus,
+  type ApprovalGatedRunStatusResult,
+} from '@/lib/ai-operations/runtimeApprovalGatedRun';
+import {
+  getRuntimeFailureStatus,
+  FAILURE_CATEGORY_META,
+  type RuntimeFailureStatusResult,
+} from '@/lib/ai-operations/runtimeFailureGovernance';
 import OpenIncident from '@/pages/ai-operations/alerts/components/OpenIncident';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import RunHeader from '@/pages/ai-operations/runs/detail/components/RunHeader';
@@ -40,10 +51,36 @@ export default function RunDetailPage() {
   const run = runId ? getRun(runId) : undefined;
   const liveMode = mode === 'live';
   const isDiagnosticRun =
-    !!run && (run.id?.startsWith(DIAGNOSTIC_RUN_KEY_PREFIX) || run.parentTaskId === DIAGNOSTIC_RUN_TASK_KEY);
+    !!run && (run.id?.startsWith(DIAGNOSTIC_RUN_KEY_PREFIX) || String(run.parentTaskId ?? '').startsWith(DIAGNOSTIC_RUN_TASK_KEY_PREFIX));
   const isApprovalGatedRun =
     !!run &&
     (run.id?.startsWith(APPROVAL_GATED_RUN_KEY_PREFIX) || String(run.parentTaskId ?? '').startsWith(APPROVAL_GATED_TASK_KEY_PREFIX));
+
+  const [approvalGatedStatus, setApprovalGatedStatus] = useState<ApprovalGatedRunStatusResult | null>(null);
+
+  useEffect(() => {
+    if (!isApprovalGatedRun) return;
+    let active = true;
+    getApprovalGatedRunStatus().then((res) => {
+      if (active && res.data) setApprovalGatedStatus(res.data);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isApprovalGatedRun]);
+
+  const [failureStatus, setFailureStatus] = useState<RuntimeFailureStatusResult | null>(null);
+
+  useEffect(() => {
+    if (!isDiagnosticRun && !isApprovalGatedRun) return;
+    let active = true;
+    getRuntimeFailureStatus(runId).then((res) => {
+      if (active && res.data) setFailureStatus(res.data);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isDiagnosticRun, isApprovalGatedRun, runId]);
 
   if (loading) {
     return (
@@ -151,6 +188,85 @@ export default function RunDetailPage() {
             </p>
             <p className="text-[10px] font-label text-accent-400/60 mt-1.5 uppercase tracking-wide">Business data: NONE · Mutation: NONE · Normal execution: BLOCKED</p>
           </div>
+        </div>
+      )}
+
+      {isApprovalGatedRun && approvalGatedStatus && (
+        <div className="flex items-start gap-2.5 bg-background-100 border border-background-200/60 rounded-lg px-4 py-3">
+          <i className="ri-shield-user-line text-accent-400 text-lg w-5 h-5 flex items-center justify-center shrink-0"></i>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-label font-semibold text-foreground-200">Approval Governance Evidence</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 mt-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-foreground-500 whitespace-nowrap">Reviewer Eligibility at Dispatch</span>
+                <span className={`text-xs font-semibold ${approvalGatedStatus.approval?.approverEligibilityInvalidated || approvalGatedStatus.approval?.approverCurrentlyEligible === false ? 'text-red-400' : approvalGatedStatus.approval?.approverCurrentlyEligible === true ? 'text-emerald-400' : 'text-foreground-300'}`}>
+                  {approvalGatedStatus.approval?.approverEligibilityInvalidated ? 'INVALID' : approvalGatedStatus.approval?.approverCurrentlyEligible === true ? 'ELIGIBLE' : approvalGatedStatus.approval?.approverCurrentlyEligible === false ? 'NOT ELIGIBLE' : '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-foreground-500 whitespace-nowrap">Approval Revoked</span>
+                <span className={`text-xs font-semibold ${approvalGatedStatus.approval?.approvalRevoked ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {approvalGatedStatus.approval?.approvalRevoked ? 'Yes' : 'No'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-foreground-500 whitespace-nowrap">Runtime Dispatch</span>
+                <span className={`text-xs font-semibold ${approvalGatedStatus.halDispatch === 'SENT' || approvalGatedStatus.halDispatch === 'RESULT_RECEIVED' ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {approvalGatedStatus.halDispatch === 'SENT' || approvalGatedStatus.halDispatch === 'RESULT_RECEIVED' ? 'SENT' : 'NOT SENT'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(isDiagnosticRun || isApprovalGatedRun) && (failureStatus?.failureCategory || run.status === 'failed') && (
+        <div className="bg-red-500/10 border border-red-500/25 rounded-lg px-4 py-3">
+          <div className="flex items-center gap-2.5 mb-2 flex-wrap">
+            <i className="ri-shield-cross-line text-red-400 text-lg w-5 h-5 flex items-center justify-center shrink-0"></i>
+            <p className="text-xs font-label font-semibold text-red-300/90">Runtime Failure Evidence</p>
+            <span className="inline-flex items-center gap-1.5 text-[10px] font-label text-red-400 bg-red-500/10 border border-red-500/25 rounded-full px-2 py-0.5 whitespace-nowrap">
+              <i className="ri-shield-check-line w-3 h-3 flex items-center justify-center"></i>
+              Runtime Diagnostic Failed Safely
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-foreground-500 whitespace-nowrap">Failure Category</span>
+              <span className="text-xs font-semibold text-red-300">
+                {failureStatus?.failureCategory ? (FAILURE_CATEGORY_META[failureStatus.failureCategory]?.label ?? failureStatus.failureCategory) : (run.status === 'failed' ? 'Failed' : '—')}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-foreground-500 whitespace-nowrap">Failed Step</span>
+              <span className="text-xs text-foreground-100 font-mono">{failureStatus?.failedStep || '—'}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-foreground-500 whitespace-nowrap">Outbound Message Status</span>
+              <span className="text-xs text-foreground-100">{failureStatus?.outboundMessageStatus || '—'}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-foreground-500 whitespace-nowrap">Signed Result Status</span>
+              <span className={`text-xs font-semibold ${!failureStatus?.resultReceived ? 'text-amber-400' : failureStatus?.resultVerified ? 'text-emerald-400' : 'text-red-400'}`}>
+                {!failureStatus?.resultReceived ? 'Awaiting' : failureStatus?.resultVerified ? 'Verified' : 'Not verified'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-foreground-500 whitespace-nowrap">Retry Count</span>
+              <span className="text-xs text-foreground-100">{failureStatus?.retryCount ?? 0}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-foreground-500 whitespace-nowrap">Incident Reference</span>
+              <span className="text-xs text-foreground-100 font-mono">{failureStatus?.incidentKey || '—'}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-foreground-500 whitespace-nowrap">Late Result Seen</span>
+              <span className={`text-xs font-semibold ${failureStatus?.lateResultReceived ? 'text-amber-400' : 'text-foreground-100'}`}>
+                {failureStatus?.lateResultReceived ? 'Yes' : 'No'}
+              </span>
+            </div>
+          </div>
+          <p className="text-[10px] font-label text-red-400/60 mt-2 uppercase tracking-wide">No retry · No duplicate HAL dispatch · Normal execution BLOCKED</p>
         </div>
       )}
 

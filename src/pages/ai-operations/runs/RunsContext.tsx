@@ -15,7 +15,7 @@ import { mapRunRowToRecord, type RunResolutionContext } from '@/pages/ai-operati
 import { mapAuditEventRowToRecord, type AuditResolutionContext } from '@/pages/ai-operations/audit/auditMapper';
 import { buildTaskLookup, toAiTaskInput, type TaskCreateInput } from '@/pages/ai-operations/runs/taskMapper';
 import type { DataSourceMode } from '@/pages/ai-operations/sites/components/DataSourceBadge';
-import { DIAGNOSTIC_RUN_TASK_KEY, DIAGNOSTIC_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeDiagnosticRun';
+import { DIAGNOSTIC_RUN_TASK_KEY_PREFIX, DIAGNOSTIC_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeDiagnosticRun';
 import { APPROVAL_GATED_TASK_KEY_PREFIX, APPROVAL_GATED_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeApprovalGatedRun';
 
 // Data-source state for the Tasks & Runs module. Mirrors the proven Sites and
@@ -174,7 +174,7 @@ export function RunsProvider({ children }: { children: ReactNode }) {
     const taskRows = (tasksRes.data ?? []).filter(
       (r) =>
         r.environment !== 'sandbox' ||
-        r.task_key === DIAGNOSTIC_RUN_TASK_KEY ||
+        String(r.task_key).startsWith(DIAGNOSTIC_RUN_TASK_KEY_PREFIX) ||
         String(r.task_key).startsWith(APPROVAL_GATED_TASK_KEY_PREFIX),
     );
     const taskLookup = buildTaskLookup(taskRows, siteKeyById);

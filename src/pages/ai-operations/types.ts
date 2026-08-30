@@ -725,6 +725,11 @@ export interface AiApproval {
   separation: ApprovalSeparationOfDuties;
   history: ApprovalHistoryEvent[];
   executionGate: ExecutionGateCheck[];
+  /** PROMPT 22 — persisted revocation + reviewer eligibility markers (approval-gated runs). */
+  approvalRevoked?: boolean;
+  approvalRevokedAt?: string | null;
+  approvalRevokedBy?: string | null;
+  approverEligibilityInvalidated?: boolean;
 }
 
 // --- Live Operations / Mission Control -----------------------------------------

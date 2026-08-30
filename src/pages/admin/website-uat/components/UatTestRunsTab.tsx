@@ -4,6 +4,8 @@ import { UatJob } from '../types';
 import TesterMarketplaceModal from './TesterMarketplaceModal';
 import TesterMarketplacePanel from './TesterMarketplacePanel';
 import TesterAssignmentsPanel from './TesterAssignmentsPanel';
+import UatJobFormModal from './UatJobFormModal';
+import UatTestCasesSection from './UatTestCasesSection';
 
 export default function UatTestRunsTab() {
   const [jobs, setJobs] = useState<UatJob[]>([]);
@@ -13,6 +15,7 @@ export default function UatTestRunsTab() {
   const [assignmentCounts, setAssignmentCounts] = useState<Record<string, number>>({});
   const [configureJob, setConfigureJob] = useState<UatJob | null>(null);
   const [testCaseCounts, setTestCaseCounts] = useState<Record<string, number>>({});
+  const [showCreate, setShowCreate] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -26,7 +29,7 @@ export default function UatTestRunsTab() {
         projectIds.length > 0 ? supabase.from('uat_projects').select('id,name').in('id', projectIds) : Promise.resolve({ data: [] }),
         envIds.length > 0 ? supabase.from('uat_environments').select('id,environment_name').in('id', envIds as string[]) : Promise.resolve({ data: [] }),
         supabase.from('uat_assignments').select('job_id'),
-        supabase.from('uat_test_cases').select('project_id'),
+        supabase.from('uat_test_cases').select('job_id').is('archived_at', null),
       ]);
 
       const projMap = Object.fromEntries((projects || []).map((p: Record<string, unknown>) => [p.id, p.name]));
@@ -39,7 +42,7 @@ export default function UatTestRunsTab() {
 
       const tcCounts: Record<string, number> = {};
       (testCases || []).forEach((tc: Record<string, unknown>) => {
-        if (tc.project_id) tcCounts[tc.project_id as string] = (tcCounts[tc.project_id as string] || 0) + 1;
+        if (tc.job_id) tcCounts[tc.job_id as string] = (tcCounts[tc.job_id as string] || 0) + 1;
       });
       setTestCaseCounts(tcCounts);
 
@@ -64,24 +67,44 @@ export default function UatTestRunsTab() {
     cancelled: 'bg-foreground-500/10 text-foreground-500',
   };
 
-  if (loading) return <div className="text-sm text-foreground-400 py-8">Loading test jobs...</div>;
-  if (error) return <div className="text-sm text-red-400 py-8">{error}</div>;
-
-  if (jobs.length === 0) {
-    return (
-      <div className="text-center py-12">
-        <i className="ri-test-tube-line text-3xl text-foreground-500 w-8 h-8 flex items-center justify-center mx-auto mb-3"></i>
-        <p className="text-sm text-foreground-500">No test jobs created yet.</p>
-      </div>
-    );
-  }
-
   const configMinSlots = configureJob
     ? Math.max(configureJob.reserve_count ?? 0, configureJob.tester_slots_filled ?? 0, assignmentCounts[configureJob.id] ?? 0)
     : 0;
 
+  const handleCreated = (jobId: string) => {
+    setShowCreate(false);
+    loadData();
+    if (jobId) setExpandedId(jobId);
+  };
+
   return (
     <>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground-100">Test Runs</h3>
+          <p className="text-xs text-foreground-500 mt-0.5">Create UAT test jobs and manage the tester marketplace.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-1.5 bg-accent-500 hover:bg-accent-400 text-background-950 px-4 py-2 rounded-full text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+        >
+          <i className="ri-add-line text-sm w-4 h-4 flex items-center justify-center"></i>
+          New Test Run
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="text-sm text-foreground-400 py-8">Loading test jobs...</div>
+      ) : error ? (
+        <div className="text-sm text-red-400 py-8">{error}</div>
+      ) : jobs.length === 0 ? (
+        <div className="text-center py-12">
+          <i className="ri-test-tube-line text-3xl text-foreground-500 w-8 h-8 flex items-center justify-center mx-auto mb-3"></i>
+          <p className="text-sm text-foreground-500">No test jobs created yet.</p>
+          <p className="text-xs text-foreground-600 mt-1">Click "New Test Run" to create your first UAT job.</p>
+        </div>
+      ) : (
       <div className="grid gap-3">
         {jobs.map((j) => (
         <div key={j.id} className="bg-background-100 border border-background-200/60 rounded-lg overflow-hidden">
@@ -111,9 +134,17 @@ export default function UatTestRunsTab() {
                 <div><span className="text-foreground-500">Browsers:</span> <span className="text-foreground-200 ml-1">{j.required_browsers?.join(', ') || 'Any'}</span></div>
               </div>
               <div className="mt-4">
+                <UatTestCasesSection
+                  job={j}
+                  projectName={j.project_name || 'Unknown'}
+                  caseCount={testCaseCounts[j.id] ?? 0}
+                  onChanged={loadData}
+                />
+              </div>
+              <div className="mt-4">
                 <TesterMarketplacePanel
                   job={j}
-                  testCaseCount={testCaseCounts[j.project_id] ?? 0}
+                  testCaseCount={testCaseCounts[j.id] ?? 0}
                   onChanged={loadData}
                   onConfigure={() => setConfigureJob(j)}
                 />
@@ -126,7 +157,14 @@ export default function UatTestRunsTab() {
           )}
         </div>
       ))}
-      </div>
+        </div>
+      )}
+
+      <UatJobFormModal
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={handleCreated}
+      />
 
       <TesterMarketplaceModal
         open={configureJob !== null}

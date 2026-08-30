@@ -25,7 +25,11 @@ import type { AiOpsResult } from '@/lib/ai-operations/types';
 export const DIAGNOSTIC_RUN_NODE_KEY = 'atlas-hal-runtime-01';
 export const DIAGNOSTIC_RUN_PROBE_ID = 'dfp_diagnostic_run_v1';
 export const DIAGNOSTIC_RUN_MODE = 'sandbox_diagnostic';
-export const DIAGNOSTIC_RUN_TASK_KEY = 'dfp-runtime-health-diagnostic-task';
+// Fixed task-key PREFIX. Each new diagnostic task gets a unique 8-char UUID
+// suffix appended server-side (e.g. dfp-runtime-health-diagnostic-task-A1B2C3D4)
+// so repeated runs never collide on the ai_tasks.task_key UNIQUE constraint.
+// The exact task key is never fixed — it is resolved from the backend response.
+export const DIAGNOSTIC_RUN_TASK_KEY_PREFIX = 'dfp-runtime-health-diagnostic-task';
 export const DIAGNOSTIC_RUN_TASK_NAME = 'DFP Runtime Health Diagnostic Task';
 export const DIAGNOSTIC_RUN_TASK_TYPE = 'runtime_health_diagnostic';
 export const DIAGNOSTIC_RUN_KEY_PREFIX = 'dfp-diagnostic-run-';

@@ -4,6 +4,26 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // ============================================================================
 // runtime-bridge — secure OUTBOUND-FIRST private-runtime bridge API for DFP AI
 // Operations.
+//
+// Prompt 23A additions (scoped to the diagnostic runtime result handlers):
+//   * ATOMIC TERMINAL CLAIM — result finalisers transition the run conditionally
+//     (WHERE status IN non-terminal) so completed/failed states are immutable
+//     under a timeout/result race.
+//   * TERMINAL GUARD + LATE/DUPLICATE result handling + runtime_result_failed /
+//     runtime_result_invalid / runtime_late_result_received /
+//     runtime_duplicate_result_blocked audit evidence.
+//   * Runtime failure incident (idempotent by correlation_id) for failed results.
+// Prompt 23B: diagnostic task_reference is now PREFIX + unique 8-char suffix;
+// the result validator accepts any key matching that prefix instead of one
+// fixed exact string.
+// Prompt 23C: incident status = "new" (not "open"), priority = "normal" (not
+// "medium"), and the ai_incidents insert error is captured + audited
+// (runtime_failure_incident_create_failed) without affecting the run lifecycle.
+// Prompt 24B: fetch_control_messages now resolves the emergency freeze and
+// fails-closed for execution-bearing pending messages (permanently invalidating
+// them rather than merely hiding them); late signed results for runs failed by
+// an in-flight freeze are recorded as runtime_emergency_freeze_late_result
+// without resurrecting the run.
 // ============================================================================
 
 const CORS = {
@@ -74,7 +94,7 @@ const DIAGNOSTIC_RUN_PROBE_MESSAGE_TYPE = "diagnostic_run_tool_probe";
 const DIAGNOSTIC_RUN_PROBE_RESULT_MESSAGE_TYPE = "diagnostic_run_tool_probe_result";
 const DIAGNOSTIC_RUN_PROBE_ID = "dfp_diagnostic_run_v1";
 const DIAGNOSTIC_RUN_PROBE_MODE = "sandbox_diagnostic";
-const DIAGNOSTIC_RUN_TASK_KEY = "dfp-runtime-health-diagnostic-task";
+const DIAGNOSTIC_RUN_TASK_KEY_PREFIX = "dfp-runtime-health-diagnostic-task";
 const DIAGNOSTIC_RUN_STEP_COUNT = 6;
 
 const APPROVAL_GATED_PROBE_MESSAGE_TYPE = "approval_gated_diagnostic_probe";
@@ -142,11 +162,49 @@ const PROBE_CONTROL_TYPES = new Set([
   "approval_gated_diagnostic_probe",
 ]);
 
+// PROMPT 24B — execution-bearing sandbox diagnostic message types. These are the
+// ones the emergency freeze must contain (vs. pure monitoring/transport).
+const EXECUTION_BEARING_MESSAGE_TYPES = new Set([
+  OLLAMA_PROBE_MESSAGE_TYPE,
+  N8N_SANDBOX_PROBE_MESSAGE_TYPE,
+  CHAIN_PROBE_MESSAGE_TYPE,
+  AGENT_DRY_RUN_PROBE_MESSAGE_TYPE,
+  READONLY_TOOL_PROBE_MESSAGE_TYPE,
+  DIAGNOSTIC_RUN_PROBE_MESSAGE_TYPE,
+  APPROVAL_GATED_PROBE_MESSAGE_TYPE,
+]);
+
+const EMERGENCY_FREEZE_CONTROL_KEY = "diagnostic-runtime-emergency-freeze";
+
 const ALLOWED_PROBE_ACK_STATUSES = new Set(["verified", "rejected"]);
 
 const ALLOWED_RESULT_STATUSES = new Set(["completed", "failed", "rejected"]);
 
 const ALLOWED_CATALOGUE_CLASSIFICATIONS = new Set(["local", "remote"]);
+
+const RUNTIME_FAILURE_CATEGORIES = new Set([
+  "runtime_result_timeout",
+  "runtime_tool_timeout",
+  "runtime_bridge_unreachable",
+  "runtime_result_failed",
+]);
+
+const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const NON_TERMINAL_RUN_STATUSES = new Set(["queued", "working", "waiting"]);
+
+type FinalizeOutcome =
+  | "completed"
+  | "failed"
+  | "late_result"
+  | "duplicate_result"
+  | "terminal_state";
+
+interface FinalizeResult {
+  runId: string | null;
+  outcome: FinalizeOutcome;
+  correlationId: string | null;
+  errorCategory: string | null;
+}
 
 const enc = new TextEncoder();
 
@@ -195,6 +253,11 @@ function safeIpClass(v: unknown): string | null {
   return allowed.has(s) ? s : null;
 }
 
+function mapRuntimeFailureCategory(cat: string | null): string {
+  if (cat && RUNTIME_FAILURE_CATEGORIES.has(cat)) return cat;
+  return "runtime_result_failed";
+}
+
 async function auditEvent(
   admin: ReturnType<typeof createClient>,
   eventType: string,
@@ -217,6 +280,34 @@ async function auditEvent(
     notes,
     ...extra,
   });
+}
+
+// PROMPT 24B — resolve whether the emergency freeze is currently engaged.
+async function resolveEmergencyFreeze(
+  admin: ReturnType<typeof createClient>,
+): Promise<boolean> {
+  const { data } = await admin
+    .from("ai_runtime_controls")
+    .select("control_key, enabled, execution_allowed")
+    .eq("control_key", EMERGENCY_FREEZE_CONTROL_KEY)
+    .limit(1);
+  const control = data && data.length > 0 ? data[0] : null;
+  return !!control && control.enabled === true && control.execution_allowed === false;
+}
+
+// PROMPT 24B — record safe late-result evidence for a non-run probe whose work
+// was delivered before/during an engaged freeze (marked via safe_payload).
+async function recordFreezeLateResultIfInflight(
+  admin: ReturnType<typeof createClient>,
+  origPayload: Record<string, unknown>,
+  correlationId: string | null,
+  probeKey: string,
+): Promise<void> {
+  if (origPayload.freeze_inflight_marked === true) {
+    await auditEvent(admin, "runtime_emergency_freeze_late_result", "recorded", "low",
+      `Signed result for ${probeKey} arrived for work delivered before/during an engaged emergency freeze. Evidence recorded.`,
+      { correlation_id: correlationId || null });
+  }
 }
 
 function sanitiseCatalogueModel(raw: unknown): Record<string, unknown> | null {
@@ -415,7 +506,6 @@ async function validateApprovalGatedApproval(
     if (!task || str(task.task_key) !== taskReference) return { ok: false, detail: "approval_task_mismatch" };
   }
 
-  // Prompt 20: decision timestamp must exist and precede dispatch.
   const decisionAt = str(approval.decision_at);
   if (!decisionAt) return { ok: false, detail: "approval_decision_missing" };
   const createdAt = str(dispatchCreatedAt);
@@ -425,7 +515,6 @@ async function validateApprovalGatedApproval(
     }
   }
 
-  // Prompt 20: dispatch must have occurred before the approval expiry (legacy-safe).
   const expiresAt = str(approval.expires_at);
   if (expiresAt && createdAt) {
     if (new Date(createdAt).getTime() > new Date(expiresAt).getTime()) {
@@ -433,7 +522,6 @@ async function validateApprovalGatedApproval(
     }
   }
 
-  // Prompt 20: approval context must be bound to the fixed agent/tool/operation (legacy-safe).
   const conditions = (approval.conditions as Record<string, unknown> | null) ?? {};
   const contextHash = str(conditions.approval_context_hash);
   if (contextHash) {
@@ -444,6 +532,181 @@ async function validateApprovalGatedApproval(
   }
 
   return { ok: true, detail: null };
+}
+
+// ===========================================================================
+// Prompt 23A — terminal-state result governance helpers.
+// ===========================================================================
+
+async function appendLateResultIncidentTimeline(
+  admin: ReturnType<typeof createClient>,
+  correlationId: string | null,
+  runKey: string,
+): Promise<void> {
+  if (!correlationId) return;
+  const { data: inc } = await admin
+    .from("ai_incidents")
+    .select("id, status")
+    .eq("correlation_id", correlationId)
+    .eq("incident_type", "runtime_diagnostic_failure")
+    .order("created_at", { ascending: true })
+    .limit(1);
+  const incident = inc && inc.length > 0 ? inc[0] : null;
+  if (!incident) return;
+  await admin.from("ai_incident_timeline").insert({
+    incident_id: incident.id,
+    event_type: "late_result_received",
+    previous_status: str(incident.status),
+    new_status: str(incident.status),
+    actor_reference: IDENTITY_KEY,
+    actor_role: "system",
+    summary: `A valid signed result arrived after timeout for run ${runKey}. Evidence recorded; run remains failed. Incident not auto-resolved.`,
+    created_at: new Date().toISOString(),
+  });
+}
+
+async function handleTerminalResult(
+  admin: ReturnType<typeof createClient>,
+  run: Record<string, unknown>,
+  corr: string | null,
+  runKey: string,
+): Promise<FinalizeResult> {
+  const runId = run.id as string;
+  const status = str(run.status);
+  const errSummary = str(run.error_summary);
+
+  if (status === "failed") {
+    await auditEvent(admin, "runtime_late_result_received", "recorded_not_applied", "low",
+      `Late signed result received for run ${runKey} after terminal failure (error=${errSummary || "n/a"}). Evidence recorded; run remains failed.`,
+      { correlation_id: corr || null, run_id: runId });
+    if (errSummary === "runtime_emergency_freeze_inflight" || errSummary === "runtime_emergency_freeze_before_delivery") {
+      await auditEvent(admin, "runtime_emergency_freeze_late_result", "recorded_not_applied", "low",
+        `Signed result arrived for run ${runKey} after it was failed by the emergency freeze (error=${errSummary}). Evidence recorded; run remains failed.`,
+        { correlation_id: corr || null, run_id: runId });
+    }
+    await appendLateResultIncidentTimeline(admin, corr, runKey);
+    return { runId, outcome: "late_result", correlationId: corr, errorCategory: errSummary || null };
+  }
+  if (status === "completed") {
+    await auditEvent(admin, "runtime_duplicate_result_blocked", "blocked", "low",
+      `Duplicate signed result blocked for run ${runKey} — run already completed. No state mutation.`,
+      { correlation_id: corr || null, run_id: runId });
+    return { runId, outcome: "duplicate_result", correlationId: corr, errorCategory: null };
+  }
+  return { runId, outcome: "terminal_state", correlationId: corr, errorCategory: null };
+}
+
+async function ensureRuntimeFailureIncident(
+  admin: ReturnType<typeof createClient>,
+  e: {
+    failureCategory: string;
+    runKey: string;
+    taskKey: string | null;
+    correlationId: string | null;
+    nodeKey: string | null;
+    failedStep: string | null;
+  },
+): Promise<string | null> {
+  if (!RUNTIME_FAILURE_CATEGORIES.has(e.failureCategory)) return null;
+  if (!e.correlationId) return null;
+
+  const { data: existing } = await admin
+    .from("ai_incidents")
+    .select("incident_key")
+    .eq("correlation_id", e.correlationId)
+    .eq("incident_type", "runtime_diagnostic_failure")
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (existing && existing.length > 0) {
+    return str(existing[0].incident_key) || null;
+  }
+
+  const nowIso = new Date().toISOString();
+  const incidentKey = uid("INC");
+  const title = `Runtime Diagnostic Failure — ${e.failureCategory}`;
+  const summary =
+    `Diagnostic run ${e.runKey || "n/a"} failed with category ${e.failureCategory}` +
+    (e.failedStep ? ` at step ${e.failedStep}` : "") +
+    `. Sandbox diagnostic only — no production execution, no retry.`;
+
+  const ins = await admin.from("ai_incidents").insert({
+    incident_key: incidentKey,
+    title,
+    summary,
+    site_id: null,
+    severity: "low",
+    priority: "normal",
+    status: "new",
+    incident_type: "runtime_diagnostic_failure",
+    environment: "sandbox",
+    lead_team: "Group AI Operations",
+    owner_reference: null,
+    correlation_id: e.correlationId,
+    impact_summary: "None — sandbox diagnostic. No business data, no mutation, no production execution.",
+    diagnostics_summary:
+      `run=${e.runKey || "n/a"} · task=${e.taskKey || "n/a"} · node=${e.nodeKey || "n/a"} · ` +
+      `step=${e.failedStep || "n/a"} · category=${e.failureCategory}`,
+    suspected_cause: null,
+    confirmed_cause: null,
+    response_plan: null,
+    resolution_summary: null,
+    prevention_summary: null,
+    known_issue_memory_key: null,
+    approval_required: false,
+    security_review_required: false,
+    uat_required: false,
+    started_at: nowIso,
+    acknowledged_at: null,
+    resolved_at: null,
+    closed_at: null,
+    is_active: true,
+    notes: JSON.stringify({
+      run_key: e.runKey,
+      task_key: e.taskKey,
+      node_key: e.nodeKey,
+      failure_category: e.failureCategory,
+      failed_step: e.failedStep,
+    }),
+    created_at: nowIso,
+    updated_at: nowIso,
+  }).select("id");
+
+  const insError = ins.error;
+  const incidentId = ins.data && ins.data.length > 0 ? (ins.data[0].id as string) : null;
+  if (!incidentId) {
+    const dbCode = insError && insError.code ? String(insError.code).slice(0, 80) : "unknown";
+    await auditEvent(admin, "runtime_failure_incident_create_failed", "failed", "medium",
+      `Runtime failure incident creation failed for run ${e.runKey || "n/a"} (category=${e.failureCategory}, db_code=${dbCode}). No retry; run lifecycle unchanged.`,
+      { correlation_id: e.correlationId });
+    return null;
+  }
+
+  await admin.from("ai_incident_timeline").insert({
+    incident_id: incidentId,
+    event_type: "runtime_dispatched",
+    previous_status: null,
+    new_status: "new",
+    actor_reference: IDENTITY_KEY,
+    actor_role: "system",
+    summary: `Runtime diagnostic failure incident opened for run ${e.runKey || "n/a"} (${e.failureCategory}).`,
+    created_at: nowIso,
+  });
+  await admin.from("ai_incident_timeline").insert({
+    incident_id: incidentId,
+    event_type: "runtime_result_failed",
+    previous_status: "new",
+    new_status: "new",
+    actor_reference: IDENTITY_KEY,
+    actor_role: "system",
+    summary: `Failure category ${e.failureCategory} recorded for run ${e.runKey || "n/a"}. No retry, no duplicate execution.`,
+    created_at: nowIso,
+  });
+
+  await auditEvent(admin, "runtime_failure_incident_created", "created", "low",
+    `Runtime diagnostic failure incident ${incidentKey} created for run ${e.runKey || "n/a"} (category=${e.failureCategory}). No retry, no duplicate execution.`,
+    { correlation_id: e.correlationId });
+
+  return incidentKey;
 }
 
 async function finalizeDiagnosticRun(
@@ -458,67 +721,96 @@ async function finalizeDiagnosticRun(
     completedAt: string;
     errorCategory: string | null;
   },
-): Promise<string | null> {
-  if (!runKey) return null;
+): Promise<FinalizeResult> {
+  const empty: FinalizeResult = { runId: null, outcome: "terminal_state", correlationId: null, errorCategory: null };
+  if (!runKey) return empty;
 
   const { data: runRows } = await admin
     .from("ai_runs")
-    .select("id, task_id")
+    .select("id, task_id, status, error_summary, correlation_id")
     .eq("run_key", runKey)
     .limit(1);
   const run = runRows && runRows.length > 0 ? runRows[0] : null;
-  if (!run) return null;
+  if (!run) return empty;
+
+  const corr = str(run.correlation_id);
+  const runId = run.id as string;
+
+  if (TERMINAL_RUN_STATUSES.has(str(run.status))) {
+    return handleTerminalResult(admin, run, corr, runKey);
+  }
+
+  const errorSummary = verified ? null : (result.errorCategory ?? "signed_result_not_verified");
+  const targetStatus = verified ? "completed" : "failed";
+
+  let resultSummary: string | null = null;
+  if (verified) {
+    resultSummary =
+      `Read-only tool verified: n8n=${result.n8nStatus}, ollama=${result.ollamaStatus}, ` +
+      `models=${result.ollamaModelCount === null ? "n/a" : result.ollamaModelCount}, ` +
+      `latency=${result.latencyMs === null ? "n/a" : result.latencyMs + "ms"}. Sandbox diagnostic only.`;
+  }
+
+  const claimUpdate: Record<string, unknown> = {
+    status: targetStatus,
+    completed_at: result.completedAt,
+    updated_at: result.completedAt,
+  };
+  if (verified) {
+    claimUpdate.current_step = DIAGNOSTIC_RUN_STEP_COUNT;
+    claimUpdate.result_summary = resultSummary;
+    claimUpdate.error_summary = null;
+  } else {
+    claimUpdate.error_summary = errorSummary;
+  }
+
+  const claim = await admin
+    .from("ai_runs")
+    .update(claimUpdate)
+    .eq("id", run.id)
+    .in("status", [...NON_TERMINAL_RUN_STATUSES])
+    .select("id, status");
+
+  if (!claim.data || claim.data.length !== 1) {
+    const { data: reRows } = await admin
+      .from("ai_runs")
+      .select("id, status, error_summary")
+      .eq("id", run.id)
+      .limit(1);
+    const re = reRows && reRows.length > 0 ? reRows[0] : null;
+    if (re) return handleTerminalResult(admin, re, corr, runKey);
+    return { runId, outcome: "terminal_state", correlationId: corr, errorCategory: null };
+  }
 
   if (verified) {
     await admin.from("ai_run_steps")
       .update({ status: "completed", completed_at: result.completedAt })
       .eq("run_id", run.id)
       .in("status", ["pending", "working"]);
-
-    const resultSummary =
-      `Read-only tool verified: n8n=${result.n8nStatus}, ollama=${result.ollamaStatus}, ` +
-      `models=${result.ollamaModelCount === null ? "n/a" : result.ollamaModelCount}, ` +
-      `latency=${result.latencyMs === null ? "n/a" : result.latencyMs + "ms"}. Sandbox diagnostic only.`;
-
-    await admin.from("ai_runs").update({
-      status: "completed",
-      current_step: DIAGNOSTIC_RUN_STEP_COUNT,
-      completed_at: result.completedAt,
-      result_summary: resultSummary,
-      error_summary: null,
-      updated_at: result.completedAt,
-    }).eq("id", run.id);
-
-    if (run.task_id) {
-      await admin.from("ai_tasks").update({
-        status: "completed",
-        updated_at: result.completedAt,
-      }).eq("id", run.task_id);
-    }
   } else {
-    const errorSummary = result.errorCategory ?? "signed_result_not_verified";
-
     await admin.from("ai_run_steps")
       .update({ status: "failed", error_summary: errorSummary, completed_at: result.completedAt })
       .eq("run_id", run.id)
       .eq("step_number", 5);
-
-    await admin.from("ai_runs").update({
-      status: "failed",
-      error_summary: errorSummary,
-      completed_at: result.completedAt,
-      updated_at: result.completedAt,
-    }).eq("id", run.id);
-
-    if (run.task_id) {
-      await admin.from("ai_tasks").update({
-        status: "failed",
-        updated_at: result.completedAt,
-      }).eq("id", run.task_id);
-    }
+    await admin.from("ai_run_steps")
+      .update({ status: "failed", error_summary: errorSummary, completed_at: result.completedAt })
+      .eq("run_id", run.id)
+      .in("status", ["pending", "working"]);
   }
 
-  return run.id as string;
+  if (run.task_id) {
+    await admin.from("ai_tasks").update({
+      status: targetStatus,
+      updated_at: result.completedAt,
+    }).eq("id", run.task_id);
+  }
+
+  return {
+    runId,
+    outcome: verified ? "completed" : "failed",
+    correlationId: corr,
+    errorCategory: errorSummary,
+  };
 }
 
 async function finalizeApprovalGatedRun(
@@ -534,64 +826,88 @@ async function finalizeApprovalGatedRun(
     completedAt: string;
     errorCategory: string | null;
   },
-): Promise<string | null> {
-  if (!runReference) return null;
+): Promise<FinalizeResult> {
+  const empty: FinalizeResult = { runId: null, outcome: "terminal_state", correlationId: null, errorCategory: null };
+  if (!runReference) return empty;
 
   const { data: runRows } = await admin
     .from("ai_runs")
-    .select("id, task_id")
+    .select("id, task_id, status, error_summary, correlation_id")
     .eq("run_key", runReference)
     .limit(1);
   const run = runRows && runRows.length > 0 ? runRows[0] : null;
-  if (!run) return null;
+  if (!run) return empty;
+
+  const corr = str(run.correlation_id);
+  const runId = run.id as string;
+
+  if (TERMINAL_RUN_STATUSES.has(str(run.status))) {
+    return handleTerminalResult(admin, run, corr, runReference);
+  }
+
+  const errorSummary = verified ? null : (result.errorCategory ?? "signed_result_not_verified");
+  const targetStatus = verified ? "completed" : "failed";
+
+  let resultSummary: string | null = null;
+  if (verified) {
+    resultSummary =
+      `Read-only tool verified (approval-gated): n8n=${result.n8nStatus}, ollama=${result.ollamaStatus}, ` +
+      `models=${result.ollamaModelCount === null ? "n/a" : result.ollamaModelCount}, ` +
+      `latency=${result.latencyMs === null ? "n/a" : result.latencyMs + "ms"}. Sandbox diagnostic only.`;
+  }
+
+  const claimUpdate: Record<string, unknown> = {
+    status: targetStatus,
+    completed_at: result.completedAt,
+    updated_at: result.completedAt,
+  };
+  if (verified) {
+    claimUpdate.current_step = APPROVAL_GATED_STEP_COUNT;
+    claimUpdate.result_summary = resultSummary;
+    claimUpdate.error_summary = null;
+  } else {
+    claimUpdate.error_summary = errorSummary;
+  }
+
+  const claim = await admin
+    .from("ai_runs")
+    .update(claimUpdate)
+    .eq("id", run.id)
+    .in("status", [...NON_TERMINAL_RUN_STATUSES, "awaiting_approval"])
+    .select("id, status");
+
+  if (!claim.data || claim.data.length !== 1) {
+    const { data: reRows } = await admin
+      .from("ai_runs")
+      .select("id, status, error_summary")
+      .eq("id", run.id)
+      .limit(1);
+    const re = reRows && reRows.length > 0 ? reRows[0] : null;
+    if (re) return handleTerminalResult(admin, re, corr, runReference);
+    return { runId, outcome: "terminal_state", correlationId: corr, errorCategory: null };
+  }
 
   if (verified) {
     await admin.from("ai_run_steps")
       .update({ status: "completed", completed_at: result.completedAt })
       .eq("run_id", run.id)
       .in("status", ["pending", "working", "awaiting_approval"]);
-
-    const resultSummary =
-      `Read-only tool verified (approval-gated): n8n=${result.n8nStatus}, ollama=${result.ollamaStatus}, ` +
-      `models=${result.ollamaModelCount === null ? "n/a" : result.ollamaModelCount}, ` +
-      `latency=${result.latencyMs === null ? "n/a" : result.latencyMs + "ms"}. Sandbox diagnostic only.`;
-
-    await admin.from("ai_runs").update({
-      status: "completed",
-      current_step: APPROVAL_GATED_STEP_COUNT,
-      completed_at: result.completedAt,
-      result_summary: resultSummary,
-      error_summary: null,
-      updated_at: result.completedAt,
-    }).eq("id", run.id);
-
-    if (run.task_id) {
-      await admin.from("ai_tasks").update({
-        status: "completed",
-        updated_at: result.completedAt,
-      }).eq("id", run.task_id);
-    }
   } else {
-    const errorSummary = result.errorCategory ?? "signed_result_not_verified";
-
     await admin.from("ai_run_steps")
       .update({ status: "failed", error_summary: errorSummary, completed_at: result.completedAt })
       .eq("run_id", run.id)
       .eq("step_number", 6);
+    await admin.from("ai_run_steps")
+      .update({ status: "failed", error_summary: errorSummary, completed_at: result.completedAt })
+      .eq("run_id", run.id)
+      .in("status", ["pending", "working", "awaiting_approval"]);
+  }
 
-    await admin.from("ai_runs").update({
-      status: "failed",
-      error_summary: errorSummary,
-      completed_at: result.completedAt,
+  if (run.task_id) {
+    await admin.from("ai_tasks").update({
+      status: targetStatus,
       updated_at: result.completedAt,
-    }).eq("id", run.id);
-
-    if (run.task_id) {
-      await admin.from("ai_tasks").update({
-        status: "failed",
-        updated_at: result.completedAt,
-      }).eq("id", run.task_id);
-    }
+    }).eq("id", run.task_id);
   }
 
   if (approvalReference) {
@@ -626,7 +942,12 @@ async function finalizeApprovalGatedRun(
     }
   }
 
-  return run.id as string;
+  return {
+    runId,
+    outcome: verified ? "completed" : "failed",
+    correlationId: corr,
+    errorCategory: errorSummary,
+  };
 }
 
 serve(async (req: Request) => {
@@ -1088,6 +1409,11 @@ serve(async (req: Request) => {
   // FETCH_CONTROL_MESSAGES
   // ===========================================================================
   if (operation === "fetch_control_messages") {
+    // PROMPT 24B — delivery gate: if the emergency freeze is engaged, execution-
+    // bearing pending messages are excluded AND permanently invalidated (never
+    // merely hidden). Pure monitoring/transport messages remain available.
+    const freezeEngaged = await resolveEmergencyFreeze(admin);
+
     const { data: pending } = await admin
       .from("ai_runtime_bridge_messages")
       .select("message_key, message_type, correlation_id, payload_type, safe_payload, created_at")
@@ -1097,9 +1423,36 @@ serve(async (req: Request) => {
       .order("created_at", { ascending: true })
       .limit(10);
 
-    const messages = (pending ?? []).filter((m) =>
+    const allowlisted = (pending ?? []).filter((m) =>
       ALLOWED_CONTROL_MESSAGE_TYPES.has(m.message_type as string),
     );
+
+    if (freezeEngaged) {
+      const frozen = allowlisted.filter((m) =>
+        EXECUTION_BEARING_MESSAGE_TYPES.has(m.message_type as string),
+      );
+      for (const m of frozen) {
+        const merged = {
+          ...((m.safe_payload as Record<string, unknown>) ?? {}),
+          freeze_invalidated: true,
+          freeze_invalidated_at: receivedAt,
+          freeze_reason: "runtime_emergency_freeze_before_delivery",
+        };
+        await admin.from("ai_runtime_bridge_messages").update({
+          status: "rejected",
+          safe_payload: merged,
+          acknowledged_at: receivedAt,
+        }).eq("message_key", str(m.message_key));
+
+        await auditEvent(admin, "runtime_emergency_pending_message_invalidated", "invalidated", "medium",
+          `Pending execution-bearing message ${str(m.message_key)} (${str(m.message_type)}) invalidated at fetch time — emergency freeze engaged. Not delivered to HAL.`,
+          { correlation_id: str(m.correlation_id) || null });
+      }
+    }
+
+    const messages = freezeEngaged
+      ? allowlisted.filter((m) => !EXECUTION_BEARING_MESSAGE_TYPES.has(m.message_type as string))
+      : allowlisted;
 
     if (messages.length > 0) {
       const probeKeys = messages
@@ -1351,6 +1704,8 @@ serve(async (req: Request) => {
       });
     }
 
+    await recordFreezeLateResultIfInflight(admin, origPayload, resultCorrelationId || (orig.correlation_id as string | null), probeKey || originalMessageKey);
+
     const verified = output.trim() === OLLAMA_PROBE_EXPECTED_OUTPUT;
     const finalStatus = verified && resultStatus === "completed" ? "completed"
       : resultStatus === "completed" ? "failed"
@@ -1498,6 +1853,8 @@ serve(async (req: Request) => {
         message: "n8n sandbox probe already recorded — no duplicate evidence created.",
       });
     }
+
+    await recordFreezeLateResultIfInflight(admin, origPayload, resultCorrelationId || (orig.correlation_id as string | null), probeKey || originalMessageKey);
 
     const verified = safeOutput === N8N_SANDBOX_PROBE_EXPECTED_OUTPUT;
     const finalStatus = verified && resultStatus === "completed" ? "completed"
@@ -1653,6 +2010,8 @@ serve(async (req: Request) => {
         message: "Runtime chain probe already recorded — no duplicate evidence created.",
       });
     }
+
+    await recordFreezeLateResultIfInflight(admin, origPayload, resultCorrelationId || (orig.correlation_id as string | null), probeKey || originalMessageKey);
 
     const finalStatus = verified && resultStatus === "completed" ? "completed"
       : resultStatus === "completed" ? "failed"
@@ -1817,6 +2176,8 @@ serve(async (req: Request) => {
         message: "Agent dry-run probe already recorded — no duplicate evidence created.",
       });
     }
+
+    await recordFreezeLateResultIfInflight(admin, origPayload, resultCorrelationId || (orig.correlation_id as string | null), probeKey || originalMessageKey);
 
     const outputVerified = safeOutput.trim() === AGENT_DRY_RUN_EXPECTED_OUTPUT;
     const recheck = await validateDiagnosticAgentAndModel(admin);
@@ -1993,6 +2354,8 @@ serve(async (req: Request) => {
       });
     }
 
+    await recordFreezeLateResultIfInflight(admin, origPayload, resultCorrelationId || (orig.correlation_id as string | null), probeKey || originalMessageKey);
+
     const recheck = await validateReadonlyToolGrant(admin);
 
     const verified = resultStatus === "completed" && recheck.ok;
@@ -2140,7 +2503,8 @@ serve(async (req: Request) => {
         `Diagnostic run tool probe result rejected: unexpected tool_operation ${toolOperation}. No tool executed.`);
       return json({ error: "Unexpected tool_operation — probe result rejected." }, 422);
     }
-    if (taskReference && taskReference !== DIAGNOSTIC_RUN_TASK_KEY) {
+    // PROMPT 23B — accept any task_reference matching the fixed prefix + suffix.
+    if (taskReference && !taskReference.startsWith(`${DIAGNOSTIC_RUN_TASK_KEY_PREFIX}-`)) {
       await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high",
         `Diagnostic run tool probe result rejected: unexpected task_reference ${taskReference}. No tool executed.`);
       return json({ error: "Unexpected task_reference — probe result rejected." }, 422);
@@ -2154,10 +2518,13 @@ serve(async (req: Request) => {
       await admin.from("ai_runtime_bridge_messages").update({ status: "expired" }).eq("message_key", originalMessageKey);
       await auditEvent(admin, "diagnostic_run_expired", "expired", "low",
         `Diagnostic run tool probe ${probeKey || originalMessageKey} expired before a valid result. No tool executed.`);
-      const expiredRunId = await finalizeDiagnosticRun(admin, runReference, false, {
-        n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: "expired",
+      const expiredFinalize = await finalizeDiagnosticRun(admin, runReference, false, {
+        n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: "runtime_message_expired",
       });
-      const expiredExtra = expiredRunId ? { run_id: expiredRunId } : {};
+      const expiredExtra = {
+        ...(expiredFinalize.runId ? { run_id: expiredFinalize.runId } : {}),
+        ...(expiredFinalize.correlationId ? { correlation_id: expiredFinalize.correlationId } : {}),
+      };
       await auditEvent(admin, "diagnostic_run_failed", "failed", "medium",
         `Diagnostic run ${runReference || "(unknown)"} failed: probe expired before a signed result. No normal execution occurred.`, expiredExtra);
       return json({
@@ -2214,7 +2581,7 @@ serve(async (req: Request) => {
         agent_key: agentKey || READONLY_TOOL_PROBE_AGENT_KEY,
         tool_key: toolKey || READONLY_TOOL_PROBE_TOOL_KEY,
         tool_operation: toolOperation || READONLY_TOOL_PROBE_TOOL_OPERATION,
-        task_reference: taskReference || DIAGNOSTIC_RUN_TASK_KEY,
+        task_reference: taskReference || DIAGNOSTIC_RUN_TASK_KEY_PREFIX,
         run_reference: runReference,
         status: finalStatus,
         verified,
@@ -2230,10 +2597,53 @@ serve(async (req: Request) => {
       created_at: receivedAt,
     });
 
-    const finalizedRunId = await finalizeDiagnosticRun(admin, runReference, verified, {
+    const finalize = await finalizeDiagnosticRun(admin, runReference, verified, {
       n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: finalErrorCategory,
     });
-    const runExtra = finalizedRunId ? { run_id: finalizedRunId } : {};
+    const runExtra = finalize.runId ? { run_id: finalize.runId } : {};
+    const corrExtra = finalize.correlationId ? { correlation_id: finalize.correlationId } : {};
+
+    if (finalize.outcome === "late_result") {
+      return json({
+        accepted: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_diagnostic_run_tool_probe",
+        status: "failed",
+        lateResult: true,
+        applied: false,
+        verified,
+        executionEnabled: false,
+        message: "Late signed result received after timeout — run remains failed.",
+      });
+    }
+    if (finalize.outcome === "duplicate_result") {
+      return json({
+        accepted: true,
+        duplicate: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_diagnostic_run_tool_probe",
+        status: "completed",
+        applied: false,
+        verified,
+        executionEnabled: false,
+        message: "Duplicate result blocked — run already completed.",
+      });
+    }
+    if (finalize.outcome === "terminal_state") {
+      return json({
+        accepted: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_diagnostic_run_tool_probe",
+        status: "terminal",
+        applied: false,
+        verified,
+        executionEnabled: false,
+        message: "Run already terminal — result not applied.",
+      });
+    }
 
     if (verified) {
       await auditEvent(admin, "diagnostic_run_tool_verified", "success", "low",
@@ -2241,6 +2651,24 @@ serve(async (req: Request) => {
       await auditEvent(admin, "diagnostic_run_completed", "success", "low",
         `Diagnostic run ${runReference || "(unknown)"} completed — 6 steps closed and signed evidence persisted. Sandbox diagnostic only.`, runExtra);
     } else {
+      if (!recheck.ok) {
+        await auditEvent(admin, "runtime_result_invalid", "rejected", "medium",
+          `Diagnostic run ${runReference || "(unknown)"} result failed cloud revalidation (${finalErrorCategory ?? "none"}). Fail-closed; never success.`,
+          { ...runExtra, ...corrExtra });
+      } else {
+        const failureCat = mapRuntimeFailureCategory(finalErrorCategory);
+        await auditEvent(admin, "runtime_result_failed", "failed", "medium",
+          `Diagnostic run ${runReference || "(unknown)"} failed (category=${failureCat}). No retry, no second tool call, no normal execution.`,
+          { ...runExtra, ...corrExtra });
+        await ensureRuntimeFailureIncident(admin, {
+          failureCategory: failureCat,
+          runKey: runReference,
+          taskKey: taskReference,
+          correlationId: finalize.correlationId,
+          nodeKey,
+          failedStep: null,
+        });
+      }
       await auditEvent(admin, "diagnostic_run_failed", "failed", "medium",
         `Diagnostic run ${runReference || "(unknown)"} failed (error=${finalErrorCategory ?? "none"}). No retry, no second tool call, no normal execution.`, runExtra);
     }
@@ -2353,12 +2781,12 @@ serve(async (req: Request) => {
       await admin.from("ai_runtime_bridge_messages").update({ status: "expired" }).eq("message_key", originalMessageKey);
       await auditEvent(admin, "approval_gated_run_expired", "expired", "low",
         `Approval-gated diagnostic probe ${probeKey || originalMessageKey} expired before a valid result. No tool executed.`);
-      const expiredRunId = await finalizeApprovalGatedRun(admin, runReference, approvalReference, false, {
-        n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: "expired",
+      const expiredFinalize = await finalizeApprovalGatedRun(admin, runReference, approvalReference, false, {
+        n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: "runtime_message_expired",
       });
       const expiredExtra = {
-        ...(expiredRunId ? { run_id: expiredRunId } : {}),
-        correlation_id: str(orig.correlation_id) || null,
+        ...(expiredFinalize.runId ? { run_id: expiredFinalize.runId } : {}),
+        correlation_id: expiredFinalize.correlationId || str(orig.correlation_id) || null,
       };
       await auditEvent(admin, "approval_gated_run_failed", "failed", "medium",
         `Approval-gated run ${runReference || "(unknown)"} failed: probe expired before a signed result. No normal execution occurred.`, expiredExtra);
@@ -2438,13 +2866,56 @@ serve(async (req: Request) => {
       created_at: receivedAt,
     });
 
-    const finalizedRunId = await finalizeApprovalGatedRun(admin, runReference, approvalReference, verified, {
+    const finalize = await finalizeApprovalGatedRun(admin, runReference, approvalReference, verified, {
       n8nStatus, ollamaStatus, ollamaModelCount, latencyMs, completedAt, errorCategory: finalErrorCategory,
     });
     const runExtra = {
-      ...(finalizedRunId ? { run_id: finalizedRunId } : {}),
-      correlation_id: str(orig.correlation_id) || null,
+      ...(finalize.runId ? { run_id: finalize.runId } : {}),
+      correlation_id: finalize.correlationId || str(orig.correlation_id) || null,
     };
+    const corrExtra = { correlation_id: finalize.correlationId || str(orig.correlation_id) || null };
+
+    if (finalize.outcome === "late_result") {
+      return json({
+        accepted: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_approval_gated_diagnostic_probe",
+        status: "failed",
+        lateResult: true,
+        applied: false,
+        verified,
+        executionEnabled: false,
+        message: "Late signed result received after timeout — run remains failed.",
+      });
+    }
+    if (finalize.outcome === "duplicate_result") {
+      return json({
+        accepted: true,
+        duplicate: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_approval_gated_diagnostic_probe",
+        status: "completed",
+        applied: false,
+        verified,
+        executionEnabled: false,
+        message: "Duplicate result blocked — run already completed.",
+      });
+    }
+    if (finalize.outcome === "terminal_state") {
+      return json({
+        accepted: true,
+        allowed: false,
+        blocked: false,
+        operation: "report_approval_gated_diagnostic_probe",
+        status: "terminal",
+        applied: false,
+        verified,
+        executionEnabled: false,
+        message: "Run already terminal — result not applied.",
+      });
+    }
 
     if (verified) {
       await auditEvent(admin, "approval_gated_tool_verified", "success", "low",
@@ -2452,6 +2923,24 @@ serve(async (req: Request) => {
       await auditEvent(admin, "approval_gated_run_completed", "success", "low",
         `Approval-gated run ${runReference || "(unknown)"} completed — 6 steps closed, signed evidence persisted, approval consumed. Sandbox diagnostic only.`, runExtra);
     } else {
+      if (!grantRecheck.ok || !approvalRecheck.ok) {
+        await auditEvent(admin, "runtime_result_invalid", "rejected", "medium",
+          `Approval-gated run ${runReference || "(unknown)"} result failed cloud revalidation (${finalErrorCategory ?? "none"}). Fail-closed; never success.`,
+          { ...runExtra, ...corrExtra });
+      } else {
+        const failureCat = mapRuntimeFailureCategory(finalErrorCategory);
+        await auditEvent(admin, "runtime_result_failed", "failed", "medium",
+          `Approval-gated run ${runReference || "(unknown)"} failed (category=${failureCat}). No retry, no second tool call, no normal execution.`,
+          { ...runExtra, ...corrExtra });
+        await ensureRuntimeFailureIncident(admin, {
+          failureCategory: failureCat,
+          runKey: runReference,
+          taskKey: taskReference,
+          correlationId: finalize.correlationId,
+          nodeKey,
+          failedStep: null,
+        });
+      }
       await auditEvent(admin, "approval_gated_run_failed", "failed", "medium",
         `Approval-gated run ${runReference || "(unknown)"} failed (error=${finalErrorCategory ?? "none"}). No retry, no second tool call, no normal execution.`, runExtra);
     }

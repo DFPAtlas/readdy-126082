@@ -60,6 +60,23 @@ export default function ApprovalsTable({ approvals }: { approvals: AiApproval[] 
                           Runtime Diagnostic Approval
                         </span>
                       )}
+                      {isRuntimeDiagnostic(a) && a.decision?.actor && (
+                        <span className="block text-[10px] text-foreground-600 mt-1 truncate">
+                          Reviewer: <span className="text-foreground-400">{a.decision.actor}</span>
+                        </span>
+                      )}
+                      {isRuntimeDiagnostic(a) && a.approvalRevoked && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-label text-red-400 bg-red-500/10 border border-red-500/25 rounded-full px-1.5 py-0.5 whitespace-nowrap mt-1">
+                          <i className="ri-close-circle-line w-3 h-3 flex items-center justify-center"></i>
+                          Approval Revoked
+                        </span>
+                      )}
+                      {isRuntimeDiagnostic(a) && a.approverEligibilityInvalidated && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-label text-red-400 bg-red-500/10 border border-red-500/25 rounded-full px-1.5 py-0.5 whitespace-nowrap mt-1">
+                          <i className="ri-shield-cross-line w-3 h-3 flex items-center justify-center"></i>
+                          Reviewer Invalidated
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-foreground-500 whitespace-nowrap">{a.siteName}</td>
                     <td className="px-4 py-3 text-foreground-400 max-w-[170px] truncate" title={a.agentName}>{a.agentName}</td>
@@ -105,6 +122,23 @@ export default function ApprovalsTable({ approvals }: { approvals: AiApproval[] 
                     <span className="inline-flex items-center gap-1 text-[10px] font-label text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-1.5 py-0.5 whitespace-nowrap mt-1">
                       <i className="ri-shield-check-line w-3 h-3 flex items-center justify-center"></i>
                       Runtime Diagnostic Approval
+                    </span>
+                  )}
+                  {isRuntimeDiagnostic(a) && a.decision?.actor && (
+                    <span className="block text-[10px] text-foreground-600 mt-1 truncate">
+                      Reviewer: <span className="text-foreground-400">{a.decision.actor}</span>
+                    </span>
+                  )}
+                  {isRuntimeDiagnostic(a) && a.approvalRevoked && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-label text-red-400 bg-red-500/10 border border-red-500/25 rounded-full px-1.5 py-0.5 whitespace-nowrap mt-1">
+                      <i className="ri-close-circle-line w-3 h-3 flex items-center justify-center"></i>
+                      Approval Revoked
+                    </span>
+                  )}
+                  {isRuntimeDiagnostic(a) && a.approverEligibilityInvalidated && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-label text-red-400 bg-red-500/10 border border-red-500/25 rounded-full px-1.5 py-0.5 whitespace-nowrap mt-1">
+                      <i className="ri-shield-cross-line w-3 h-3 flex items-center justify-center"></i>
+                      Reviewer Invalidated
                     </span>
                   )}
                   <p className="text-xs text-foreground-500 mt-0.5">{a.siteName} · {a.agentName}</p>

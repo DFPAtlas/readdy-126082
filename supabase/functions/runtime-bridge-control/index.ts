@@ -1,26 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// ============================================================================
-// runtime-bridge-control — authenticated internal-staff control endpoint for
-// the private runtime transport probe (Phase 3 Prompt 10), the controlled
-// Ollama sandbox inference probe (Phase 3 Prompt 11A), the controlled n8n
-// sandbox workflow probe (Phase 3 Prompt 12), the controlled multi-runtime
-// chain probe (Phase 3 Prompt 13), the controlled registered-agent dry-run
-// probe (Phase 3 Prompt 14), the controlled tool access denial probe
-// (Phase 3 Prompt 15), the controlled tool access grant probe (Phase 3
-// Prompt 16), the controlled read-only tool probe (Phase 3 Prompt 17), the
-// controlled runtime-backed diagnostic run (Phase 3 Prompt 18), the
-// controlled human approval-gated diagnostic run (Phase 3 Prompt 19), the
-// approval expiry + context binding extension (Phase 3 Prompt 20), the
-// permanent context invalidation repair (Phase 3 Prompt 20B), and the
-// maker/checker separation-of-duties control (Phase 3 Prompt 21).
-//
-// SECURITY: verify_jwt = true -> only authenticated users reach this.
-//   * internal_role() gate: owner/admin may queue/run/approve/reject/dispatch;
-//     any internal role (including viewer) may read status only.
-// ============================================================================
-
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -28,8 +8,8 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const PROBE_TTL_MS = 2 * 60_000; // probe expires in 2 minutes
-const HEARTBEAT_FRESH_MS = 2 * 60_000; // heartbeat must be < 2 min old
+const PROBE_TTL_MS = 2 * 60_000;
+const HEARTBEAT_FRESH_MS = 2 * 60_000;
 
 const ALLOWED_OPERATIONS = new Set([
   "queue_transport_probe",
@@ -55,6 +35,10 @@ const ALLOWED_OPERATIONS = new Set([
   "approve_approval_gated_run",
   "reject_approval_gated_run",
   "dispatch_approved_diagnostic_run",
+  "revoke_approved_diagnostic_run",
+  "engage_diagnostic_runtime_freeze",
+  "release_diagnostic_runtime_freeze",
+  "get_diagnostic_runtime_freeze_status",
 ]);
 
 const PROBE_MESSAGE_TYPE = "runtime_transport_probe";
@@ -117,7 +101,7 @@ const DIAGNOSTIC_RUN_QUEUE_MESSAGE_TYPE = "diagnostic_run_tool_probe";
 const DIAGNOSTIC_RUN_RESULT_MESSAGE_TYPE = "diagnostic_run_tool_probe_result";
 const DIAGNOSTIC_RUN_PROBE_ID = "dfp_diagnostic_run_v1";
 const DIAGNOSTIC_RUN_PROBE_MODE = "sandbox_diagnostic";
-const DIAGNOSTIC_RUN_TASK_KEY = "dfp-runtime-health-diagnostic-task";
+const DIAGNOSTIC_RUN_TASK_KEY_PREFIX = "dfp-runtime-health-diagnostic-task";
 const DIAGNOSTIC_RUN_TASK_NAME = "DFP Runtime Health Diagnostic Task";
 const DIAGNOSTIC_RUN_TASK_TYPE = "runtime_health_diagnostic";
 const DIAGNOSTIC_RUN_KEY_PREFIX = "dfp-diagnostic-run-";
@@ -157,7 +141,7 @@ const APPROVAL_GATED_STEPS = [
   "verify_and_close",
 ];
 
-const APPROVAL_GATED_VALIDITY_MS = 5 * 60_000; // fixed 5-minute approval validity window (Prompt 20)
+const APPROVAL_GATED_VALIDITY_MS = 5 * 60_000;
 const APPROVAL_CONTEXT_VERSION = "v1";
 
 function json(body: unknown, status = 200) {
@@ -175,9 +159,6 @@ function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
-// PROMPT 21 — maker/checker separation of duties: normalise a persisted human
-// identity for safe comparison. Lowercases so email case differences can never
-// defeat the self-approval / separation-of-duties gate.
 function normaliseIdentity(v: unknown): string {
   return str(v).toLowerCase();
 }
@@ -335,6 +316,341 @@ async function resolveMasterKillSwitch(
     .eq("control_type", "master_kill_switch")
     .limit(1);
   return data && data.length > 0 ? data[0] : null;
+}
+
+// ===========================================================================
+// PROMPT 24A — Emergency Runtime Freeze control + server-side queue gates.
+// ===========================================================================
+
+const EMERGENCY_FREEZE_CONTROL_KEY = "diagnostic-runtime-emergency-freeze";
+const EMERGENCY_FREEZE_CONTROL_TYPE = "runtime_feature_gate";
+const EMERGENCY_FREEZE_DISPLAY_NAME = "Diagnostic Runtime Emergency Freeze";
+
+const FREEZE_CONFIGURATION_INVALID_SENTINEL: Record<string, unknown> = Object.freeze({
+  __freezeConfigurationInvalid: true,
+});
+
+async function ensureEmergencyFreezeControl(
+  admin: ReturnType<typeof createClient>,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await admin
+    .from("ai_runtime_controls")
+    .select("id, control_key, control_type, scope_type, environment, enabled, execution_allowed, changed_by, changed_at")
+    .eq("control_key", EMERGENCY_FREEZE_CONTROL_KEY)
+    .limit(1);
+  if (data && data.length > 0) {
+    const existingRow = data[0];
+    return isEmergencyFreezeConfigurationValid(existingRow)
+      ? existingRow
+      : FREEZE_CONFIGURATION_INVALID_SENTINEL;
+  }
+
+  const nowIso = new Date().toISOString();
+  const ins = await admin.from("ai_runtime_controls").insert({
+    control_key: EMERGENCY_FREEZE_CONTROL_KEY,
+    control_type: EMERGENCY_FREEZE_CONTROL_TYPE,
+    enabled: false,
+    execution_allowed: true,
+    reason: `${EMERGENCY_FREEZE_DISPLAY_NAME} — default DISENGAGED. Blocks only execution-bearing sandbox diagnostic dispatches.`,
+    risk_ceiling: null,
+    scope_type: "global",
+    environment: "sandbox",
+    requires_approval: false,
+    notes: "Protects ollama/n8n/chain/agent-dry-run/readonly-tool/diagnostic-run/approval-gated dispatch paths only. Monitoring and transport are unaffected.",
+    created_at: nowIso,
+    updated_at: nowIso,
+  }).select("id, control_key, control_type, enabled, execution_allowed, changed_by, changed_at");
+
+  if (ins.error) {
+    if (ins.error.code === "23505") {
+      const { data: existing } = await admin
+        .from("ai_runtime_controls")
+        .select("id, control_key, control_type, enabled, execution_allowed, changed_by, changed_at")
+        .eq("control_key", EMERGENCY_FREEZE_CONTROL_KEY)
+        .limit(1);
+      if (existing && existing.length > 0) return existing[0];
+      return null;
+    }
+    return null;
+  }
+  if (!ins.data || ins.data.length === 0) return null;
+  return ins.data[0];
+}
+
+function isEmergencyFreezeConfigurationValid(control: Record<string, unknown>): boolean {
+  return (
+    str(control.control_key) === EMERGENCY_FREEZE_CONTROL_KEY &&
+    str(control.control_type) === EMERGENCY_FREEZE_CONTROL_TYPE &&
+    str(control.scope_type) === "global" &&
+    str(control.environment) === "sandbox"
+  );
+}
+
+function isFreezeEngaged(control: Record<string, unknown> | null): boolean {
+  return !!control && control.enabled === true && control.execution_allowed === false;
+}
+
+async function emergencyFreezeEngaged(
+  admin: ReturnType<typeof createClient>,
+  actor: string,
+  correlationId: string | null,
+): Promise<boolean> {
+  const control = await ensureEmergencyFreezeControl(admin);
+  if (control && control.__freezeConfigurationInvalid === true) return true;
+  if (!isFreezeEngaged(control)) return false;
+  await auditEvent(admin, "runtime_emergency_dispatch_blocked", "blocked", "high", actor,
+    "Diagnostic runtime execution is frozen by the emergency freeze control. No outbound dispatch was created.",
+    correlationId);
+  return true;
+}
+
+function emergencyFreezeBlockedResponse(operation: string) {
+  return json({
+    accepted: false,
+    operation,
+    detail: "runtime_emergency_freeze_engaged",
+    message: "Diagnostic runtime execution is frozen. No runtime dispatch was created.",
+    executionEnabled: false,
+  }, 409);
+}
+
+// ===========================================================================
+// PROMPT 24B — existing-work containment on freeze engage.
+// ===========================================================================
+
+const EXECUTION_BEARING_MESSAGE_TYPES = new Set([
+  OLLAMA_PROBE_MESSAGE_TYPE,
+  N8N_SANDBOX_PROBE_MESSAGE_TYPE,
+  CHAIN_PROBE_MESSAGE_TYPE,
+  AGENT_DRY_RUN_PROBE_MESSAGE_TYPE,
+  READONLY_TOOL_PROBE_MESSAGE_TYPE,
+  DIAGNOSTIC_RUN_QUEUE_MESSAGE_TYPE,
+  APPROVAL_GATED_QUEUE_MESSAGE_TYPE,
+]);
+
+const FREEZE_REASON_BEFORE_DELIVERY = "runtime_emergency_freeze_before_delivery";
+const FREEZE_REASON_INFLIGHT = "runtime_emergency_freeze_inflight";
+
+const NON_TERMINAL_RUN_STATUSES = new Set(["queued", "working", "waiting", "awaiting_approval"]);
+const NON_TERMINAL_STEP_STATUSES = new Set(["pending", "working", "awaiting_approval"]);
+
+async function resolveRunByReferences(
+  admin: ReturnType<typeof createClient>,
+  safePayload: Record<string, unknown>,
+  correlationId: string | null,
+): Promise<Record<string, unknown> | null> {
+  const runReference = str(safePayload.run_reference);
+  if (runReference) {
+    const { data } = await admin
+      .from("ai_runs")
+      .select("id, run_key, task_id, status, correlation_id, approval_id")
+      .eq("run_key", runReference)
+      .limit(1);
+    return data && data.length > 0 ? data[0] : null;
+  }
+  if (correlationId) {
+    const { data } = await admin
+      .from("ai_runs")
+      .select("id, run_key, task_id, status, correlation_id, approval_id")
+      .eq("correlation_id", correlationId)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    return data && data.length > 0 ? data[0] : null;
+  }
+  return null;
+}
+
+async function cancelRunBeforeDelivery(
+  admin: ReturnType<typeof createClient>,
+  run: Record<string, unknown>,
+  engagedAt: string,
+): Promise<void> {
+  const runId = run.id as string;
+  if (!NON_TERMINAL_RUN_STATUSES.has(str(run.status))) return;
+
+  await admin.from("ai_runs").update({
+    status: "cancelled",
+    error_summary: FREEZE_REASON_BEFORE_DELIVERY,
+    completed_at: engagedAt,
+    updated_at: engagedAt,
+  }).eq("id", runId).in("status", [...NON_TERMINAL_RUN_STATUSES]);
+
+  if (run.task_id) {
+    await admin.from("ai_tasks").update({ status: "failed", updated_at: engagedAt }).eq("id", run.task_id);
+  }
+
+  await admin.from("ai_run_steps").update({
+    status: "failed",
+    error_summary: FREEZE_REASON_BEFORE_DELIVERY,
+    completed_at: engagedAt,
+  }).eq("run_id", runId).in("status", [...NON_TERMINAL_STEP_STATUSES]);
+}
+
+async function failRunInflight(
+  admin: ReturnType<typeof createClient>,
+  run: Record<string, unknown>,
+  engagedAt: string,
+): Promise<void> {
+  const runId = run.id as string;
+  if (!NON_TERMINAL_RUN_STATUSES.has(str(run.status))) return;
+
+  await admin.from("ai_runs").update({
+    status: "failed",
+    error_summary: FREEZE_REASON_INFLIGHT,
+    completed_at: engagedAt,
+    updated_at: engagedAt,
+  }).eq("id", runId).in("status", [...NON_TERMINAL_RUN_STATUSES]);
+
+  if (run.task_id) {
+    await admin.from("ai_tasks").update({ status: "failed", updated_at: engagedAt }).eq("id", run.task_id);
+  }
+
+  await admin.from("ai_run_steps").update({
+    status: "failed",
+    error_summary: FREEZE_REASON_INFLIGHT,
+    completed_at: engagedAt,
+  }).eq("run_id", runId).in("status", [...NON_TERMINAL_STEP_STATUSES]);
+}
+
+async function invalidatePendingApproval(
+  admin: ReturnType<typeof createClient>,
+  run: Record<string, unknown>,
+  safePayload: Record<string, unknown>,
+  actor: string,
+  role: string,
+  engagedAt: string,
+): Promise<void> {
+  const approvalReference = str(safePayload.approval_reference);
+  let approval: Record<string, unknown> | null = null;
+
+  if (approvalReference) {
+    const { data } = await admin
+      .from("ai_approvals")
+      .select("id, approval_key, status, decision, decision_actor, decision_at, requested_by, conditions")
+      .eq("approval_key", approvalReference)
+      .limit(1);
+    approval = data && data.length > 0 ? data[0] : null;
+  }
+  if (!approval && run.approval_id) {
+    const { data } = await admin
+      .from("ai_approvals")
+      .select("id, approval_key, status, decision, decision_actor, decision_at, requested_by, conditions")
+      .eq("id", run.approval_id)
+      .limit(1);
+    approval = data && data.length > 0 ? data[0] : null;
+  }
+
+  if (!approval) return;
+  if (str(approval.status) !== "approved") return;
+
+  const conditions = (approval.conditions as Record<string, unknown> | null) ?? {};
+  const mergedConditions = {
+    ...conditions,
+    emergency_freeze_invalidated: true,
+    emergency_freeze_invalidated_at: engagedAt,
+    emergency_freeze_invalidated_reason: FREEZE_REASON_BEFORE_DELIVERY,
+  };
+
+  await admin.from("ai_approvals").update({
+    status: "rejected",
+    decision_reason: "Approved runtime dispatch was invalidated by Emergency Runtime Freeze before HAL delivery.",
+    conditions: mergedConditions,
+    updated_at: engagedAt,
+  }).eq("id", approval.id);
+
+  await admin.from("ai_approval_history").insert({
+    approval_id: approval.id,
+    event_type: "emergency_freeze_invalidated",
+    previous_status: "approved",
+    new_status: "rejected",
+    decision: null,
+    actor_reference: actor,
+    actor_role: role,
+    reason: "Approved runtime dispatch was invalidated by Emergency Runtime Freeze before HAL delivery.",
+    conditions: null,
+    approval_count_before: 1,
+    approval_count_after: 1,
+    created_at: engagedAt,
+  });
+}
+
+async function containExistingExecutionBearingWork(
+  admin: ReturnType<typeof createClient>,
+  actor: string,
+  role: string,
+  engagedAt: string,
+): Promise<{ pendingMessagesInvalidated: number; inflightMessagesDetected: number; latestAffectedRunKey: string | null }> {
+  const { data: messages } = await admin
+    .from("ai_runtime_bridge_messages")
+    .select("message_key, message_type, direction, status, correlation_id, safe_payload, created_at")
+    .eq("direction", "outbound")
+    .order("created_at", { ascending: true });
+
+  let pendingMessagesInvalidated = 0;
+  let inflightMessagesDetected = 0;
+  let latestAffectedRunKey: string | null = null;
+
+  for (const msg of messages ?? []) {
+    const type = str(msg.message_type);
+    if (!EXECUTION_BEARING_MESSAGE_TYPES.has(type)) continue;
+    const status = str(msg.status);
+    const safePayload = (msg.safe_payload as Record<string, unknown>) ?? {};
+    const correlationId = str(msg.correlation_id) || null;
+
+    if (status === "pending") {
+      pendingMessagesInvalidated += 1;
+      const merged = {
+        ...safePayload,
+        freeze_invalidated: true,
+        freeze_invalidated_at: engagedAt,
+        freeze_reason: FREEZE_REASON_BEFORE_DELIVERY,
+      };
+      await admin.from("ai_runtime_bridge_messages").update({
+        status: "rejected",
+        safe_payload: merged,
+        acknowledged_at: engagedAt,
+      }).eq("message_key", str(msg.message_key));
+
+      if (type === DIAGNOSTIC_RUN_QUEUE_MESSAGE_TYPE || type === APPROVAL_GATED_QUEUE_MESSAGE_TYPE) {
+        const run = await resolveRunByReferences(admin, safePayload, correlationId);
+        if (run) {
+          latestAffectedRunKey = str(run.run_key) || latestAffectedRunKey;
+          await cancelRunBeforeDelivery(admin, run, engagedAt);
+          if (type === APPROVAL_GATED_QUEUE_MESSAGE_TYPE) {
+            await invalidatePendingApproval(admin, run, safePayload, actor, role, engagedAt);
+          }
+        }
+      }
+
+      await auditEvent(admin, "runtime_emergency_pending_message_invalidated", "invalidated", "medium", actor,
+        `Pending execution-bearing message ${str(msg.message_key)} (${type}) permanently invalidated by emergency freeze before HAL delivery. No execution occurred.`,
+        correlationId);
+    } else if (status === "delivered" || status === "acknowledged") {
+      inflightMessagesDetected += 1;
+      const merged = {
+        ...safePayload,
+        freeze_inflight_marked: true,
+        freeze_inflight_marked_at: engagedAt,
+      };
+      await admin.from("ai_runtime_bridge_messages").update({
+        safe_payload: merged,
+      }).eq("message_key", str(msg.message_key));
+
+      if (type === DIAGNOSTIC_RUN_QUEUE_MESSAGE_TYPE || type === APPROVAL_GATED_QUEUE_MESSAGE_TYPE) {
+        const run = await resolveRunByReferences(admin, safePayload, correlationId);
+        if (run) {
+          latestAffectedRunKey = str(run.run_key) || latestAffectedRunKey;
+          await failRunInflight(admin, run, engagedAt);
+        }
+      }
+
+      await auditEvent(admin, "runtime_emergency_inflight_detected", "contained", "medium", actor,
+        `Execution-bearing message ${str(msg.message_key)} (${type}) was already delivered to HAL — recorded as potentially in-flight. Freeze engaged after HAL delivery; local work may have started.`,
+        correlationId);
+    }
+  }
+
+  return { pendingMessagesInvalidated, inflightMessagesDetected, latestAffectedRunKey };
 }
 
 async function recordDenialProbeEvent(
@@ -587,7 +903,6 @@ async function revalidateApprovalContext(
   return { ok: true, detail: null };
 }
 
-// PROMPT 20A — dispatch-specific context revalidation.
 async function revalidateApprovalContextForDispatch(
   admin: ReturnType<typeof createClient>,
   approval: Record<string, unknown>,
@@ -600,7 +915,6 @@ async function revalidateApprovalContextForDispatch(
   return { ok: true, detail: null, currentHash: cur.hash };
 }
 
-// PROMPT 20B — fail-closed detection of a prior context-drift audit event.
 async function hasContextChangedAuditEvent(
   admin: ReturnType<typeof createClient>,
   correlationId: string,
@@ -615,7 +929,6 @@ async function hasContextChangedAuditEvent(
   return !!(data && data.length > 0);
 }
 
-// PROMPT 20B — permanently invalidate an approved context-bound approval.
 async function permanentlyInvalidateApprovalContext(
   admin: ReturnType<typeof createClient>,
   approval: Record<string, unknown>,
@@ -680,6 +993,129 @@ async function permanentlyInvalidateApprovalContext(
 
   await auditEvent(admin, "approval_context_changed", "blocked", "high", actor, safeNote, corr);
   await auditEvent(admin, "approval_context_invalidated", "blocked", "high", actor, safeNote, corr);
+}
+
+// ===========================================================================
+// PROMPT 22 — approval revocation + reviewer eligibility helpers.
+// ===========================================================================
+
+async function resolveApproverInternalRole(
+  admin: ReturnType<typeof createClient>,
+  decisionActor: string,
+): Promise<{
+  ok: boolean;
+  detail: string | null;
+  eligible: boolean;
+  role: string | null;
+  userId: string | null;
+  fullName: string | null;
+}> {
+  const normalized = normaliseIdentity(decisionActor);
+  if (!normalized) {
+    return { ok: false, detail: "approver_identity_unverifiable", eligible: false, role: null, userId: null, fullName: null };
+  }
+
+  let userId: string | null = null;
+  if (normalized.includes("@")) {
+    try {
+      const { data: listData, error: listErr } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      if (listErr) throw new Error("list_users_failed");
+      const users = (listData as { users?: { id: string; email?: string }[] } | null)?.users ?? [];
+      const match = users.find((u) => normaliseIdentity(u.email) === normalized);
+      if (!match) throw new Error("no_match");
+      userId = match.id;
+    } catch {
+      return { ok: false, detail: "approver_identity_unverifiable", eligible: false, role: null, userId: null, fullName: null };
+    }
+  } else {
+    userId = decisionActor;
+  }
+
+  if (!userId) {
+    return { ok: false, detail: "approver_identity_unverifiable", eligible: false, role: null, userId: null, fullName: null };
+  }
+
+  const { data: roleRows } = await admin
+    .from("internal_user_roles")
+    .select("id, user_id, role, status, disabled_at, full_name")
+    .eq("user_id", userId)
+    .limit(1);
+  const roleRow = roleRows && roleRows.length > 0 ? roleRows[0] : null;
+  if (!roleRow) {
+    return { ok: false, detail: "approver_identity_unverifiable", eligible: false, role: null, userId, fullName: null };
+  }
+
+  const approverRole = str(roleRow.role);
+  const approverStatus = str(roleRow.status);
+  const disabledAt = roleRow.disabled_at ?? null;
+  const eligible =
+    (approverRole === "owner" || approverRole === "admin") &&
+    approverStatus === "active" &&
+    disabledAt == null;
+
+  return { ok: true, detail: null, eligible, role: approverRole, userId, fullName: str(roleRow.full_name) || null };
+}
+
+async function invalidateApproverEligibility(
+  admin: ReturnType<typeof createClient>,
+  approval: Record<string, unknown>,
+  run: Record<string, unknown>,
+  actor: string,
+  role: string,
+): Promise<void> {
+  const invalidatedAt = new Date().toISOString();
+  const conditions = (approval.conditions as Record<string, unknown> | null) ?? {};
+  const mergedConditions = {
+    ...conditions,
+    approver_eligibility_invalidated: true,
+    approver_eligibility_invalidated_at: invalidatedAt,
+  };
+
+  await admin.from("ai_approvals").update({
+    status: "rejected",
+    decision_reason: "Approving reviewer is no longer an eligible active owner/admin before dispatch.",
+    conditions: mergedConditions,
+    updated_at: invalidatedAt,
+  }).eq("id", approval.id);
+
+  await admin.from("ai_approval_history").insert({
+    approval_id: approval.id,
+    event_type: "approver_eligibility_invalidated",
+    previous_status: "approved",
+    new_status: "rejected",
+    decision: null,
+    actor_reference: actor,
+    actor_role: role,
+    reason: "Approving reviewer was no longer an eligible active owner/admin before dispatch.",
+    conditions: null,
+    approval_count_before: 1,
+    approval_count_after: 1,
+    created_at: invalidatedAt,
+  });
+
+  await admin.from("ai_run_steps").update({
+    status: "failed",
+    error_summary: "approver_no_longer_eligible",
+    completed_at: invalidatedAt,
+  }).eq("run_id", run.id).eq("step_number", 5);
+
+  await admin.from("ai_runs").update({
+    status: "cancelled",
+    error_summary: "approver_no_longer_eligible",
+    completed_at: invalidatedAt,
+    updated_at: invalidatedAt,
+  }).eq("id", run.id);
+
+  if (run.task_id) {
+    await admin.from("ai_tasks").update({ status: "failed", updated_at: invalidatedAt }).eq("id", run.task_id);
+  }
+
+  const corr = str(run.correlation_id) || null;
+  const safeNote =
+    `Approval ${str(approval.approval_key)} invalidated: approving reviewer no longer eligible before dispatch ` +
+    `(run ${str(run.run_key)}). Reason=approver_no_longer_eligible. HAL dispatch=blocked.`;
+
+  await auditEvent(admin, "approver_eligibility_failed", "blocked", "high", actor, safeNote, corr);
 }
 
 serve(async (req: Request) => {
@@ -863,6 +1299,10 @@ serve(async (req: Request) => {
   if (operation === "queue_ollama_inference_probe") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to queue an Ollama inference probe." }, 403);
 
+    if (await emergencyFreezeEngaged(admin, actor, null)) {
+      return emergencyFreezeBlockedResponse("queue_ollama_inference_probe");
+    }
+
     const node = await resolveNode(admin, str(body.node_key));
     if (!node) {
       return json({
@@ -1016,6 +1456,10 @@ serve(async (req: Request) => {
   // ===========================================================================
   if (operation === "queue_n8n_sandbox_probe") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to queue an n8n sandbox probe." }, 403);
+
+    if (await emergencyFreezeEngaged(admin, actor, null)) {
+      return emergencyFreezeBlockedResponse("queue_n8n_sandbox_probe");
+    }
 
     const node = await resolveNode(admin, str(body.node_key));
     if (!node) {
@@ -1172,6 +1616,10 @@ serve(async (req: Request) => {
   if (operation === "queue_runtime_chain_probe") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to queue a runtime chain probe." }, 403);
 
+    if (await emergencyFreezeEngaged(admin, actor, null)) {
+      return emergencyFreezeBlockedResponse("queue_runtime_chain_probe");
+    }
+
     const node = await resolveNode(admin, str(body.node_key));
     if (!node) {
       return json({
@@ -1327,6 +1775,10 @@ serve(async (req: Request) => {
   // ===========================================================================
   if (operation === "queue_agent_dry_run_probe") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to queue an agent dry-run probe." }, 403);
+
+    if (await emergencyFreezeEngaged(admin, actor, null)) {
+      return emergencyFreezeBlockedResponse("queue_agent_dry_run_probe");
+    }
 
     const node = await resolveNode(admin, str(body.node_key));
     if (!node) {
@@ -1588,7 +2040,7 @@ serve(async (req: Request) => {
         severity: "high",
         actor,
         correlationId,
-        agentId: agent.id as string,
+        agentId: tool ? (agent.id as string) : null,
         decision: "failed",
         reason: "diagnostic_tool_missing",
         permissionState: null,
@@ -2041,6 +2493,10 @@ serve(async (req: Request) => {
   if (operation === "queue_readonly_tool_probe") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to queue a read-only tool probe." }, 403);
 
+    if (await emergencyFreezeEngaged(admin, actor, null)) {
+      return emergencyFreezeBlockedResponse("queue_readonly_tool_probe");
+    }
+
     const node = await resolveNode(admin, str(body.node_key));
     if (!node) {
       return json({
@@ -2253,6 +2709,10 @@ serve(async (req: Request) => {
   if (operation === "queue_diagnostic_run") {
     if (!isPrivileged) return json({ error: "Owner or admin role required to queue a diagnostic run." }, 403);
 
+    if (await emergencyFreezeEngaged(admin, actor, null)) {
+      return emergencyFreezeBlockedResponse("queue_diagnostic_run");
+    }
+
     const master = await resolveMasterKillSwitch(admin);
     if (!master || master.enabled !== true || master.execution_allowed !== false) {
       await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high", actor,
@@ -2327,10 +2787,11 @@ serve(async (req: Request) => {
     const now = new Date();
     const correlationId = uid("COR");
     const runKey = `${DIAGNOSTIC_RUN_KEY_PREFIX}${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const taskKey = `${DIAGNOSTIC_RUN_TASK_KEY_PREFIX}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const probeKey = uid("DRP");
 
     const taskInsert = {
-      task_key: DIAGNOSTIC_RUN_TASK_KEY,
+      task_key: taskKey,
       name: DIAGNOSTIC_RUN_TASK_NAME,
       description: "Sandbox AI Operations run that executes the approved fixed read-only runtime health tool and stores the verified result.",
       task_type: DIAGNOSTIC_RUN_TASK_TYPE,
@@ -2424,7 +2885,7 @@ serve(async (req: Request) => {
       probe_key: probeKey,
       probe_id: DIAGNOSTIC_RUN_PROBE_ID,
       correlation_id: correlationId,
-      task_reference: DIAGNOSTIC_RUN_TASK_KEY,
+      task_reference: taskKey,
       run_reference: runKey,
       expected_node_key: node.node_key,
       agent_key: DIAGNOSTIC_RUN_AGENT_KEY,
@@ -2453,7 +2914,7 @@ serve(async (req: Request) => {
     });
 
     await auditEvent(admin, "diagnostic_run_queued", "success", "low", actor,
-      `Diagnostic run ${runKey} queued (task=${DIAGNOSTIC_RUN_TASK_KEY}, agent=${DIAGNOSTIC_RUN_AGENT_KEY}, tool=${DIAGNOSTIC_RUN_TOOL_KEY}, operation=${DIAGNOSTIC_RUN_TOOL_OPERATION}). Sandbox diagnostic only — no business data, no mutation.`,
+      `Diagnostic run ${runKey} queued (task=${taskKey}, agent=${DIAGNOSTIC_RUN_AGENT_KEY}, tool=${DIAGNOSTIC_RUN_TOOL_KEY}, operation=${DIAGNOSTIC_RUN_TOOL_OPERATION}). Sandbox diagnostic only — no business data, no mutation.`,
       correlationId);
 
     await auditEvent(admin, "diagnostic_run_started", "success", "low", actor,
@@ -2463,7 +2924,7 @@ serve(async (req: Request) => {
     return json({
       accepted: true,
       operation: "queue_diagnostic_run",
-      taskKey: DIAGNOSTIC_RUN_TASK_KEY,
+      taskKey,
       runKey,
       correlationId,
       nodeKey: node.node_key,
@@ -2488,7 +2949,8 @@ serve(async (req: Request) => {
     const { data: taskRows } = await admin
       .from("ai_tasks")
       .select("id, task_key, name, task_type, status, environment, risk_level, created_at")
-      .eq("task_key", DIAGNOSTIC_RUN_TASK_KEY)
+      .eq("task_type", DIAGNOSTIC_RUN_TASK_TYPE)
+      .like("task_key", `${DIAGNOSTIC_RUN_TASK_KEY_PREFIX}-%`)
       .order("created_at", { ascending: false })
       .limit(1);
     const task = taskRows && taskRows.length > 0 ? taskRows[0] : null;
@@ -2670,7 +3132,6 @@ serve(async (req: Request) => {
     const taskKey = `${APPROVAL_GATED_TASK_KEY_PREFIX}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const approvalKey = `${APPROVAL_GATED_APPROVAL_KEY_PREFIX}${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
-    // Prompt 20: build the immutable server-side approval context + SHA-256 hash.
     const approvalContext = buildApprovalContext({
       agentId: str(agent.id),
       toolId: str(tool.id),
@@ -2923,9 +3384,6 @@ serve(async (req: Request) => {
       return json({ error: "Run is not awaiting approval.", detail: "run_not_awaiting_approval" }, 409);
     }
 
-    // PROMPT 21 — self-approval gate (maker ≠ checker). The human who created
-    // this request can never approve it. This fails closed before ANY state
-    // change, decision timestamp, count increment, or HAL dispatch.
     const requesterIdentity = normaliseIdentity(approval.requested_by);
     const approverIdentity = normaliseIdentity(actor);
     if (requesterIdentity && approverIdentity && requesterIdentity === approverIdentity) {
@@ -2939,7 +3397,6 @@ serve(async (req: Request) => {
       }, 409);
     }
 
-    // Prompt 20: expiry gate — a pending approval expires after 5 minutes.
     const approvalExpiresAt = str(approval.expires_at);
     if (approvalExpiresAt && Date.now() > new Date(approvalExpiresAt).getTime()) {
       const expireNow = new Date().toISOString();
@@ -2978,7 +3435,6 @@ serve(async (req: Request) => {
       return json({ error: "This approval has expired and can no longer be approved.", detail: "approval_expired" }, 409);
     }
 
-    // Prompt 20: context revalidation — the authorization context must still match.
     const ctxCheck = await revalidateApprovalContext(admin, approval);
     if (!ctxCheck.ok) {
       await auditEvent(admin, "approval_context_changed", "blocked", "high", actor,
@@ -3014,7 +3470,6 @@ serve(async (req: Request) => {
       created_at: decisionAt,
     });
 
-    // PROMPT 21 — append an explicit maker/checker separation-of-duties record.
     await admin.from("ai_approval_history").insert({
       approval_id: approval.id,
       event_type: "separation_of_duties_verified",
@@ -3159,6 +3614,16 @@ serve(async (req: Request) => {
       return json({ error: "Approval-gated approval not found.", detail: "approval_not_found" }, 404);
     }
 
+    const dispatchPreConditions = (approval.conditions as Record<string, unknown> | null) ?? {};
+    if (dispatchPreConditions.approval_revoked === true) {
+      await auditEvent(admin, "approval_revocation_blocked", "blocked", "high", actor,
+        `Dispatch blocked: approval ${str(approval.approval_key)} was revoked before dispatch. HAL dispatch=blocked.`);
+      return json({
+        error: "This approval was revoked before dispatch. A fresh approval-gated run is required.",
+        detail: "approval_revoked",
+      }, 409);
+    }
+
     if (str(approval.status) !== "approved") {
       return json({ error: "Dispatch requires an explicit approved approval.", detail: "approval_not_approved" }, 409);
     }
@@ -3182,9 +3647,6 @@ serve(async (req: Request) => {
       return json({ error: "Run is already in a terminal state.", detail: "run_terminal" }, 409);
     }
 
-    // PROMPT 21 — separation-of-duties revalidation at dispatch. A NEW approval
-    // must carry distinct maker/checker evidence. Legacy approvals lacking this
-    // evidence also fail closed here (no backfill).
     const sodRequester = normaliseIdentity(approval.requested_by);
     const sodApprover = normaliseIdentity(approval.decision_actor);
     if (!sodRequester || !sodApprover || sodRequester === sodApprover) {
@@ -3195,6 +3657,24 @@ serve(async (req: Request) => {
       return json({
         error: "This approval lacks valid maker/checker separation-of-duties evidence. Create a fresh approval.",
         detail: "separation_of_duties_invalid",
+      }, 409);
+    }
+
+    const approverResolution = await resolveApproverInternalRole(admin, str(approval.decision_actor));
+    if (!approverResolution.ok) {
+      await auditEvent(admin, "approver_eligibility_failed", "blocked", "high", actor,
+        `Dispatch blocked: approving reviewer identity cannot be uniquely resolved for approval ${str(approval.approval_key)} (run ${str(run.run_key)}). HAL dispatch=blocked.`,
+        str(run.correlation_id) || null);
+      return json({
+        error: "The approving reviewer identity cannot be verified. A fresh approval from an eligible checker is required.",
+        detail: "approver_identity_unverifiable",
+      }, 409);
+    }
+    if (!approverResolution.eligible) {
+      await invalidateApproverEligibility(admin, approval, run, actor, role);
+      return json({
+        error: "The approving reviewer is no longer an eligible active owner/admin. A fresh approval from an eligible checker is required.",
+        detail: "approver_no_longer_eligible",
       }, 409);
     }
 
@@ -3213,7 +3693,6 @@ serve(async (req: Request) => {
       return json({ error: "This approval has already been dispatched.", detail: "already_dispatched" }, 409);
     }
 
-    // Prompt 20: expiry gate — an approved approval expires after 5 minutes.
     const approvalExpiresAt = str(approval.expires_at);
     if (approvalExpiresAt && Date.now() > new Date(approvalExpiresAt).getTime()) {
       const expireNow = new Date().toISOString();
@@ -3270,7 +3749,6 @@ serve(async (req: Request) => {
       }, 404);
     }
 
-    // PROMPT 20B — permanent context invalidation gate.
     const approvalConditionsForGate = (approval.conditions as Record<string, unknown> | null) ?? {};
     if (approvalConditionsForGate.context_invalidated === true) {
       await auditEvent(admin, "approval_context_changed", "blocked", "high", actor,
@@ -3282,8 +3760,6 @@ serve(async (req: Request) => {
       }, 409);
     }
 
-    // PROMPT 20B — fail-closed compatibility for approvals that drifted under
-    // the previous implementation.
     if (await hasContextChangedAuditEvent(admin, corr)) {
       await permanentlyInvalidateApprovalContext(admin, approval, run, actor, role);
       return json({
@@ -3292,7 +3768,6 @@ serve(async (req: Request) => {
       }, 409);
     }
 
-    // PROMPT 20A — context revalidation FIRST for context-bound approvals.
     const boundContextHash = str((approval.conditions as Record<string, unknown> | null)?.approval_context_hash);
     if (boundContextHash) {
       const ctxRecheck = await revalidateApprovalContextForDispatch(admin, approval);
@@ -3347,7 +3822,6 @@ serve(async (req: Request) => {
       return json({ error: "Dedicated agent grant is not the exact isolated execute permission for the callable tool.", detail: "tool_access_scope_invalid" }, 409);
     }
 
-    // Prompt 20: context hash must still match the approved authorization context.
     const dispatchContext = buildApprovalContext({
       agentId: str(agent.id),
       toolId: str(tool.id),
@@ -3367,6 +3841,12 @@ serve(async (req: Request) => {
     if (run.task_id) {
       const { data: taskRows } = await admin.from("ai_tasks").select("task_key").eq("id", run.task_id).limit(1);
       taskKey = taskRows && taskRows.length > 0 ? str(taskRows[0].task_key) : "";
+    }
+
+    // PROMPT 24A — emergency freeze is the FINAL gate, applied after all
+    // Prompt 19–22 checks, immediately before the outbound HAL message insert.
+    if (await emergencyFreezeEngaged(admin, actor, corr)) {
+      return emergencyFreezeBlockedResponse("dispatch_approved_diagnostic_run");
     }
 
     const now = new Date();
@@ -3439,6 +3919,135 @@ serve(async (req: Request) => {
       halDispatch: "SENT",
       executionEnabled: false,
       message: "Approved diagnostic run dispatched once. The fixed read-only tool will execute through HAL.",
+    });
+  }
+
+  // ===========================================================================
+  // REVOKE_APPROVED_DIAGNOSTIC_RUN — owner or original checker only.
+  // ===========================================================================
+  if (operation === "revoke_approved_diagnostic_run") {
+    if (!isPrivileged) return json({ error: "Owner or admin role required to revoke an approval-gated run." }, 403);
+
+    const approval = await resolveApprovalGatedApprovalByRefs(admin, str(body.approval_key), str(body.run_key));
+    if (!approval) {
+      return json({ error: "Approval-gated approval not found.", detail: "approval_not_found" }, 404);
+    }
+
+    if (str(approval.status) !== "approved") {
+      return json({ error: "Only an approved approval can be revoked.", detail: "approval_not_approved" }, 409);
+    }
+
+    const runId = approval.run_id;
+    if (!runId) {
+      return json({ error: "Approval is not linked to a run.", detail: "approval_run_missing" }, 409);
+    }
+
+    const { data: runRows } = await admin
+      .from("ai_runs")
+      .select("id, run_key, task_id, status, correlation_id")
+      .eq("id", runId)
+      .limit(1);
+    const run = runRows && runRows.length > 0 ? runRows[0] : null;
+    if (!run) {
+      return json({ error: "Approval run not found.", detail: "run_not_found" }, 409);
+    }
+
+    const runStatus = str(run.status);
+    if (runStatus === "completed" || runStatus === "failed" || runStatus === "cancelled") {
+      return json({ error: "Run is already in a terminal state.", detail: "run_terminal" }, 409);
+    }
+
+    const corr = str(run.correlation_id);
+
+    const { data: existingDispatch } = await admin
+      .from("ai_runtime_bridge_messages")
+      .select("message_key")
+      .eq("direction", "outbound")
+      .eq("message_type", APPROVAL_GATED_QUEUE_MESSAGE_TYPE)
+      .eq("correlation_id", corr)
+      .limit(1);
+    if (existingDispatch && existingDispatch.length > 0) {
+      await auditEvent(admin, "approval_revocation_blocked", "blocked", "high", actor,
+        `Revocation blocked: approval ${str(approval.approval_key)} (run ${str(run.run_key)}) has already been dispatched. An already-dispatched runtime call cannot be revoked as if cancelled.`,
+        corr);
+      return json({ error: "This approval has already been dispatched and cannot be revoked.", detail: "already_dispatched" }, 409);
+    }
+
+    const decisionActor = str(approval.decision_actor);
+    const isOriginalChecker = normaliseIdentity(decisionActor) === normaliseIdentity(actor);
+    const isOwner = role === "owner";
+    if (!isOriginalChecker && !isOwner) {
+      await auditEvent(admin, "approval_revocation_blocked", "blocked", "high", actor,
+        `Revocation blocked: ${actor} is neither the original checker nor an owner for approval ${str(approval.approval_key)} (run ${str(run.run_key)}). Peer-admin revocation is not permitted.`,
+        corr);
+      return json({
+        error: "Only the original approving checker or an owner may revoke this approval.",
+        detail: "revocation_not_authorized",
+      }, 403);
+    }
+
+    const revokedAt = new Date().toISOString();
+    const conditions = (approval.conditions as Record<string, unknown> | null) ?? {};
+    const mergedConditions = {
+      ...conditions,
+      approval_revoked: true,
+      approval_revoked_at: revokedAt,
+      approval_revoked_by: actor,
+      approval_revoked_reason: "manual_revocation",
+    };
+
+    await admin.from("ai_approvals").update({
+      status: "rejected",
+      decision_reason: "Previously approved; approval explicitly revoked before runtime dispatch.",
+      conditions: mergedConditions,
+      updated_at: revokedAt,
+    }).eq("id", approval.id);
+
+    await admin.from("ai_approval_history").insert({
+      approval_id: approval.id,
+      event_type: "revoked",
+      previous_status: "approved",
+      new_status: "rejected",
+      decision: null,
+      actor_reference: actor,
+      actor_role: role,
+      reason: "Approved runtime authorization was revoked before dispatch.",
+      conditions: null,
+      approval_count_before: 1,
+      approval_count_after: 1,
+      created_at: revokedAt,
+    });
+
+    await admin.from("ai_run_steps").update({
+      status: "failed",
+      error_summary: "approval_revoked",
+      completed_at: revokedAt,
+    }).eq("run_id", runId).eq("step_number", 5);
+
+    await admin.from("ai_runs").update({
+      status: "cancelled",
+      error_summary: "approval_revoked",
+      completed_at: revokedAt,
+      updated_at: revokedAt,
+    }).eq("id", runId);
+
+    if (run.task_id) {
+      await admin.from("ai_tasks").update({ status: "failed", updated_at: revokedAt }).eq("id", run.task_id);
+    }
+
+    await auditEvent(admin, "approval_revoked", "blocked", "high", actor,
+      `Approval ${str(approval.approval_key)} explicitly revoked by ${actor} before dispatch (run ${str(run.run_key)}, reason=manual_revocation). HAL dispatch=blocked.`,
+      corr);
+
+    return json({
+      accepted: true,
+      operation: "revoke_approved_diagnostic_run",
+      approvalKey: str(approval.approval_key),
+      runKey: str(run.run_key),
+      status: "revoked",
+      halDispatch: "BLOCKED",
+      executionEnabled: false,
+      message: "Approval revoked before dispatch. Run cancelled; a fresh approval-gated run is required.",
     });
   }
 
@@ -3525,7 +4134,6 @@ serve(async (req: Request) => {
       }
     }
 
-    // Prompt 20: expiry + context-binding status.
     const approvalExpiresAt = approval ? str(approval.expires_at) : null;
     const approvalIsExpired = approvalExpiresAt ? Date.now() > new Date(approvalExpiresAt).getTime() : false;
     const approvalConditions = (approval?.conditions as Record<string, unknown> | null) ?? {};
@@ -3533,7 +4141,6 @@ serve(async (req: Request) => {
     const approvalContextBound = !!approvalContextHash;
     const contextFingerprint = approvalContextHash ? approvalContextHash.slice(0, 8) : null;
 
-    // Prompt 20B: permanent invalidation marker + fail-closed compatibility.
     let contextInvalidated = approvalConditions.context_invalidated === true;
     let contextInvalidatedAt = str(approvalConditions.context_invalidated_at) || null;
     if (!contextInvalidated && approval && str(approval.status) === "approved" && run) {
@@ -3550,12 +4157,24 @@ serve(async (req: Request) => {
       approvalContextMatched = cur.ok && cur.hash === approvalContextHash;
     }
 
-    // PROMPT 21 — separation of duties (maker ≠ checker) status.
     const requestedBy = approval ? str(approval.requested_by) : null;
     const approvedBy = approval ? str(approval.decision_actor) : null;
     const separationOfDutiesRequired = true;
     const selfApprovalAllowed = false;
     const separationOfDutiesVerified = !!requestedBy && !!approvedBy && normaliseIdentity(requestedBy) !== normaliseIdentity(approvedBy);
+
+    const approvalRevoked = approvalConditions.approval_revoked === true;
+    const approvalRevokedAt = str(approvalConditions.approval_revoked_at) || null;
+    const approvalRevokedBy = str(approvalConditions.approval_revoked_by) || null;
+    const approverEligibilityInvalidated = approvalConditions.approver_eligibility_invalidated === true;
+
+    let approverCurrentlyEligible: boolean | null = null;
+    let approverCurrentRole: string | null = null;
+    if (approval && str(approval.decision_actor)) {
+      const approverRes = await resolveApproverInternalRole(admin, str(approval.decision_actor));
+      approverCurrentlyEligible = approverRes.eligible;
+      approverCurrentRole = approverRes.role;
+    }
 
     let halDispatch = "BLOCKED";
     if (contextInvalidated) {
@@ -3609,6 +4228,12 @@ serve(async (req: Request) => {
         separationOfDutiesRequired,
         separationOfDutiesVerified,
         selfApprovalAllowed,
+        approvalRevoked,
+        approvalRevokedAt,
+        approvalRevokedBy,
+        approverEligibilityInvalidated,
+        approverCurrentlyEligible,
+        approverCurrentRole,
       } : null,
       steps,
       signedResult,
@@ -3621,6 +4246,252 @@ serve(async (req: Request) => {
       probeMode: APPROVAL_GATED_PROBE_MODE,
       executionEnabled: false,
       message: "Approval-gated run status read (sandbox diagnostic only — no business data, no mutation).",
+    });
+  }
+
+  // ===========================================================================
+  // ENGAGE_DIAGNOSTIC_RUNTIME_FREEZE — owner/admin only.
+  // ===========================================================================
+  if (operation === "engage_diagnostic_runtime_freeze") {
+    if (!isPrivileged) return json({ error: "Owner or admin role required to engage the diagnostic runtime freeze." }, 403);
+
+    const control = await ensureEmergencyFreezeControl(admin);
+    if (!control) {
+      return json({ error: "Failed to resolve the emergency freeze control.", detail: "freeze_control_resolve_failed" }, 500);
+    }
+    if (control.__freezeConfigurationInvalid === true) {
+      return json({ error: "The emergency freeze control has an invalid configuration.", detail: "freeze_control_configuration_invalid" }, 500);
+    }
+
+    if (isFreezeEngaged(control)) {
+      return json({
+        accepted: true,
+        alreadyEngaged: true,
+        operation: "engage_diagnostic_runtime_freeze",
+        engaged: true,
+        engagedBy: str(control.changed_by) || null,
+        engagedAt: str(control.changed_at) || null,
+        normalExecutionBlocked: true,
+        masterKillSwitchOn: true,
+        productionEnabled: false,
+        message: "Diagnostic runtime freeze is already engaged. No duplicate history or audit recorded.",
+      });
+    }
+
+    const engagedAt = new Date().toISOString();
+    const previousEnabled = control.enabled === true;
+    const previousExecutionAllowed = control.execution_allowed === true;
+
+    await admin.from("ai_runtime_controls").update({
+      enabled: true,
+      execution_allowed: false,
+      changed_by: actor,
+      changed_at: engagedAt,
+      updated_at: engagedAt,
+    }).eq("id", control.id);
+
+    await admin.from("ai_runtime_control_history").insert({
+      control_id: control.id,
+      action: "engaged",
+      previous_enabled: previousEnabled,
+      new_enabled: true,
+      previous_execution_allowed: previousExecutionAllowed,
+      new_execution_allowed: false,
+      actor_reference: actor,
+      actor_role: role,
+      reason: "Diagnostic runtime emergency freeze engaged — execution-bearing sandbox diagnostic dispatches are blocked.",
+      correlation_id: null,
+      created_at: engagedAt,
+    });
+
+    const containment = await containExistingExecutionBearingWork(admin, actor, role, engagedAt);
+
+    await auditEvent(admin, "runtime_emergency_freeze_engaged", "success", "high", actor,
+      `Diagnostic runtime emergency freeze ENGAGED. Execution-bearing sandbox diagnostic dispatches are blocked until owner release. ` +
+      `Contained ${containment.pendingMessagesInvalidated} pending message(s) and ${containment.inflightMessagesDetected} in-flight message(s).`,
+      null);
+
+    return json({
+      accepted: true,
+      alreadyEngaged: false,
+      operation: "engage_diagnostic_runtime_freeze",
+      engaged: true,
+      engagedAt,
+      engagedBy: actor,
+      pendingMessagesInvalidated: containment.pendingMessagesInvalidated,
+      inflightMessagesDetected: containment.inflightMessagesDetected,
+      latestAffectedRunKey: containment.latestAffectedRunKey,
+      normalExecutionBlocked: true,
+      masterKillSwitchOn: true,
+      productionEnabled: false,
+      message: "Diagnostic runtime freeze engaged. All execution-bearing sandbox diagnostic dispatches are now blocked.",
+    });
+  }
+
+  // ===========================================================================
+  // RELEASE_DIAGNOSTIC_RUNTIME_FREEZE — owner ONLY.
+  // ===========================================================================
+  if (operation === "release_diagnostic_runtime_freeze") {
+    if (role !== "owner") return json({ error: "Owner role required to release the diagnostic runtime freeze." }, 403);
+
+    const control = await ensureEmergencyFreezeControl(admin);
+    if (!control) {
+      return json({ error: "Failed to resolve the emergency freeze control.", detail: "freeze_control_resolve_failed" }, 500);
+    }
+    if (control.__freezeConfigurationInvalid === true) {
+      return json({ error: "The emergency freeze control has an invalid configuration.", detail: "freeze_control_configuration_invalid" }, 500);
+    }
+
+    if (!isFreezeEngaged(control)) {
+      return json({
+        accepted: true,
+        alreadyReleased: true,
+        operation: "release_diagnostic_runtime_freeze",
+        engaged: false,
+        releasedBy: str(control.changed_by) || null,
+        releasedAt: str(control.changed_at) || null,
+        normalExecutionBlocked: true,
+        masterKillSwitchOn: true,
+        productionEnabled: false,
+        message: "Diagnostic runtime freeze is already released. No duplicate history or audit recorded.",
+      });
+    }
+
+    const releasedAt = new Date().toISOString();
+    const previousEnabled = control.enabled === true;
+    const previousExecutionAllowed = control.execution_allowed === true;
+
+    await admin.from("ai_runtime_controls").update({
+      enabled: false,
+      execution_allowed: true,
+      changed_by: actor,
+      changed_at: releasedAt,
+      updated_at: releasedAt,
+    }).eq("id", control.id);
+
+    await admin.from("ai_runtime_control_history").insert({
+      control_id: control.id,
+      action: "released",
+      previous_enabled: previousEnabled,
+      new_enabled: false,
+      previous_execution_allowed: previousExecutionAllowed,
+      new_execution_allowed: true,
+      actor_reference: actor,
+      actor_role: role,
+      reason: "Diagnostic runtime emergency freeze released — future execution-bearing sandbox diagnostic dispatches are allowed again. No historical work is replayed.",
+      correlation_id: null,
+      created_at: releasedAt,
+    });
+
+    await auditEvent(admin, "runtime_emergency_freeze_released", "success", "high", actor,
+      `Diagnostic runtime emergency freeze RELEASED. Future execution-bearing sandbox diagnostic dispatches are allowed again. No prior messages, runs, approvals, or tasks were replayed or reactivated.`,
+      null);
+
+    return json({
+      accepted: true,
+      alreadyReleased: false,
+      operation: "release_diagnostic_runtime_freeze",
+      engaged: false,
+      releasedAt,
+      releasedBy: actor,
+      normalExecutionBlocked: true,
+      masterKillSwitchOn: true,
+      productionEnabled: false,
+      message: "Diagnostic runtime freeze released. Future execution-bearing sandbox diagnostic dispatches are allowed again.",
+    });
+  }
+
+  // ===========================================================================
+  // GET_DIAGNOSTIC_RUNTIME_FREEZE_STATUS — any internal role (read-only).
+  // ===========================================================================
+  if (operation === "get_diagnostic_runtime_freeze_status") {
+    const control = await ensureEmergencyFreezeControl(admin);
+    if (!control) {
+      return json({ error: "Failed to resolve the emergency freeze control.", detail: "freeze_control_resolve_failed" }, 500);
+    }
+    if (control.__freezeConfigurationInvalid === true) {
+      return json({ error: "The emergency freeze control has an invalid configuration.", detail: "freeze_control_configuration_invalid" }, 500);
+    }
+
+    const engaged = isFreezeEngaged(control);
+    let engagedAt: string | null = null;
+    let engagedBy: string | null = null;
+    let releasedAt: string | null = null;
+    let releasedBy: string | null = null;
+
+    const { data: engRows } = await admin
+      .from("ai_runtime_control_history")
+      .select("created_at, actor_reference")
+      .eq("control_id", control.id)
+      .eq("action", "engaged")
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (engRows && engRows.length > 0) {
+      engagedAt = str(engRows[0].created_at) || null;
+      engagedBy = str(engRows[0].actor_reference) || null;
+    }
+
+    const { data: relRows } = await admin
+      .from("ai_runtime_control_history")
+      .select("created_at, actor_reference")
+      .eq("control_id", control.id)
+      .eq("action", "released")
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (relRows && relRows.length > 0) {
+      releasedAt = str(relRows[0].created_at) || null;
+      releasedBy = str(relRows[0].actor_reference) || null;
+    }
+
+    let pendingMessagesInvalidated = 0;
+    let inflightMessagesDetected = 0;
+    let latestAffectedRunKey: string | null = null;
+    let latestAffectedCorrelationId: string | null = null;
+
+    const latestEngageAt = engagedAt;
+    if (latestEngageAt) {
+      const { data: containmentEvents } = await admin
+        .from("ai_audit_events")
+        .select("event_type, correlation_id, occurred_at")
+        .in("event_type", [
+          "runtime_emergency_pending_message_invalidated",
+          "runtime_emergency_inflight_detected",
+        ])
+        .gte("occurred_at", latestEngageAt)
+        .order("occurred_at", { ascending: false })
+        .limit(1000);
+
+      for (const ev of containmentEvents ?? []) {
+        if (ev.event_type === "runtime_emergency_pending_message_invalidated") pendingMessagesInvalidated += 1;
+        else if (ev.event_type === "runtime_emergency_inflight_detected") inflightMessagesDetected += 1;
+        if (!latestAffectedCorrelationId && ev.correlation_id) latestAffectedCorrelationId = str(ev.correlation_id);
+      }
+
+      if (latestAffectedCorrelationId) {
+        const { data: runRows } = await admin
+          .from("ai_runs")
+          .select("run_key")
+          .eq("correlation_id", latestAffectedCorrelationId)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (runRows && runRows.length > 0) latestAffectedRunKey = str(runRows[0].run_key);
+      }
+    }
+
+    return json({
+      operation: "get_diagnostic_runtime_freeze_status",
+      engaged,
+      engagedAt,
+      engagedBy,
+      releasedAt,
+      releasedBy,
+      pendingMessagesInvalidated,
+      inflightMessagesDetected,
+      latestAffectedRunKey,
+      latestAffectedCorrelationId,
+      normalExecutionBlocked: true,
+      masterKillSwitchOn: true,
+      productionEnabled: false,
     });
   }
 

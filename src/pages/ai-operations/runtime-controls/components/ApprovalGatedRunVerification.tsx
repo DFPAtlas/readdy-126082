@@ -5,6 +5,7 @@ import {
   createApprovalGatedRun,
   approveApprovalGatedRun,
   rejectApprovalGatedRun,
+  revokeApprovedDiagnosticRun,
   dispatchApprovedDiagnosticRun,
   getApprovalGatedRunStatus,
   deriveApprovalGatedState,
@@ -55,7 +56,7 @@ export default function ApprovalGatedRunVerification() {
 
   const [status, setStatus] = useState<ApprovalGatedRunStatusResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [sending, setSending] = useState<'create' | 'approve' | 'reject' | 'dispatch' | null>(null);
+  const [sending, setSending] = useState<'create' | 'approve' | 'reject' | 'revoke' | 'dispatch' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selfApprovalBlocked, setSelfApprovalBlocked] = useState(false);
   const pollActiveRef = useRef(false);
@@ -155,6 +156,20 @@ export default function ApprovalGatedRunVerification() {
     setSending(null);
   }
 
+  async function handleRevoke() {
+    if (!isPrivileged || !approvalKey) return;
+    setSending('revoke');
+    setError(null);
+    const res = await revokeApprovedDiagnosticRun(approvalKey);
+    if (res.error) {
+      setError(res.error);
+      setSending(null);
+      return;
+    }
+    await refreshStatus();
+    setSending(null);
+  }
+
   async function handleDispatch() {
     if (!isPrivileged || !approvalKey) return;
     setSending('dispatch');
@@ -190,6 +205,14 @@ export default function ApprovalGatedRunVerification() {
   const sodVerified = status?.approval?.separationOfDutiesVerified ?? false;
   const selfApprovalAllowed = status?.approval?.selfApprovalAllowed ?? false;
   const isRequester = !!requestedBy && requestedBy.trim().toLowerCase() === currentIdentity;
+  const isOriginalChecker = !!approvedBy && approvedBy.trim().toLowerCase() === currentIdentity;
+  const canRevoke = isPrivileged && (role === 'owner' || isOriginalChecker);
+  const approvalRevoked = status?.approval?.approvalRevoked ?? false;
+  const approvalRevokedAt = status?.approval?.approvalRevokedAt ?? null;
+  const approvalRevokedBy = status?.approval?.approvalRevokedBy ?? null;
+  const approverEligibilityInvalidated = status?.approval?.approverEligibilityInvalidated ?? false;
+  const approverCurrentlyEligible = status?.approval?.approverCurrentlyEligible ?? null;
+  const approverCurrentRole = status?.approval?.approverCurrentRole ?? null;
   const makerChecker = approvedBy && sodVerified
     ? { label: 'VERIFIED', tone: 'emerald' as const }
     : approvalStatus === 'approved'
@@ -295,7 +318,7 @@ export default function ApprovalGatedRunVerification() {
             </>
           )}
 
-          {approvalStatus === 'approved' && !contextInvalidated && (
+          {state === 'approved' && (
             <button
               onClick={() => void handleDispatch()}
               disabled={sending !== null || loading || !isPrivileged}
@@ -304,6 +327,18 @@ export default function ApprovalGatedRunVerification() {
             >
               <i className={`${sending === 'dispatch' ? 'ri-loader-4-line animate-spin' : 'ri-send-plane-line'} w-4 h-4 flex items-center justify-center`}></i>
               {sending === 'dispatch' ? 'Dispatching…' : 'Dispatch Approved Run'}
+            </button>
+          )}
+
+          {state === 'approved' && canRevoke && (
+            <button
+              onClick={() => void handleRevoke()}
+              disabled={sending !== null || loading}
+              title={isOriginalChecker ? 'Revoke your own approval before dispatch' : 'Owner role can revoke any undispatched approval'}
+              className="inline-flex items-center gap-1.5 text-xs font-label font-semibold border border-red-500/50 text-red-400 hover:bg-red-500/10 rounded-md px-3.5 py-2 transition-colors duration-150 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              <i className={`${sending === 'revoke' ? 'ri-loader-4-line animate-spin' : 'ri-close-circle-line'} w-4 h-4 flex items-center justify-center`}></i>
+              {sending === 'revoke' ? 'Revoking…' : 'Revoke Approval'}
             </button>
           )}
 
@@ -369,6 +404,52 @@ export default function ApprovalGatedRunVerification() {
                   <i className="ri-user-location-line w-3.5 h-3.5 flex items-center justify-center shrink-0"></i>
                   You created this request. A different owner or admin must approve it.
                 </p>
+              )}
+            </div>
+
+            {/* PROMPT 22 — approval authority, revocation + reviewer eligibility */}
+            <div className="bg-background-50 border border-background-200/60 rounded-md px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                <h4 className="text-[11px] font-label font-semibold text-foreground-500 uppercase tracking-wide">Approval Authority &amp; Revocation</h4>
+                {approvalRevoked ? (
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-label text-red-400 bg-red-500/10 border border-red-500/25 rounded-full px-2 py-0.5 whitespace-nowrap">
+                    <i className="ri-close-circle-line w-3 h-3 flex items-center justify-center"></i>
+                    REVOKED
+                  </span>
+                ) : approverEligibilityInvalidated ? (
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-label text-red-400 bg-red-500/10 border border-red-500/25 rounded-full px-2 py-0.5 whitespace-nowrap">
+                    <i className="ri-shield-cross-line w-3 h-3 flex items-center justify-center"></i>
+                    REVIEWER INVALIDATED
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-label text-foreground-500 bg-background-100 border border-background-200/60 rounded-full px-2 py-0.5 whitespace-nowrap">
+                    <i className="ri-shield-check-line w-3 h-3 flex items-center justify-center"></i>
+                    ACTIVE
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <DetailStat label="Reviewer" value={approvedBy || '—'} />
+                <DetailStat
+                  label="Reviewer eligibility"
+                  value={approverEligibilityInvalidated ? 'INVALID' : approverCurrentlyEligible === true ? 'ELIGIBLE' : approverCurrentlyEligible === false ? 'NOT ELIGIBLE' : '—'}
+                  tone={approverEligibilityInvalidated || approverCurrentlyEligible === false ? 'red' : approverCurrentlyEligible === true ? 'emerald' : undefined}
+                />
+                <DetailStat label="Reviewer role" value={approverCurrentRole || '—'} />
+                <DetailStat
+                  label="Revocation status"
+                  value={approvalRevoked ? 'REVOKED' : state === 'approved' ? 'AVAILABLE' : 'NONE'}
+                  tone={approvalRevoked ? 'red' : state === 'approved' ? 'emerald' : undefined}
+                />
+                {approvalRevoked && (
+                  <>
+                    <DetailStat label="Revoked at" value={formatTime(approvalRevokedAt)} />
+                    <DetailStat label="Revoked by" value={approvalRevokedBy || '—'} />
+                  </>
+                )}
+              </div>
+              {(approvalRevoked || approverEligibilityInvalidated) && (
+                <p className="text-[10px] text-red-400/70 mt-1.5 uppercase tracking-wide">HAL dispatch: BLOCKED · Fresh approval required</p>
               )}
             </div>
 
@@ -551,6 +632,58 @@ function ResultBanner({ status }: { status: ApprovalGatedRunStatusResult }) {
           <p className="text-xs text-red-300/90 font-semibold">Approval Context Changed — New Approval Required</p>
           <p className="text-[11px] text-red-400/70 mt-0.5">This approval was permanently invalidated after its authorization context changed. Context Binding: BOUND · Context Status: INVALIDATED · HAL Dispatch: BLOCKED. A fresh approval-gated run and human approval are required.</p>
         </div>
+      </div>
+    );
+  }
+
+  if (state === 'revoked') {
+    return (
+      <div className="bg-red-500/10 border border-red-500/25 rounded-md px-3 py-3">
+        <div className="flex items-center gap-2.5 mb-1.5">
+          <i className="ri-close-circle-line text-red-400 w-4 h-4 flex items-center justify-center shrink-0"></i>
+          <p className="text-xs text-red-300/90 font-semibold">Approval Revoked — Fresh Approval Required</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-red-400/70">Revocation Status</span>
+            <span className="text-xs text-red-100 font-semibold">REVOKED</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-red-400/70">HAL Dispatch</span>
+            <span className="text-xs text-red-100 font-semibold">BLOCKED</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-red-400/70">Run</span>
+            <span className="text-xs text-red-100 font-semibold">Cancelled</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-red-400/70">Revoked by</span>
+            <span className="text-xs text-red-100 font-semibold">{status.approval?.approvalRevokedBy || '—'}</span>
+          </div>
+        </div>
+        <p className="text-[11px] text-red-400/70 mt-2">The approved authorization was explicitly revoked before dispatch. A fresh approval-gated run and human approval are required.</p>
+      </div>
+    );
+  }
+
+  if (state === 'approver_invalidated') {
+    return (
+      <div className="bg-red-500/10 border border-red-500/25 rounded-md px-3 py-3">
+        <div className="flex items-center gap-2.5 mb-1.5">
+          <i className="ri-shield-cross-line text-red-400 w-4 h-4 flex items-center justify-center shrink-0"></i>
+          <p className="text-xs text-red-300/90 font-semibold">Reviewer No Longer Eligible</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-red-400/70">Reviewer Eligibility</span>
+            <span className="text-xs text-red-100 font-semibold">INVALID</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-red-400/70">HAL Dispatch</span>
+            <span className="text-xs text-red-100 font-semibold">BLOCKED</span>
+          </div>
+        </div>
+        <p className="text-[11px] text-red-400/70 mt-2">The approving reviewer is no longer an eligible active owner/admin. Fresh independent approval is required.</p>
       </div>
     );
   }

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useRuntimeControls, refreshControls, findMasterSwitch } from '@/pages/ai-operations/runtime-controls/runtimeControlsStore';
 import { evaluateRuntimeExecution, buildDefaultGateContext } from '@/lib/ai-operations/runtimeControls';
 import MasterKillSwitch from '@/pages/ai-operations/runtime-controls/components/MasterKillSwitch';
+import EmergencyRuntimeFreeze from '@/pages/ai-operations/runtime-controls/components/EmergencyRuntimeFreeze';
 import GatesPanel from '@/pages/ai-operations/runtime-controls/components/GatesPanel';
 import GateEvaluation from '@/pages/ai-operations/runtime-controls/components/GateEvaluation';
 import ControlHistory from '@/pages/ai-operations/runtime-controls/components/ControlHistory';
@@ -21,6 +22,7 @@ import ToolAccessGrantProbeVerification from '@/pages/ai-operations/runtime-cont
 import ReadonlyToolProbeVerification from '@/pages/ai-operations/runtime-controls/components/ReadonlyToolProbeVerification';
 import DiagnosticRunVerification from '@/pages/ai-operations/runtime-controls/components/DiagnosticRunVerification';
 import ApprovalGatedRunVerification from '@/pages/ai-operations/runtime-controls/components/ApprovalGatedRunVerification';
+import RuntimeFailureGovernance from '@/pages/ai-operations/runtime-controls/components/RuntimeFailureGovernance';
 
 export default function RuntimeControlsPage() {
   const { controls, loading, error } = useRuntimeControls();
@@ -98,6 +100,9 @@ export default function RuntimeControlsPage() {
       {/* Master kill switch */}
       <MasterKillSwitch />
 
+      {/* Emergency runtime freeze (Prompt 24C — block new dispatch, contain in-flight) */}
+      <EmergencyRuntimeFreeze />
+
       {/* Site / agent / risk gates */}
       <GatesPanel />
 
@@ -148,6 +153,7 @@ export default function RuntimeControlsPage() {
 
       {/* Human approval-gated run (Prompt 19 first approval-gated diagnostic lifecycle) */}
       <ApprovalGatedRunVerification />
+      <RuntimeFailureGovernance />
 
       {/* Change history */}
       <ControlHistory />

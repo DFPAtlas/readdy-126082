@@ -262,3 +262,19 @@ export const pilotExecutionGate: {
     { label: 'Current health fresh', met: false },
   ],
 };
+
+// --- Phase 3 Prompt 24C — Emergency Runtime Freeze readiness ------------------
+
+export interface EmergencyFreezeReadinessItem {
+  name: string;
+  status: string;
+  note: string;
+}
+
+export const emergencyFreezeReadiness: EmergencyFreezeReadinessItem[] = [
+  { name: 'Emergency Freeze Control', status: 'Available', note: 'diagnostic-runtime-emergency-freeze control record exists (default DISENGAGED).' },
+  { name: 'Queue Gate', status: 'Protected', note: 'All 7 execution-bearing dispatch paths fail closed when the freeze is engaged.' },
+  { name: 'Delivery Gate', status: 'Protected', note: 'Frozen pending execution messages are excluded and permanently invalidated at HAL fetch.' },
+  { name: 'Release Authority', status: 'Owner Only', note: 'Engage is owner/admin; release is owner only.' },
+  { name: 'HAL Cancellation', status: 'Not Implemented / Not Required', note: 'No HAL cancel command exists — containment is terminal, never a cancel signal.' },
+];

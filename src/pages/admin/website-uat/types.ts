@@ -92,6 +92,28 @@ export interface UatSession {
   environment_name?: string;
 }
 
+export interface UatTestCase {
+  id: string;
+  project_id: string | null;
+  job_id: string | null;
+  scenario_id: string;
+  suite_id: string | null;
+  title: string | null;
+  description: string | null;
+  reference: string;
+  preconditions: string | null;
+  steps: Array<{ action: string; expected: string }>;
+  expected_result: string;
+  required_evidence: string | null;
+  is_required: boolean;
+  priority: string;
+  case_status: string;
+  sort_order: number;
+  estimated_minutes: number | null;
+  archived_at: string | null;
+  created_at: string;
+}
+
 export interface UatTestCaseResult {
   id: string;
   assignment_test_case_id: string;

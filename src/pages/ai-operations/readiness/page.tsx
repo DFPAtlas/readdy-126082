@@ -3,6 +3,7 @@ import Phase2Closeout from '@/pages/ai-operations/readiness/components/Phase2Clo
 import RuntimeHealthReadiness from '@/pages/ai-operations/readiness/components/RuntimeHealthReadiness';
 import RuntimeConfigurationReadiness from '@/pages/ai-operations/readiness/components/RuntimeConfigurationReadiness';
 import RuntimeSafetyReadiness from '@/pages/ai-operations/readiness/components/RuntimeSafetyReadiness';
+import RuntimeEmergencyFreezeReadiness from '@/pages/ai-operations/readiness/components/RuntimeEmergencyFreezeReadiness';
 import RuntimeBoundaryReadiness from '@/pages/ai-operations/readiness/components/RuntimeBoundaryReadiness';
 import RuntimeN8nConnectorReadiness from '@/pages/ai-operations/readiness/components/RuntimeN8nConnectorReadiness';
 import RuntimeMessageBoundaryReadiness from '@/pages/ai-operations/readiness/components/RuntimeMessageBoundaryReadiness';
@@ -64,6 +65,9 @@ export default function ReadinessPage() {
 
       {/* Phase 3 runtime safety controls + pilot execution gate */}
       <RuntimeSafetyReadiness />
+
+      {/* Phase 3 emergency runtime freeze (Prompt 24C — governance capability) */}
+      <RuntimeEmergencyFreezeReadiness />
 
       {/* Phase 3 trusted runtime boundary (deny-only gateway) */}
       <RuntimeBoundaryReadiness />

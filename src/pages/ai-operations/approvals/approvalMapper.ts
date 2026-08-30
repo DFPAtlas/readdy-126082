@@ -53,6 +53,13 @@ function conditionsToString(value: unknown): string {
   return '';
 }
 
+// Parse the JSONB `conditions` column back to an object (approval-gated runs
+// store a structured object, not a string array). Never throws.
+function conditionsObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  return {};
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -176,6 +183,7 @@ export function mapApprovalRowToRecord(
   // Latest decision fields (authoritative live base).
   const decisionType = row.decision ? (row.decision as ApprovalDecisionType) : (d.decision?.type ?? null);
   const decisionConditions = row.conditions != null ? conditionsToString(row.conditions) : (d.decision?.conditions ?? '');
+  const condObj = conditionsObject(row.conditions);
 
   // Merge live base metadata into the nested `requirement` object so the
   // ApprovalRequirements section reflects live approver counts.
@@ -251,6 +259,10 @@ export function mapApprovalRowToRecord(
     requirement,
     separation: d.separation,
     history: d.history,
+    approvalRevoked: condObj.approval_revoked === true,
+    approvalRevokedAt: typeof condObj.approval_revoked_at === 'string' ? condObj.approval_revoked_at : null,
+    approvalRevokedBy: typeof condObj.approval_revoked_by === 'string' ? condObj.approval_revoked_by : null,
+    approverEligibilityInvalidated: condObj.approver_eligibility_invalidated === true,
     executionGate: d.executionGate,
   };
 }

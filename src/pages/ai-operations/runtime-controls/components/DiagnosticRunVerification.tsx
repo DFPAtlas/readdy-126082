@@ -11,7 +11,7 @@ import {
   DIAGNOSTIC_RUN_NODE_KEY,
   DIAGNOSTIC_RUN_PROBE_ID,
   DIAGNOSTIC_RUN_MODE,
-  DIAGNOSTIC_RUN_TASK_KEY,
+  DIAGNOSTIC_RUN_TASK_KEY_PREFIX,
   DIAGNOSTIC_RUN_TASK_NAME,
   DIAGNOSTIC_RUN_AGENT_KEY,
   DIAGNOSTIC_RUN_AGENT_NAME,
@@ -133,7 +133,7 @@ export default function DiagnosticRunVerification() {
         <h4 className="text-[11px] font-label font-semibold text-foreground-500 uppercase tracking-wide mb-2">Fixed Diagnostic Configuration</h4>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px bg-background-200/60 rounded-md overflow-hidden">
           <ConfigStat label="Task" value={DIAGNOSTIC_RUN_TASK_NAME} />
-          <ConfigStat label="Task key" value={DIAGNOSTIC_RUN_TASK_KEY} mono />
+          <ConfigStat label="Task key prefix" value={DIAGNOSTIC_RUN_TASK_KEY_PREFIX} mono />
           <ConfigStat label="Agent" value={DIAGNOSTIC_RUN_AGENT_NAME} />
           <ConfigStat label="Agent key" value={DIAGNOSTIC_RUN_AGENT_KEY} mono />
           <ConfigStat label="Tool" value={DIAGNOSTIC_RUN_TOOL_NAME} />
@@ -200,7 +200,7 @@ export default function DiagnosticRunVerification() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               <DetailStat label="Run ID" value={status.run.runKey || '—'} mono />
-              <DetailStat label="Task key" value={status.task?.taskKey || DIAGNOSTIC_RUN_TASK_KEY} mono />
+              <DetailStat label="Task key" value={status.task?.taskKey || '—'} mono />
               <DetailStat label="Run status" value={status.run.status || '—'} tone={runStatus === 'completed' ? 'emerald' : runStatus === 'failed' ? 'red' : undefined} />
               <DetailStat label="Task status" value={status.task?.status || '—'} />
               <DetailStat label="Current step" value={`${status.run.currentStep ?? 0} / ${totalSteps}`} />
