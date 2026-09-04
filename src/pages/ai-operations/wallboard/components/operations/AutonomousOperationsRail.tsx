@@ -59,14 +59,14 @@ export default function AutonomousOperationsRail() {
   const rows = getMasterAgentRows();
 
   return (
-    <aside className="flex flex-col min-h-0 h-full">
-      <div className="ow-panel flex flex-col flex-1 min-h-0">
+    <aside className="flex flex-col min-h-0 h-full w-full max-w-full overflow-hidden">
+      <div className="ow-panel flex flex-col flex-1 min-h-0 w-full max-w-full overflow-hidden">
         <div className="shrink-0 px-3 py-2 border-b border-cyan-400/15">
           <div className="text-[10px] font-label tracking-[0.24em] text-cyan-300">AUTONOMOUS OPERATIONS</div>
           <div className="text-[8px] font-label tracking-[0.18em] text-slate-500 mt-0.5">MASTER AGENTS STATUS</div>
         </div>
 
-        <div className="shrink-0 grid grid-cols-[86px_58px_1fr_auto] gap-2 px-3 py-1 border-b border-cyan-400/10">
+        <div className="shrink-0 grid grid-cols-[minmax(72px,86px)_58px_minmax(0,1fr)_40px] gap-2 px-3 py-1 border-b border-cyan-400/10">
           <span className="text-[7.5px] font-label tracking-[0.18em] text-slate-500">AGENT</span>
           <span className="text-[7.5px] font-label tracking-[0.18em] text-slate-500">STATE</span>
           <span className="text-[7.5px] font-label tracking-[0.18em] text-slate-500">TASK</span>

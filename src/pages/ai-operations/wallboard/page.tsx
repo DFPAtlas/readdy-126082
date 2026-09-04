@@ -104,10 +104,10 @@ function OperationsWall() {
     <div className="ow-root ow-grid h-screen w-screen overflow-hidden flex flex-col select-none">
       <OperationsWallHeader />
 
-      <main className="flex-1 min-h-0 grid grid-cols-[248px_1fr_312px] gap-3 px-3 py-3">
+      <main className="ow-wall-main">
         <CoreSystemsRail />
 
-        <div className="flex flex-col min-h-0">
+        <div className="ow-wall-centre">
           <GroupOperationsCenter />
           <ComputeCore />
         </div>

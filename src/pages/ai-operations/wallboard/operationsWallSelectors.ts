@@ -39,7 +39,7 @@ import { getDatabaseSummary } from '@/pages/ai-operations/wallboard/databaseSele
 import { getHalHost, getTronHost, getOllamaStatus, getOversight } from '@/pages/ai-operations/wallboard/aiInfraSelectors';
 import { getRuntimeHealthState, HAL_RUNTIME_NODE_KEY } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import { getVectorHealth } from '@/pages/ai-operations/wallboard/knowledgeSelectors';
-import { getSecuritySummary } from '@/pages/ai-operations/wallboard/securitySelectors';
+import { getSecuritySummary, getSecurityConnections } from '@/pages/ai-operations/wallboard/securitySelectors';
 import { getSitesServicesList } from '@/pages/ai-operations/wallboard/siteSelectors';
 
 // ---------------------------------------------------------------------------
@@ -662,6 +662,30 @@ export function getMasterAgentRows(): MasterAgentRow[] {
 // Compute Core (HAL / TRON)
 // ---------------------------------------------------------------------------
 
+export interface ComputeGauge {
+  label: string;
+  value: string;
+  percent: number | null;
+  accent: 'orange' | 'cyan';
+}
+
+/** Ring tone for a TRON HUD instrument (count/status dials, never a percentage). */
+export type TronDialTone = 'violet' | 'green' | 'amber' | 'red' | 'muted';
+
+/** A TRON HUD instrument — a non-percentage circular dial (count or status). */
+export interface TronDial {
+  key: 'models' | 'ollama';
+  /** Main label under the dial (MODELS / OLLAMA). */
+  label: string;
+  /** Centre value (a count, or LIVE / ALERT / N/C / —). Never a percentage. */
+  value: string;
+  /** Status line beneath the label (LOCAL / HEALTHY / DEGRADED / NOT CONFIGURED / UNKNOWN). */
+  statusLabel: string;
+  tone: TronDialTone;
+  /** Whether valid live telemetry exists (drives orbit/pulse + LIVE dot). */
+  live: boolean;
+}
+
 export interface ComputeNode {
   name: string;
   subtitle: string;
@@ -669,6 +693,8 @@ export interface ComputeNode {
   stateLabel: string;
   tone: Tone;
   metrics: { label: string; value: string }[];
+  gauges?: ComputeGauge[];
+  dials?: TronDial[];
 }
 
 /** Read HAL's own bridge heartbeat host telemetry (CPU / memory). Never falls
@@ -711,11 +737,23 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
     stateLabel: halState === 'nominal' ? 'NOMINAL' : halState === 'offline' ? 'OFFLINE' : 'DEGRADED',
     tone: halTone,
     metrics: [
-      { label: 'CPU', value: hostTelemetry.cpuPercent != null ? `${hostTelemetry.cpuPercent.toFixed(1)}%` : 'NOT MONITORED' },
-      { label: 'MEMORY', value: hostTelemetry.memoryPercent != null ? `${hostTelemetry.memoryPercent.toFixed(1)}%` : 'NOT MONITORED' },
       { label: 'AGENT RUNS', value: String(m.activeRuns) },
       { label: 'UPTIME', value: halHost?.lastHeartbeat ? 'LINKED' : '—' },
       { label: 'STATE', value: halState === 'nominal' ? 'NOMINAL' : halState === 'offline' ? 'OFFLINE' : 'DEGRADED' },
+    ],
+    gauges: [
+      {
+        label: 'CPU',
+        value: hostTelemetry.cpuPercent != null ? `${hostTelemetry.cpuPercent.toFixed(1)}%` : '—',
+        percent: hostTelemetry.cpuPercent,
+        accent: 'orange',
+      },
+      {
+        label: 'MEMORY',
+        value: hostTelemetry.memoryPercent != null ? `${hostTelemetry.memoryPercent.toFixed(1)}%` : '—',
+        percent: hostTelemetry.memoryPercent,
+        accent: 'cyan',
+      },
     ],
   };
 
@@ -738,6 +776,52 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
         : tronState === 'offline' ? 'OFFLINE'
           : 'DEGRADED';
 
+  // TRON dial data — resolved ONLY from TRON's own host/status (never HAL).
+  const modelCount = tronHost?.ollamaModelCount ?? null;
+  const ollamaStatus = tronHost?.ollamaStatus ?? null;
+
+  let ollamaValue: string;
+  let ollamaStatusLabel: string;
+  let ollamaTone: TronDialTone;
+  let ollamaLive: boolean;
+  switch (ollamaStatus) {
+    case 'healthy':
+      ollamaValue = 'LIVE';
+      ollamaStatusLabel = 'HEALTHY';
+      ollamaTone = 'green';
+      ollamaLive = true;
+      break;
+    case 'degraded':
+      ollamaValue = 'ALERT';
+      ollamaStatusLabel = 'DEGRADED';
+      ollamaTone = 'amber';
+      ollamaLive = true;
+      break;
+    case 'unavailable':
+      ollamaValue = 'ALERT';
+      ollamaStatusLabel = 'UNKNOWN';
+      ollamaTone = 'red';
+      ollamaLive = true;
+      break;
+    case 'not_configured':
+      ollamaValue = 'N/C';
+      ollamaStatusLabel = 'NOT CONFIGURED';
+      ollamaTone = 'muted';
+      ollamaLive = false;
+      break;
+    case 'unknown':
+      ollamaValue = 'ALERT';
+      ollamaStatusLabel = 'UNKNOWN';
+      ollamaTone = 'muted';
+      ollamaLive = false;
+      break;
+    default:
+      ollamaValue = '—';
+      ollamaStatusLabel = 'UNKNOWN';
+      ollamaTone = 'muted';
+      ollamaLive = false;
+  }
+
   const tron: ComputeNode = {
     name: 'TRON',
     subtitle: 'AI OVERWATCH',
@@ -745,11 +829,27 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
     stateLabel: tronStateLabel,
     tone: tronTone,
     metrics: [
-      { label: 'MODELS', value: tronHost?.ollamaModelCount != null ? `${tronHost.ollamaModelCount} LOCAL` : '—' },
-      { label: 'OLLAMA', value: tronHost?.ollamaStatus === 'healthy' ? 'HEALTHY' : tronHost?.ollamaStatus != null ? tronHost.ollamaStatus.toUpperCase() : '—' },
       { label: 'N8N', value: tronHost?.n8nStatus === 'not_configured' ? 'NOT CONFIGURED' : tronHost?.n8nStatus != null ? tronHost.n8nStatus.toUpperCase() : '—' },
       { label: 'HEARTBEAT', value: tronHost == null ? '—' : tronHost.state === 'healthy' ? 'LIVE' : tronHost.state === 'stale' ? 'STALE' : 'OFFLINE' },
       { label: 'STATE', value: tronStateLabel },
+    ],
+    dials: [
+      {
+        key: 'models',
+        label: 'MODELS',
+        value: modelCount != null ? String(modelCount) : '—',
+        statusLabel: 'LOCAL',
+        tone: modelCount != null ? 'violet' : 'muted',
+        live: modelCount != null,
+      },
+      {
+        key: 'ollama',
+        label: 'OLLAMA',
+        value: ollamaValue,
+        statusLabel: ollamaStatusLabel,
+        tone: ollamaTone,
+        live: ollamaLive,
+      },
     ],
   };
 
@@ -788,36 +888,86 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
 // AI Systems status (compact diagnostic block beside TRON)
 // ---------------------------------------------------------------------------
 
+export type AiSystemKey = 'model_status' | 'vector_db' | 'tools' | 'safety';
+
 export interface AiSystemRow {
+  key: AiSystemKey;
   label: string;
+  /** Primary status word (OPERATIONAL / CONNECTED / ONLINE / NOMINAL / …). */
   value: string;
   tone: Tone;
+  /** Live numeric count for the circular instruments (null → em-dash). */
+  count: number | null;
+  /** Whether the instrument/row has valid live state (drives glow/pulse). */
+  live: boolean;
 }
 
 export function getAiSystemsStatus(): AiSystemRow[] {
   const ollama = getOllamaStatus();
   const vector = getVectorHealth();
   const security = getSecuritySummary();
+  const connections = getSecurityConnections();
   const data = getGroupLiveData();
 
+  // MODEL STATUS — OPERATIONAL / DEGRADED / OFFLINE / UNKNOWN.
   const modelTone: Tone = ollama.state === 'healthy' ? 'green' : ollama.state === 'offline' ? 'red' : ollama.state === 'stale' ? 'amber' : 'muted';
   const modelValue = ollama.state === 'healthy' ? 'OPERATIONAL' : ollama.state === 'offline' ? 'OFFLINE' : ollama.state === 'stale' ? 'DEGRADED' : 'UNKNOWN';
+  const modelLive = ollama.state === 'healthy' || ollama.state === 'offline' || ollama.state === 'stale';
 
-  const vectorConnected = vector.embedded > 0;
-  const vectorValue = vectorConnected ? `CONNECTED · ${vector.embedded} EMB` : 'NO DATA';
+  // VECTOR DB — embedding count + CONNECTED / DISCONNECTED / UNKNOWN.
+  // embedding_state is a registry marker, not a live vector-store health
+  // check, so a reachable source with zero embeddings is honestly DISCONNECTED
+  // and a missing source is UNKNOWN (never fabricated).
+  const vectorAvailable = data.availability.knowledge;
+  const vectorCount = vectorAvailable ? vector.embedded : null;
+  let vectorValue: string;
+  let vectorTone: Tone;
+  if (!vectorAvailable) {
+    vectorValue = 'UNKNOWN';
+    vectorTone = 'muted';
+  } else if (vector.embedded > 0) {
+    vectorValue = 'CONNECTED';
+    vectorTone = 'green';
+  } else {
+    vectorValue = 'DISCONNECTED';
+    vectorTone = 'red';
+  }
 
-  const toolsCount = data.tools.filter((t) => !['disabled', 'not_configured'].includes(t.status ?? '')).length;
-  const toolsValue = toolsCount > 0 ? `ONLINE · ${toolsCount}` : 'NO DATA';
-  const toolsTone: Tone = toolsCount > 0 ? 'green' : 'muted';
+  // TOOLS — online count + ONLINE / DEGRADED / UNAVAILABLE / UNKNOWN.
+  const onlineTools = connections.filter((c) => c.state === 'healthy').length;
+  const degradedTools = connections.filter((c) => c.state === 'warning' || c.state === 'degraded').length;
+  const unavailableTools = connections.filter((c) => c.state === 'offline').length;
+  const toolsAvailable = data.availability.tools;
+  const toolsCount = toolsAvailable ? onlineTools : null;
+  let toolsValue: string;
+  let toolsTone: Tone;
+  if (!toolsAvailable) {
+    toolsValue = 'UNKNOWN';
+    toolsTone = 'muted';
+  } else if (onlineTools > 0) {
+    toolsValue = 'ONLINE';
+    toolsTone = 'green';
+  } else if (degradedTools > 0) {
+    toolsValue = 'DEGRADED';
+    toolsTone = 'amber';
+  } else if (unavailableTools > 0) {
+    toolsValue = 'UNAVAILABLE';
+    toolsTone = 'red';
+  } else {
+    toolsValue = 'UNKNOWN';
+    toolsTone = 'muted';
+  }
 
-  const safetyValue = security.sourceState === 'unavailable' ? 'UNKNOWN' : security.tone === 'emerald' ? 'ENABLED' : security.tone === 'amber' ? 'DEGRADED' : 'ALERT';
-  const safetyTone: Tone = security.sourceState === 'unavailable' ? 'muted' : security.tone === 'emerald' ? 'green' : security.tone === 'amber' ? 'amber' : 'red';
+  // SAFETY — NOMINAL / ALERT / UNKNOWN (degraded collapses into ALERT).
+  const safetyUnavailable = security.sourceState === 'unavailable';
+  const safetyValue = safetyUnavailable ? 'UNKNOWN' : security.tone === 'emerald' ? 'NOMINAL' : 'ALERT';
+  const safetyTone: Tone = safetyUnavailable ? 'muted' : security.tone === 'emerald' ? 'green' : 'red';
 
   return [
-    { label: 'MODEL STATUS', value: modelValue, tone: modelTone },
-    { label: 'VECTOR DB', value: vectorValue, tone: vectorConnected ? 'green' : 'muted' },
-    { label: 'TOOLS', value: toolsValue, tone: toolsTone },
-    { label: 'SAFETY', value: safetyValue, tone: safetyTone },
+    { key: 'model_status', label: 'MODEL STATUS', value: modelValue, tone: modelTone, count: null, live: modelLive },
+    { key: 'vector_db', label: 'VECTOR DB', value: vectorValue, tone: vectorTone, count: vectorCount, live: vectorAvailable && vector.embedded > 0 },
+    { key: 'tools', label: 'TOOLS', value: toolsValue, tone: toolsTone, count: toolsCount, live: toolsAvailable && onlineTools > 0 },
+    { key: 'safety', label: 'SAFETY', value: safetyValue, tone: safetyTone, count: null, live: !safetyUnavailable },
   ];
 }
 

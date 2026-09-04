@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   useRuntimeBridge,
   refreshBridge,
@@ -11,6 +11,9 @@ import {
   deriveBridgeNodeState,
   BRIDGE_NODE_STATE_META,
 } from '@/lib/ai-operations/runtimeBridge';
+import { simulateRuntimeHeartbeat } from '@/lib/ai-operations/runtimeHeartbeatSimulate';
+import { getTronHost } from '@/pages/ai-operations/wallboard/aiInfraSelectors';
+import { TRON_RUNTIME_NODE_KEY, refreshHistory } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 
 function formatTime(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -38,6 +41,30 @@ export default function PrivateRuntimeBridge() {
   const stateMeta = BRIDGE_NODE_STATE_META[nodeState];
   const latest = summary?.latest ?? null;
   const comparison = catalogue.comparison;
+
+  // Test control: simulate TRON's Ollama state (degraded ↔ healthy) without raw SQL.
+  const [simulateOn, setSimulateOn] = useState<boolean>(
+    () => getTronHost()?.ollamaStatus === 'degraded',
+  );
+  const [simBusy, setSimBusy] = useState(false);
+  const [simError, setSimError] = useState<string | null>(null);
+
+  const handleSimulateToggle = async () => {
+    const next = !simulateOn;
+    setSimulateOn(next);
+    setSimBusy(true);
+    setSimError(null);
+    const res = await simulateRuntimeHeartbeat(TRON_RUNTIME_NODE_KEY, next ? 'degraded' : 'healthy');
+    if (res.error) {
+      setSimError(res.error);
+      setSimulateOn(!next);
+    } else {
+      void refreshHistory();
+      void refreshBridge();
+      void refreshOllamaCatalogue();
+    }
+    setSimBusy(false);
+  };
 
   const stateTone =
     stateMeta.tone === 'emerald' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
@@ -82,6 +109,26 @@ export default function PrivateRuntimeBridge() {
             <span className="text-xs font-heading font-semibold text-emerald-400 whitespace-nowrap">{comparison.registeredPresent}</span>
           </div>
         )}
+
+        <div className="mt-2.5 pt-2 border-t border-background-200/60">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[9px] font-label text-foreground-600 uppercase tracking-wide whitespace-nowrap">Simulate degraded</p>
+              {simError && <p className="text-[8px] text-red-400 truncate mt-0.5">{simError}</p>}
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={simulateOn}
+              aria-label="Simulate degraded Ollama state for TRON"
+              onClick={handleSimulateToggle}
+              disabled={simBusy}
+              className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors cursor-pointer disabled:opacity-50 ${simulateOn ? 'bg-amber-500' : 'bg-background-300/70'}`}
+            >
+              <span className={`inline-block h-3 w-3 transform rounded-full bg-background-50 transition-transform ${simulateOn ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+        </div>
       </div>
     </section>
   );

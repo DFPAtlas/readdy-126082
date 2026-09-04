@@ -48,7 +48,7 @@ export default function SiteModule({ site }: { site: SiteModuleData }) {
 
   return (
     <div
-      className="ow-panel relative flex flex-col px-3 py-2 min-w-0"
+      className="ow-panel ow-site-module relative flex flex-col px-3 py-2 min-w-0"
       style={{ borderColor: accent.borderColor, boxShadow: dim ? 'none' : accent.boxShadow, opacity: dim ? 0.55 : 1 }}
     >
       {/* left accent bar */}
@@ -94,7 +94,7 @@ export default function SiteModule({ site }: { site: SiteModuleData }) {
 function HubModule({ site, accent, health }: { site: SiteModuleData; accent: { color: string; borderColor: string; boxShadow: string }; health: string }) {
   return (
     <div
-      className="ow-panel ow-glow-cyan relative flex flex-col items-center justify-center px-4 py-2 min-w-0"
+      className="ow-panel ow-glow-cyan ow-site-module relative flex flex-col items-center justify-center px-4 py-2 min-w-0"
       style={{ borderColor: accent.borderColor }}
     >
       <span className="absolute left-0 top-0 w-full h-[2px]" style={{ background: `linear-gradient(90deg, ${accent.color}, transparent)` }} />

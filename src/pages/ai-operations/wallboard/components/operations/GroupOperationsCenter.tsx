@@ -122,29 +122,29 @@ export default function GroupOperationsCenter() {
       </div>
 
       {/* Site network */}
-      <div className="relative flex-1 min-h-0 mt-3 grid grid-rows-3 gap-2">
+      <div className="ow-site-network relative flex-1 min-h-0 mt-3 grid grid-rows-3 gap-2">
         <NetworkSpine />
 
-        <div className="grid grid-cols-3 gap-2 min-h-0">
+        <div className="ow-site-row grid grid-cols-3 gap-2">
           {top.map((s) => (
-            <div key={s.key} className="min-h-0">
+            <div key={s.key} className="ow-site-cell">
               <SiteModule site={s} />
             </div>
           ))}
         </div>
 
-        <div className="grid grid-cols-3 gap-2 min-h-0">
+        <div className="ow-site-row grid grid-cols-3 gap-2">
           {middle.map((s) => (
-            <div key={s.key} className="min-h-0">
+            <div key={s.key} className="ow-site-cell">
               <SiteModule site={s} />
             </div>
           ))}
         </div>
 
-        <div className="grid grid-cols-3 gap-2 min-h-0">
-          <div className="min-h-0"><SiteModule site={byKey('vowora')} /></div>
-          <div className="min-h-0" />
-          <div className="min-h-0"><SiteModule site={byKey('synqoro')} /></div>
+        <div className="ow-site-row grid grid-cols-3 gap-2">
+          <div className="ow-site-cell"><SiteModule site={byKey('vowora')} /></div>
+          <div className="ow-site-cell" />
+          <div className="ow-site-cell"><SiteModule site={byKey('synqoro')} /></div>
         </div>
       </div>
     </section>
