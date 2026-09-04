@@ -577,12 +577,57 @@
   animation: ow-safety-pulse 2.8s ease-in-out infinite;
 }
 
+/* --- Live Events ticker (bottom strip) ----------------------------------- */
+
+.ow-ticker {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.ow-ticker-track {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  width: max-content;
+  will-change: transform;
+  animation: ow-ticker-scroll 50s linear infinite;
+}
+
+@keyframes ow-ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.ow-ticker-mask {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 56px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.ow-ticker-mask-left {
+  left: 0;
+  background: linear-gradient(90deg, #03060d 0%, rgba(3, 6, 13, 0) 100%);
+}
+
+.ow-ticker-mask-right {
+  right: 0;
+  background: linear-gradient(270deg, #03060d 0%, rgba(3, 6, 13, 0) 100%);
+}
+
 /* Respect reduced-motion users. */
 @media (prefers-reduced-motion: reduce) {
   .ow-pulse, .ow-alert, .ow-alert-row, .ow-ring, .ow-flow, .ow-flow-y, .ow-arrive, .ow-progress,
   .ow-relay-packet-hal, .ow-relay-ack-hal, .ow-relay-packet-tron, .ow-relay-ack-tron, .ow-relay-core,
   .ow-dial-pulse, .ow-tron-orbit, .ow-tron-pulse,
-  .ow-ai-vector-orbit, .ow-ai-tools-point, .ow-safety-alert, .ow-safety-pulse {
+  .ow-ai-vector-orbit, .ow-ai-tools-point, .ow-safety-alert, .ow-safety-pulse,
+  .ow-ticker-track {
     animation: none !important;
   }
   .ow-dial, .ow-tron-dial, .ow-ai-instrument {

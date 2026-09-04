@@ -77,12 +77,13 @@ export function brandHex(color: BrandColor): string {
 // Health / state tone helpers
 // ---------------------------------------------------------------------------
 
-export type Tone = 'green' | 'amber' | 'red' | 'muted';
+export type Tone = 'green' | 'amber' | 'red' | 'cyan' | 'muted';
 
 const TONE_HEX: Record<Tone, string> = {
   green: '#22c55e',
   amber: '#f59e0b',
   red: '#ef4444',
+  cyan: '#22d3ee',
   muted: '#64748b',
 };
 
@@ -975,31 +976,83 @@ export function getAiSystemsStatus(): AiSystemRow[] {
 // Live events (bottom strip)
 // ---------------------------------------------------------------------------
 
+export type EventProvenance = 'live' | 'simulated';
+
 export interface LiveEventItem {
   id: string;
   time: string;
+  site: string;
   text: string;
   tone: Tone;
+  sourceType: string;
+  provenance: EventProvenance;
 }
 
-function eventTone(status: string | null | undefined): Tone {
+// Machine action names → readable ticker labels. Unknown actions fall through
+// to a safe generic humanisation (never raw JSON or payloads).
+const EVENT_LABELS: Record<string, string> = {
+  runtime_bridge: 'Runtime bridge heartbeat received',
+  simulate_runtime_heartbeat: 'Runtime heartbeat test recorded',
+  approval_created: 'Approval created',
+  run_completed: 'Agent run completed',
+  run_failed: 'Agent run failed',
+  site_status_changed: 'Site status changed',
+};
+
+function humaniseEvent(action: string | null | undefined): string {
+  const raw = (action ?? '').trim();
+  if (!raw) return 'Activity recorded';
+  if (EVENT_LABELS[raw]) return EVENT_LABELS[raw];
+  return raw.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+}
+
+// Severity colour from BOTH outcome/status and severity. Critical/high must
+// never surface as green even when the outcome reads informational.
+function eventTone(status: string | null | undefined, severity: string | null | undefined): Tone {
+  const sev = (severity ?? '').toLowerCase();
   const s = (status ?? '').toLowerCase();
-  if (['failed', 'blocked', 'error', 'critical'].includes(s)) return 'red';
-  if (['warning', 'degraded'].includes(s)) return 'amber';
-  return 'green';
+
+  if (sev === 'critical' || sev === 'high') return 'red';
+  if (['failed', 'blocked', 'error', 'critical', 'rejected'].includes(s)) return 'red';
+  if (sev === 'warning' || sev === 'medium') return 'amber';
+  if (['warning', 'degraded', 'partial'].includes(s)) return 'amber';
+  if (['success', 'completed', 'healthy', 'approved', 'resolved'].includes(s)) return 'green';
+  if (sev === 'info' || sev === 'low' || ['informational', 'info'].includes(s)) return 'cyan';
+  return 'muted';
 }
 
-export function getLiveEvents(limit = 6): LiveEventItem[] {
-  const events = getWallboardActivity(limit + 2);
-  return events.slice(0, limit).map((e) => {
-    const time = e.timestamp ? e.timestamp.split(' · ').pop() ?? e.timestamp : '—';
-    return {
+/**
+ * Recent operational events for the Live Events ticker, deduplicated for
+ * display. Reads up to the newest 40 audit events, collapses repeated
+ * heartbeats (same site + sourceType + normalised event + status +
+ * provenance) to their newest occurrence, and returns up to `limit` unique
+ * events. Display-only — no audit record is modified.
+ */
+export function getLiveEvents(limit = 12): LiveEventItem[] {
+  const events = getWallboardActivity(40);
+  const seen = new Set<string>();
+  const unique: LiveEventItem[] = [];
+
+  for (const e of events) {
+    const provenance: EventProvenance = e.event === 'simulate_runtime_heartbeat' ? 'simulated' : 'live';
+    const text = humaniseEvent(e.event);
+    const normEvent = (e.event ?? '').toLowerCase();
+    const key = `${e.site}|${e.sourceType}|${normEvent}|${e.status ?? ''}|${provenance}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push({
       id: e.id,
-      time,
-      text: `${e.site} ${e.event}`,
-      tone: eventTone(e.status),
-    };
-  });
+      time: e.timestamp ? e.timestamp.split(' · ').pop() ?? e.timestamp : '—',
+      site: e.site,
+      text,
+      tone: eventTone(e.status, e.severity),
+      sourceType: e.sourceType,
+      provenance,
+    });
+    if (unique.length >= limit) break;
+  }
+
+  return unique;
 }
 
 // ---------------------------------------------------------------------------
