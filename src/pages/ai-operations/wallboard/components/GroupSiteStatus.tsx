@@ -1,10 +1,12 @@
 import { Link } from 'react-router-dom';
-import { getWallboardSites } from '@/pages/ai-operations/wallboard/selectors';
+import { getWallboardSites, getWallboardStatus } from '@/pages/ai-operations/wallboard/selectors';
+import UnavailableState from '@/pages/ai-operations/wallboard/components/UnavailableState';
 import { SITE_STATUS, AI_STATUS } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
 export default function GroupSiteStatus() {
   const sites = getWallboardSites();
+  const status = getWallboardStatus().sites;
 
   return (
     <section className="h-full bg-background-100 border border-background-200/60 rounded-lg flex flex-col min-h-0">
@@ -13,6 +15,7 @@ export default function GroupSiteStatus() {
         <span className="text-xs font-label text-foreground-600">{sites.length} sites</span>
       </div>
 
+      {status === 'live' ? (
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-3 overflow-y-auto">
         {sites.map((site) => {
           const op = SITE_STATUS[site.operationalStatus];
@@ -61,6 +64,9 @@ export default function GroupSiteStatus() {
           );
         })}
       </div>
+      ) : (
+        <UnavailableState label="Site registry unavailable." />
+      )}
     </section>
   );
 }

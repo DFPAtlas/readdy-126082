@@ -22,9 +22,11 @@ const navItems = [
   { to: '/build-process', icon: 'ri-list-check-3', label: 'Build Process' },
   { to: '/project-budget', icon: 'ri-money-pound-circle-line', label: 'Project Budget' },
   { to: '/system-status', icon: 'ri-pulse-line', label: 'System Status' },
+  { to: '/ai-operations/wallboard', icon: 'ri-radar-line', label: 'Operations Wall' },
   { to: '/activity-log', icon: 'ri-history-line', label: 'Activity' },
   { to: '/github', icon: 'ri-github-fill', label: 'GitHub' },
   { to: '/ai-operations', icon: 'ri-robot-2-line', label: 'AI Operations' },
+  { to: '/help', icon: 'ri-question-line', label: 'Help Centre' },
 ];
 
 const uatNavItems = [

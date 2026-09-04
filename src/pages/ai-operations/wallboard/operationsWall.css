@@ -1,0 +1,146 @@
+/* ============================================================================
+   DFP COMMAND — OPERATIONS WALL
+   Command-centre theme for the full-screen read-only wall display.
+
+   Deliberately a fixed dark technical palette (near-black navy, cyan
+   structural lines, restrained orange rails) — this is NOT the StyleSystem
+   palette; it is the approved command-centre aesthetic for the office wall.
+   ============================================================================ */
+
+.ow-root {
+  background:
+    radial-gradient(1200px 700px at 50% -10%, rgba(34, 211, 238, 0.06), transparent 60%),
+    radial-gradient(900px 600px at 100% 110%, rgba(251, 146, 60, 0.05), transparent 55%),
+    linear-gradient(180deg, #050a14 0%, #04070f 55%, #03060d 100%);
+  color: #dbe4f0;
+}
+
+/* Structural background grid (very subtle, low opacity). */
+.ow-grid {
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+/* Panel base — dark interior, thin cyan edge, clipped/chamfered corners. */
+.ow-panel {
+  position: relative;
+  background: linear-gradient(160deg, rgba(14, 24, 42, 0.92) 0%, rgba(7, 13, 26, 0.96) 100%);
+  border: 1px solid rgba(34, 211, 238, 0.14);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+
+/* Corner accent ticks (orange) for a couple of structural anchors. */
+.ow-rail {
+  background: linear-gradient(180deg, rgba(251, 146, 60, 0.9), rgba(251, 146, 60, 0.25));
+}
+
+/* Subtle cyan edge glow used sparingly on key panels. */
+.ow-glow-cyan {
+  box-shadow: 0 0 18px 0 rgba(34, 211, 238, 0.08), inset 0 0 22px 0 rgba(34, 211, 238, 0.03);
+}
+
+/* Thin divider line (horizontal). */
+.ow-hairline {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.25), transparent);
+}
+
+/* --- Micro-animations ----------------------------------------------------- */
+
+/* Calm status pulse — healthy systems breathe very slowly. */
+@keyframes ow-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.ow-pulse {
+  animation: ow-pulse 3.2s ease-in-out infinite;
+}
+
+/* Critical alert pulse — noticeable but not strobing. */
+@keyframes ow-alert {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px 0 rgba(239, 68, 68, 0.5); }
+  50% { opacity: 0.55; box-shadow: 0 0 14px 0 rgba(239, 68, 68, 0.9); }
+}
+.ow-alert {
+  animation: ow-alert 1.8s ease-in-out infinite;
+}
+
+/* Pinned failed-row glow — pulses the red halo only, keeping text fully readable. */
+@keyframes ow-alert-row {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.28); }
+  50% { box-shadow: 0 0 16px 2px rgba(239, 68, 68, 0.55); }
+}
+.ow-alert-row {
+  animation: ow-alert-row 2.4s ease-in-out infinite;
+}
+
+/* Estate ring — slow breathing. */
+@keyframes ow-ring {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.5; }
+}
+.ow-ring {
+  animation: ow-ring 4s ease-in-out infinite;
+}
+
+/* Network packet — a soft band travelling along a line (very subtle, slow). */
+@keyframes ow-flow {
+  0% { transform: translateX(-30%); opacity: 0; }
+  15% { opacity: 0.7; }
+  85% { opacity: 0.7; }
+  100% { transform: translateX(130%); opacity: 0; }
+}
+.ow-flow {
+  animation: ow-flow 11s linear infinite;
+}
+
+/* Vertical network packet (trunk movement) — mirrored, slower. */
+@keyframes ow-flow-y {
+  0% { transform: translateY(-30%); opacity: 0; }
+  15% { opacity: 0.6; }
+  85% { opacity: 0.6; }
+  100% { transform: translateY(130%); opacity: 0; }
+}
+.ow-flow-y {
+  animation: ow-flow-y 13s linear infinite;
+}
+
+/* HAL ↔ TRON link pulse. */
+@keyframes ow-link {
+  0% { transform: translateX(0); opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateX(100%); opacity: 0; }
+}
+.ow-link {
+  animation: ow-link 3.6s ease-in-out infinite;
+}
+
+/* Event arrival transition. */
+@keyframes ow-arrive {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.ow-arrive {
+  animation: ow-arrive 0.5s ease-out both;
+}
+
+/* Gentle progress activity shimmer. */
+@keyframes ow-progress {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.ow-progress {
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.25), rgba(34, 211, 238, 0.7), rgba(34, 211, 238, 0.25));
+  background-size: 200% 100%;
+  animation: ow-progress 2.4s linear infinite;
+}
+
+/* Respect reduced-motion users. */
+@media (prefers-reduced-motion: reduce) {
+  .ow-pulse, .ow-alert, .ow-alert-row, .ow-ring, .ow-flow, .ow-flow-y, .ow-link, .ow-arrive, .ow-progress {
+    animation: none !important;
+  }
+}

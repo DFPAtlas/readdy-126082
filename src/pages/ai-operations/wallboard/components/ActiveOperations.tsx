@@ -1,21 +1,24 @@
 import { Link } from 'react-router-dom';
-import { getActiveOperations } from '@/pages/ai-operations/wallboard/selectors';
+import { getActiveOperations, getWallboardStatus } from '@/pages/ai-operations/wallboard/selectors';
+import UnavailableState from '@/pages/ai-operations/wallboard/components/UnavailableState';
 import { RISK_LEVEL } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
 export default function ActiveOperations() {
   const items = getActiveOperations();
+  const status = getWallboardStatus().operations;
 
   return (
     <section className="h-full bg-background-100 border border-background-200/60 rounded-lg flex flex-col min-h-0">
       <div className="px-4 py-3 border-b border-background-200/60 flex items-center justify-between shrink-0">
         <h3 className="text-sm font-label font-semibold text-foreground-200 uppercase tracking-wide">Active Operations</h3>
         <span className="inline-flex items-center gap-1.5 text-[11px] font-label text-accent-400">
-          <span className="w-1.5 h-1.5 rounded-full bg-accent-400 animate-pulse"></span>
+          <span className="w-1.5 h-1.5 rounded-full bg-accent-400"></span>
           {items.length} active
         </span>
       </div>
 
+      {status === 'live' ? (
       <div className="divide-y divide-background-200/40 overflow-y-auto">
         {items.map((item) => {
           const risk = RISK_LEVEL[item.risk as keyof typeof RISK_LEVEL];
@@ -51,6 +54,9 @@ export default function ActiveOperations() {
           );
         })}
       </div>
+      ) : (
+        <UnavailableState label="Run registry unavailable." />
+      )}
     </section>
   );
 }

@@ -1,20 +1,23 @@
-import { getWallboardActivity } from '@/pages/ai-operations/wallboard/selectors';
+import { getWallboardActivity, getWallboardStatus } from '@/pages/ai-operations/wallboard/selectors';
+import UnavailableState from '@/pages/ai-operations/wallboard/components/UnavailableState';
 import { SEVERITY, ACTIVITY_SOURCE_LABELS } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
 export default function LiveActivity() {
   const events = getWallboardActivity(10);
+  const status = getWallboardStatus().activity;
 
   return (
     <section className="h-full bg-background-100 border border-background-200/60 rounded-lg flex flex-col min-h-0">
       <div className="px-4 py-3 border-b border-background-200/60 flex items-center justify-between shrink-0">
         <h3 className="text-sm font-label font-semibold text-foreground-200 uppercase tracking-wide">Live Activity</h3>
         <span className="inline-flex items-center gap-1.5 text-[11px] font-label text-emerald-400">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
           Live
         </span>
       </div>
 
+      {status === 'live' ? (
       <div className="divide-y divide-background-200/40 overflow-y-auto">
         {events.map((event) => {
           const severity = SEVERITY[event.severity];
@@ -36,6 +39,9 @@ export default function LiveActivity() {
           );
         })}
       </div>
+      ) : (
+        <UnavailableState label="Activity feed unavailable." />
+      )}
     </section>
   );
 }

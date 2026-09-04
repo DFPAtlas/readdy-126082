@@ -171,6 +171,9 @@ export interface UatApproval {
   exceptions: string | null;
   conditions: string | null;
   decision_reason: string | null;
+  revoked_at: string | null;
+  revoked_by: string | null;
+  revocation_reason: string | null;
   created_at: string;
   updated_at: string;
   project_name?: string;

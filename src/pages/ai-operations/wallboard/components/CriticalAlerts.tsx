@@ -1,10 +1,12 @@
 import { Link } from 'react-router-dom';
-import { getCriticalAlerts } from '@/pages/ai-operations/wallboard/selectors';
+import { getCriticalAlerts, getWallboardStatus } from '@/pages/ai-operations/wallboard/selectors';
+import UnavailableState from '@/pages/ai-operations/wallboard/components/UnavailableState';
 import { SEVERITY } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
 export default function CriticalAlerts() {
   const alerts = getCriticalAlerts(6);
+  const status = getWallboardStatus().alerts;
 
   return (
     <section className="h-full bg-background-100 border border-red-500/20 rounded-lg flex flex-col min-h-0">
@@ -13,6 +15,7 @@ export default function CriticalAlerts() {
         <span className="text-xs font-label text-red-400">{alerts.length} active</span>
       </div>
 
+      {status === 'live' ? (
       <div className="divide-y divide-background-200/40 overflow-y-auto">
         {alerts.map((alert) => {
           const severity = SEVERITY[alert.severity];
@@ -39,6 +42,9 @@ export default function CriticalAlerts() {
           );
         })}
       </div>
+      ) : (
+        <UnavailableState label="Alert registry unavailable." />
+      )}
     </section>
   );
 }

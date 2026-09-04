@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { DashboardSummary } from './types';
 import WebsiteRegisterTab from './components/WebsiteRegisterTab';
@@ -51,7 +51,7 @@ function SummaryCard({ label, value, icon, accent }: { label: string; value: num
 }
 
 export default function WebsiteUatDashboard() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') ?? 'register';
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,7 +119,7 @@ export default function WebsiteUatDashboard() {
     return (
       <div className="flex flex-col items-center justify-center py-20">
         <p className="text-foreground-400 text-sm mb-4">{error}</p>
-        <button onClick={loadSummary} className="bg-accent-500 text-background-950 px-4 py-2 rounded-full text-sm font-medium hover:bg-accent-400 transition-colors whitespace-nowrap cursor-pointer">
+        <button type="button" onClick={loadSummary} className="bg-accent-500 text-background-950 px-4 py-2 rounded-full text-sm font-medium hover:bg-accent-400 transition-colors whitespace-nowrap cursor-pointer">
           Retry
         </button>
       </div>
@@ -145,20 +145,25 @@ export default function WebsiteUatDashboard() {
       </div>
 
       <div className="bg-background-100 border border-background-200/60 rounded-lg p-1 flex flex-wrap gap-1">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setSearchParams({ tab: tab.key })}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors cursor-pointer whitespace-nowrap ${
-              activeTab === tab.key
-                ? 'bg-accent-500/10 text-accent-400 font-medium'
-                : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-50'
-            }`}
-          >
-            <i className={`${tab.icon} w-4 h-4 flex items-center justify-center`}></i>
-            {tab.label}
-          </button>
-        ))}
+        {TABS.map((tab) => {
+          const isActive = activeTab === tab.key;
+          return (
+            <Link
+              key={tab.key}
+              to={`?tab=${tab.key}`}
+              replace
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors cursor-pointer whitespace-nowrap no-underline ${
+                isActive
+                  ? 'bg-accent-500/10 text-accent-400 font-medium'
+                  : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-50'
+              }`}
+              aria-current={isActive ? 'page' : undefined}
+            >
+              <i className={`${tab.icon} w-4 h-4 flex items-center justify-center`}></i>
+              {tab.label}
+            </Link>
+          );
+        })}
       </div>
 
       <div className="min-h-[400px]">

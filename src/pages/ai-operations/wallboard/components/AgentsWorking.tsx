@@ -1,10 +1,12 @@
 import { Link } from 'react-router-dom';
-import { getWallboardAgents } from '@/pages/ai-operations/wallboard/selectors';
+import { getWallboardAgents, getWallboardStatus } from '@/pages/ai-operations/wallboard/selectors';
+import UnavailableState from '@/pages/ai-operations/wallboard/components/UnavailableState';
 import { AGENT_STATUS, AGENT_HEALTH } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
 export default function AgentsWorking() {
   const agents = getWallboardAgents(6);
+  const status = getWallboardStatus().agents;
 
   return (
     <section className="h-full bg-background-100 border border-background-200/60 rounded-lg flex flex-col min-h-0">
@@ -13,6 +15,7 @@ export default function AgentsWorking() {
         <span className="text-xs font-label text-foreground-600">{agents.length} shown</span>
       </div>
 
+      {status === 'live' ? (
       <div className="divide-y divide-background-200/40 overflow-y-auto">
         {agents.map((a) => {
           const status = AGENT_STATUS[a.status];
@@ -36,6 +39,9 @@ export default function AgentsWorking() {
           );
         })}
       </div>
+      ) : (
+        <UnavailableState label="Agent registry unavailable." />
+      )}
     </section>
   );
 }

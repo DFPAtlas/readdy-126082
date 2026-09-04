@@ -2132,6 +2132,23 @@ export function acknowledgeAiBudgetEvent(
   );
 }
 
+// --- Online presence (wallboard) ----------------------------------------------
+
+// Aggregate online-visitor presence from the platform's built-in analytics
+// (public_analytics_events). Privacy-safe: only anonymous session hashes are
+// counted (distinct sessions), never names/emails/IPs/user-ids. `site_domain`
+// is the normalised public domain attributed to an event (via
+// source_metadata/safe_metadata) and is mapped to the ai_sites registry by the
+// caller using the stable `domain` identifier.
+export interface OnlinePresenceRow {
+  site_domain: string;
+  online_count: number;
+}
+
+export function getOnlinePresence(): Promise<AiOpsResult<OnlinePresenceRow[]>> {
+  return runQuery<OnlinePresenceRow[]>(supabase.rpc('wallboard_online_presence'));
+}
+
 // --- Re-exports for convenience ----------------------------------------------
 
 export type {

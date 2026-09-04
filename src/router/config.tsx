@@ -35,6 +35,7 @@ import SupportTeams from "@/pages/support-teams/page";
 import SupportRouting from "@/pages/support-routing/page";
 import SupportKnowledge from "@/pages/support-knowledge/page";
 import WebsiteUatDashboard from "@/pages/admin/website-uat/page";
+import UatApprovalDetailPage from "@/pages/admin/website-uat/approval/page";
 import SupportIntegrations from "@/pages/admin/support-integrations/page";
 import SupportIntegrationTestForm from "@/pages/admin/support-integrations/test-form/page";
 import UatAdminGuard from "@/components/feature/UatAdminGuard";
@@ -94,6 +95,7 @@ import WallboardPage from "@/pages/ai-operations/wallboard/page";
 import ReadinessPage from "@/pages/ai-operations/readiness/page";
 import RuntimeHealthPage from "@/pages/ai-operations/runtime-health/page";
 import RuntimeControlsPage from "@/pages/ai-operations/runtime-controls/page";
+import Help from "@/pages/help/page";
 
 const routes: RouteObject[] = [
   {
@@ -159,6 +161,7 @@ const routes: RouteObject[] = [
       { path: "team", element: <TeamPage /> },
       { path: "security", element: <Security /> },
       { path: "github", element: <GitHubPage /> },
+      { path: "help", element: <Help /> },
       { path: "support-tickets", element: <SupportTickets /> },
       { path: "support-tickets/preferences", element: <NotificationPreferences /> },
       { path: "support-tickets/reports", element: <SupportReports /> },
@@ -290,6 +293,7 @@ const routes: RouteObject[] = [
       { path: "ai-operations/runtime-controls", element: <RuntimeControlsPage /> },
       { path: "command-centre/tickets", element: <SupportTickets /> },
       { path: "admin/website-uat", element: <UatAdminGuard><WebsiteUatDashboard /></UatAdminGuard> },
+      { path: "admin/website-uat/approval/:approvalId", element: <UatAdminGuard><UatApprovalDetailPage /></UatAdminGuard> },
       { path: "admin/support-integrations", element: <SupportIntegrations /> },
       { path: "admin/support-integrations/test-form", element: <SupportIntegrationTestForm /> },
     ],

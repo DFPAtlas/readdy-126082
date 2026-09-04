@@ -28,7 +28,7 @@ export default function KpiStrip({ large = false }: { large?: boolean }) {
         {items.map((item) => (
           <div
             key={item.label}
-            className="bg-background-100 border border-background-200/60 rounded-lg px-3 py-3 flex flex-col justify-between min-h-[88px]"
+            className="bg-background-100 border border-background-200/60 rounded-lg px-3 py-3 flex flex-col justify-between min-h-[96px]"
           >
             <div className="flex items-center gap-2">
               <span className={`w-7 h-7 flex items-center justify-center rounded-md bg-background-200/50 ${item.tone}`}>
@@ -38,7 +38,7 @@ export default function KpiStrip({ large = false }: { large?: boolean }) {
                 {item.label}
               </p>
             </div>
-            <p className={`${large ? 'text-4xl' : 'text-3xl'} font-heading font-bold ${item.tone} leading-none tabular-nums mt-2`}>
+            <p className={`${large ? 'text-5xl' : 'text-4xl'} font-heading font-bold ${item.tone} leading-none tabular-nums mt-2`}>
               {item.value}
             </p>
           </div>

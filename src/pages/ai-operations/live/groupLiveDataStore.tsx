@@ -40,6 +40,7 @@ import type {
   AiBudgetRow,
   AiUsageCostRow,
   AiBudgetEventRow,
+  OnlinePresenceRow,
 } from '@/lib/ai-operations';
 import {
   getAiSites,
@@ -64,6 +65,7 @@ import {
   getAiBudgets,
   getAiUsageCosts,
   getAiBudgetEvents,
+  getOnlinePresence,
 } from '@/lib/ai-operations';
 
 // ---------------------------------------------------------------------------
@@ -98,6 +100,7 @@ export interface GroupAvailability {
   budgets: boolean;
   usageCosts: boolean;
   budgetEvents: boolean;
+  usersOnline: boolean;
 }
 
 export interface GroupLiveData {
@@ -129,6 +132,7 @@ export interface GroupLiveData {
   budgets: AiBudgetRow[];
   usageCosts: AiUsageCostRow[];
   budgetEvents: AiBudgetEventRow[];
+  presence: OnlinePresenceRow[];
   siteKeyByUuid: Map<string, string>;
   siteNameByUuid: Map<string, string>;
   agentKeyByUuid: Map<string, string>;
@@ -158,6 +162,7 @@ function emptyAvailability(): GroupAvailability {
     budgets: false,
     usageCosts: false,
     budgetEvents: false,
+    usersOnline: false,
   };
 }
 
@@ -190,6 +195,7 @@ function emptySnapshot(): GroupLiveData {
     budgets: [],
     usageCosts: [],
     budgetEvents: [],
+    presence: [],
     siteKeyByUuid: new Map(),
     siteNameByUuid: new Map(),
     agentKeyByUuid: new Map(),
@@ -284,6 +290,7 @@ export async function refreshGroupLiveData(): Promise<void> {
     budgetsRes,
     usageRes,
     budgetEventsRes,
+    presenceRes,
   ] = await Promise.all([
     getAiSites(),
     getAiAgents(),
@@ -307,6 +314,7 @@ export async function refreshGroupLiveData(): Promise<void> {
     getAiBudgets(),
     getAiUsageCosts(),
     getAiBudgetEvents(),
+    getOnlinePresence(),
   ]);
 
   const availability: GroupAvailability = {
@@ -331,6 +339,7 @@ export async function refreshGroupLiveData(): Promise<void> {
     budgets: !budgetsRes.error,
     usageCosts: !usageRes.error,
     budgetEvents: !budgetEventsRes.error,
+    usersOnline: !presenceRes.error,
   };
 
   const sites = (sitesRes.data ?? []).filter((r) => !isTestOrSandbox(r));
@@ -355,6 +364,7 @@ export async function refreshGroupLiveData(): Promise<void> {
   const budgets = budgetsRes.data ?? [];
   const usageCosts = usageRes.data ?? [];
   const budgetEvents = budgetEventsRes.data ?? [];
+  const presence = presenceRes.data ?? [];
 
   const { siteKeyByUuid, siteNameByUuid, agentKeyByUuid, agentNameByUuid } =
     buildResolutionMaps(sites, agents);
@@ -397,6 +407,7 @@ export async function refreshGroupLiveData(): Promise<void> {
     budgets,
     usageCosts,
     budgetEvents,
+    presence,
     siteKeyByUuid,
     siteNameByUuid,
     agentKeyByUuid,

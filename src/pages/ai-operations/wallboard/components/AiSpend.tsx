@@ -1,8 +1,10 @@
-import { getWallboardSpend } from '@/pages/ai-operations/wallboard/selectors';
+import { getWallboardSpend, getWallboardStatus } from '@/pages/ai-operations/wallboard/selectors';
+import UnavailableState from '@/pages/ai-operations/wallboard/components/UnavailableState';
 import { BUDGET_STATUS } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
 export default function AiSpend() {
+  const status = getWallboardStatus().costs;
   const spend = getWallboardSpend();
   const budget = BUDGET_STATUS[spend.budgetStatus as keyof typeof BUDGET_STATUS];
 
@@ -13,6 +15,7 @@ export default function AiSpend() {
         <StatusPill tone={budget.tone} label={budget.label} />
       </div>
 
+      {status === 'live' ? (
       <div className="px-4 py-3">
         <p className="text-3xl font-heading font-bold text-foreground-100 tabular-nums">{spend.total}</p>
         <div className="mt-3 space-y-1.5 text-sm">
@@ -30,6 +33,9 @@ export default function AiSpend() {
           </div>
         </div>
       </div>
+      ) : (
+        <UnavailableState label="Cost data unavailable." />
+      )}
     </section>
   );
 }

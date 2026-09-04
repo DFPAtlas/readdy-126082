@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { UatApproval, APPROVAL_STATUS_COLORS } from '../types';
 
@@ -49,9 +50,13 @@ export default function ApprovalQueueTab() {
   return (
     <div className="grid gap-3">
       {approvals.map((a) => (
-        <div key={a.id} className="bg-background-100 border border-background-200/60 rounded-lg p-4">
+        <Link
+          key={a.id}
+          to={`/admin/website-uat/approval/${a.id}`}
+          className="bg-background-100 border border-background-200/60 rounded-lg p-4 hover:border-background-300/60 transition-colors duration-150 no-underline block"
+        >
           <div className="flex items-start justify-between gap-3 mb-2">
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h4 className="text-sm font-semibold text-foreground-50">{a.project_name}</h4>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${APPROVAL_STATUS_COLORS[a.status] || 'bg-foreground-500/10 text-foreground-500'}`}>{a.status}</span>
@@ -80,7 +85,7 @@ export default function ApprovalQueueTab() {
               </span>
             )}
           </div>
-        </div>
+        </Link>
       ))}
     </div>
   );
