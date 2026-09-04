@@ -12,4 +12,4 @@ COPY src/main.ts ./src/main.ts
 
 # Runs with only --allow-env (config) and --allow-net (outbound HTTPS + local
 # health checks). NO shell/filesystem/arbitrary-execution permissions.
-CMD ["run", "--allow-env", "--allow-net", "src/main.ts"]
+CMD ["run", "--allow-env", "--allow-net", "--allow-read=/proc/stat,/proc/meminfo", "src/main.ts"]

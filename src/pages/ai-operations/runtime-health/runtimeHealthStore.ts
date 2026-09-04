@@ -47,6 +47,10 @@ import {
 } from '@/lib/ai-operations/runtimeHealthSource';
 import { createAiAuditEvent } from '@/lib/ai-operations';
 
+/** Stable runtime-node keys (multi-runtime bridge registry). */
+export const HAL_RUNTIME_NODE_KEY = 'atlas-hal-runtime-01';
+export const TRON_RUNTIME_NODE_KEY = 'atlas-tron-runtime-01';
+
 interface RuntimeHealthState {
   /** Latest session result per stable key (connection_key / provider_key). */
   results: Record<string, RuntimeHealthResult>;
@@ -61,7 +65,15 @@ interface RuntimeHealthState {
   rules: AiRuntimeMonitoringRuleRow[];
   latestBySystem: LatestBySystem;
   effectivePaths: Record<string, EffectivePath>;
+  /** All registered runtime bridge nodes (multi-runtime). */
+  bridgeNodes: AiRuntimeBridgeNode[];
+  /** node_key → node lookup (multi-runtime). */
+  bridgeNodesByKey: Record<string, AiRuntimeBridgeNode>;
+  /** node_key → newest heartbeat for that node (multi-runtime). */
+  latestHeartbeatByNodeKey: Record<string, AiRuntimeBridgeHeartbeat>;
+  /** HAL compatibility alias — HAL node only (operational automation path). */
   bridgeNode: AiRuntimeBridgeNode | null;
+  /** HAL compatibility alias — HAL heartbeat only. */
   latestHeartbeat: AiRuntimeBridgeHeartbeat | null;
   historyLoading: boolean;
   historyError: string | null;
@@ -84,6 +96,9 @@ const EMPTY: RuntimeHealthState = {
   rules: [],
   latestBySystem: new Map(),
   effectivePaths: {},
+  bridgeNodes: [],
+  bridgeNodesByKey: {},
+  latestHeartbeatByNodeKey: {},
   bridgeNode: null,
   latestHeartbeat: null,
   historyLoading: false,
@@ -165,8 +180,27 @@ export async function refreshHistory(): Promise<void> {
   const nodes = nodesRes.data ?? [];
   const heartbeats = heartbeatsRes.data ?? [];
 
-  const bridgeNode = nodes[0] ?? null;
-  const latestHeartbeat = heartbeats[0] ?? null;
+  // Multi-runtime: keep every node, index by node_key, and pair each heartbeat
+  // to its own node by node_id (heartbeats arrive newest-first, so the first
+  // heartbeat seen per node is that node's newest).
+  const bridgeNodes = nodes;
+  const bridgeNodesByKey: Record<string, AiRuntimeBridgeNode> = {};
+  const nodeIdToKey: Record<string, string> = {};
+  for (const node of nodes) {
+    bridgeNodesByKey[node.node_key] = node;
+    nodeIdToKey[node.id] = node.node_key;
+  }
+  const latestHeartbeatByNodeKey: Record<string, AiRuntimeBridgeHeartbeat> = {};
+  for (const heartbeat of heartbeats) {
+    const nodeKey = nodeIdToKey[heartbeat.node_id];
+    if (!nodeKey || latestHeartbeatByNodeKey[nodeKey]) continue;
+    latestHeartbeatByNodeKey[nodeKey] = heartbeat;
+  }
+
+  // HAL compatibility aliases — resolve strictly by HAL key, never fall back to
+  // nodes[0] / heartbeats[0] when HAL is absent.
+  const bridgeNode = bridgeNodesByKey[HAL_RUNTIME_NODE_KEY] ?? null;
+  const latestHeartbeat = latestHeartbeatByNodeKey[HAL_RUNTIME_NODE_KEY] ?? null;
 
   const cloudEdge = deriveLatestBySystem(checks);
   const localBridge = deriveLocalBridgeHealth(latestHeartbeat);
@@ -180,6 +214,9 @@ export async function refreshHistory(): Promise<void> {
     rules,
     latestBySystem,
     effectivePaths,
+    bridgeNodes,
+    bridgeNodesByKey,
+    latestHeartbeatByNodeKey,
     bridgeNode,
     latestHeartbeat,
     historyLoading: false,

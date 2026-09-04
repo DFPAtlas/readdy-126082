@@ -5,13 +5,16 @@ import {
   type SiteModule as SiteModuleData,
 } from '@/pages/ai-operations/wallboard/operationsWallSelectors';
 
-function Metric({ label, value, color }: { label: string; value: string; color: string }) {
+function Metric({ label, value, color, sub }: { label: string; value: string; color: string; sub?: string }) {
   return (
     <div className="flex flex-col items-center px-6 leading-none">
       <span className="font-mono text-[22px] font-semibold tabular-nums" style={{ color }}>
         {value}
       </span>
       <span className="text-[8px] font-label tracking-[0.22em] text-slate-500 mt-1 whitespace-nowrap">{label}</span>
+      {sub ? (
+        <span className="text-[7px] font-label tracking-[0.14em] text-slate-600 mt-1 whitespace-nowrap">{sub}</span>
+      ) : null}
     </div>
   );
 }
@@ -22,7 +25,8 @@ function Divider() {
 
 function EstateRing({ percent }: { percent: number | null }) {
   const healthy = percent != null && percent >= 100;
-  const ringColor = healthy ? '#22c55e' : percent != null && percent >= 60 ? '#f59e0b' : '#ef4444';
+  const ringColor =
+    percent == null ? '#64748b' : healthy ? '#22c55e' : percent >= 60 ? '#f59e0b' : '#ef4444';
   const sweep = percent == null ? 0 : Math.max(0, Math.min(100, percent));
 
   return (
@@ -39,7 +43,7 @@ function EstateRing({ percent }: { percent: number | null }) {
       <div className="flex flex-col leading-tight">
         <span className="text-[9px] font-label tracking-[0.2em] text-slate-400 whitespace-nowrap">ESTATE</span>
         <span className="text-[9px] font-label tracking-[0.2em]" style={{ color: ringColor }}>
-          ONLINE
+          {percent == null ? 'NOT CONFIGURED' : 'ONLINE'}
         </span>
       </div>
     </div>
@@ -67,8 +71,8 @@ function NetworkSpine() {
       <span className="absolute left-1/2 top-[16.5%] -translate-x-1/2 w-1.5 h-1.5 rounded-full" style={{ background: 'rgba(34,211,238,0.7)', boxShadow: '0 0 6px #22d3ee' }} />
       <span className="absolute left-1/2 bottom-[7%] -translate-x-1/2 w-1.5 h-1.5 rounded-full" style={{ background: 'rgba(34,211,238,0.7)', boxShadow: '0 0 6px #22d3ee' }} />
 
-      {/* slow packets along the spine + trunk */}
-      <span className="ow-flow absolute left-[8%] right-[8%] top-1/2 h-[2px]" style={{ background: 'rgba(103,232,249,0.45)' }} />
+      {/* slow packets — horizontal along the upper rail + vertical trunk */}
+      <span className="ow-flow absolute left-[8%] right-[8%] top-[16.5%] h-[2px]" style={{ background: 'rgba(103,232,249,0.45)' }} />
       <span className="ow-flow-y absolute left-1/2 top-[7%] bottom-[7%] w-[2px]" style={{ background: 'rgba(103,232,249,0.4)' }} />
     </div>
   );
@@ -100,7 +104,12 @@ export default function GroupOperationsCenter() {
         </div>
 
         <div className="flex items-center flex-1 justify-center min-w-0">
-          <Metric label="SITES ONLINE" value={`${metrics.sitesOnline}/${metrics.sitesTotal}`} color="#22d3ee" />
+          <Metric
+            label="SITES ONLINE"
+            value={`${metrics.sitesOnline}/${metrics.sitesConfigured}`}
+            color="#22d3ee"
+            sub={`${metrics.sitesConfigured} CONFIGURED · ${metrics.sitesNotConfigured} PENDING`}
+          />
           <Divider />
           <Metric label="USERS ACTIVE" value={metrics.usersActive == null ? '—' : String(metrics.usersActive)} color="#4ade80" />
           <Divider />

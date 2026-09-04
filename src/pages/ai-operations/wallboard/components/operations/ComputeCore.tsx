@@ -14,7 +14,7 @@ function NodeMetrics({ node, accentColor }: { node: ComputeNode; accentColor: st
           <span className="text-[8px] font-label tracking-[0.16em] text-slate-500 whitespace-nowrap">{m.label}</span>
           <span
             className="font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap"
-            style={{ color: m.value === 'NOT MONITORED' || m.value === 'NOT CONNECTED' || m.value === '—' ? '#475569' : accentColor }}
+            style={{ color: m.value === 'NOT MONITORED' || m.value === 'NOT CONNECTED' || m.value === 'NOT CONFIGURED' || m.value === '—' ? '#475569' : accentColor }}
           >
             {m.value}
           </span>
@@ -68,6 +68,7 @@ export default function ComputeCore() {
   const halColor = hal.tone === 'green' ? '#fb923c' : toneHex(hal.tone);
   const tronColor = '#a78bfa';
   const linkColor = toneHex(link.tone);
+  const relayMode = link.tone === 'green' ? 'active' : link.tone === 'amber' ? 'degraded' : 'idle';
 
   return (
     <section className="shrink-0 mt-3">
@@ -95,14 +96,31 @@ export default function ComputeCore() {
           <NodeMetrics node={hal} accentColor={halColor} />
         </div>
 
-        {/* Link spine */}
-        <div className="flex flex-col items-center justify-center px-2 min-w-0">
-          <div className="text-center leading-tight">
-            <span className="font-mono text-[10px] tracking-[0.08em]" style={{ color: linkColor }}>HAL ↔ TRON</span>
-            <div className="text-[8px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: linkColor }}>{link.label}</div>
+        {/* DFP Relay — HAL ⇄ DFP COMMAND ⇄ TRON */}
+        <div className="flex flex-col items-center justify-center px-1 min-w-0">
+          <span className="font-mono text-[10px] tracking-[0.08em] whitespace-nowrap" style={{ color: linkColor }}>DFP RELAY</span>
+
+          <div className={`ow-relay ow-relay-${relayMode} mt-1.5`}>
+            <div className="ow-relay-track ow-relay-track-hal">
+              <span className="ow-relay-packet ow-relay-packet-hal" />
+              <span className="ow-relay-packet ow-relay-ack-hal" />
+            </div>
+            <div className="ow-relay-core">
+              <i className="ri-node-tree text-[14px]"></i>
+            </div>
+            <div className="ow-relay-track ow-relay-track-tron">
+              <span className="ow-relay-packet ow-relay-packet-tron" />
+              <span className="ow-relay-packet ow-relay-ack-tron" />
+            </div>
           </div>
-          <div className="relative w-full h-px mt-2" style={{ background: 'rgba(34,211,238,0.2)' }}>
-            <span className="ow-link absolute top-1/2 -translate-y-1/2 left-0 w-1.5 h-1.5 rounded-full" style={{ background: '#67e8f9', boxShadow: '0 0 8px #67e8f9' }} />
+
+          <span className="text-[6.5px] font-label tracking-[0.12em] text-slate-500 whitespace-nowrap mt-1.5">
+            HEARTBEATS · HEALTH · MODEL CATALOGUE
+          </span>
+
+          <div className="text-center leading-tight mt-1.5">
+            <div className="text-[8px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: linkColor }}>{link.label}</div>
+            <div className="text-[7px] font-label tracking-[0.14em] whitespace-nowrap mt-0.5" style={{ color: '#64748b' }}>{link.sublabel}</div>
           </div>
         </div>
 

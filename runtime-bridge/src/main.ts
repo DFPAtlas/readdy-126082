@@ -1539,6 +1539,89 @@ async function handleApprovalGatedDiagnosticProbe(m: ControlMessage): Promise<vo
   await report(status, verified, result.n8n, result.ollama, result.ollama_model_count, latencyMs, errorCategory);
 }
 
+// --- Host CPU + memory telemetry (DFP COMMAND — PROMPT 4) ---------------------
+// Reads aggregate CPU counters from the first "cpu" line in /proc/stat and
+// memory from /proc/meminfo. CPU utilisation is derived from the DELTA between
+// two samples; the first heartbeat returns null (no previous sample exists).
+// idle + iowait are counted as idle. Memory percent = (total - available) / total.
+//
+// A telemetry failure (missing file, invalid value, or missing --allow-read
+// permission) NEVER stops heartbeat delivery — it simply reports null.
+//
+// This NEVER collects process lists, environment variables, usernames, IP
+// addresses, filesystem listings, command output, prompts or workflow data.
+interface CpuSample {
+  total: number;
+  idle: number;
+}
+
+let previousCpuSample: CpuSample | null = null;
+
+async function readCpuSample(): Promise<CpuSample | null> {
+  try {
+    const stat = await Deno.readTextFile("/proc/stat");
+    const cpuLine = stat.split("\n").find((line) => line.startsWith("cpu "));
+    if (!cpuLine) return null;
+    // Format: "cpu  user nice system idle iowait irq softirq steal guest guest_nice"
+    const fields = cpuLine.trim().split(/\s+/).slice(1).map((f) => Number(f));
+    if (fields.length < 5 || fields.some((n) => !Number.isFinite(n))) return null;
+    const total = fields.reduce((sum, n) => sum + n, 0);
+    const idle = fields[3] + fields[4]; // idle + iowait
+    return { total, idle };
+  } catch {
+    return null;
+  }
+}
+
+function computeCpuPercent(prev: CpuSample, curr: CpuSample): number | null {
+  const deltaTotal = curr.total - prev.total;
+  const deltaIdle = curr.idle - prev.idle;
+  if (deltaTotal <= 0) return null;
+  const util = ((deltaTotal - deltaIdle) / deltaTotal) * 100;
+  if (!Number.isFinite(util)) return null;
+  return Math.max(0, Math.min(100, Math.round(util * 10) / 10));
+}
+
+async function readMemory(): Promise<{ used: number | null; total: number | null; percent: number | null }> {
+  try {
+    const meminfo = await Deno.readTextFile("/proc/meminfo");
+    const values: Record<string, number> = {};
+    for (const line of meminfo.split("\n")) {
+      const match = line.match(/^(\w+):\s+(\d+)\s*kB$/);
+      if (match) values[match[1]] = Number(match[2]) * 1024; // kB → bytes
+    }
+    const total = typeof values.MemTotal === "number" && values.MemTotal > 0 ? values.MemTotal : null;
+    const available = typeof values.MemAvailable === "number" && values.MemAvailable >= 0 ? values.MemAvailable : null;
+    if (total == null || available == null) return { used: null, total: null, percent: null };
+    const used = Math.max(0, total - available);
+    const percent = Math.round((used / total) * 1000) / 10;
+    return { used, total, percent: Math.max(0, Math.min(100, percent)) };
+  } catch {
+    return { used: null, total: null, percent: null };
+  }
+}
+
+async function sampleHostTelemetry(): Promise<Record<string, unknown>> {
+  const sampledAt = new Date().toISOString();
+
+  const cpuNow = await readCpuSample();
+  let cpuPercent: number | null = null;
+  if (previousCpuSample && cpuNow) {
+    cpuPercent = computeCpuPercent(previousCpuSample, cpuNow);
+  }
+  if (cpuNow) previousCpuSample = cpuNow;
+
+  const mem = await readMemory();
+
+  return {
+    cpu_percent: cpuPercent,
+    memory_percent: mem.percent,
+    memory_used_bytes: mem.used,
+    memory_total_bytes: mem.total,
+    sampled_at: sampledAt,
+  };
+}
+
 // --- Operations --------------------------------------------------------------
 async function handshake(): Promise<boolean> {
   const result = await sendRequest("handshake", {
@@ -1561,6 +1644,7 @@ async function handshake(): Promise<boolean> {
 async function heartbeat(): Promise<void> {
   const n8n = await checkN8n();
   const ollama = await checkOllama();
+  const host = await sampleHostTelemetry();
   const started = Date.now();
   const result = await sendRequest("heartbeat", {
     node_key: config.nodeKey,
@@ -1572,6 +1656,7 @@ async function heartbeat(): Promise<void> {
     local_services: {
       n8n: { configured: !!config.n8nUrl, status: n8n.status },
       ollama: { configured: !!config.ollamaUrl, status: ollama.status, model_count: ollama.models },
+      host,
     },
     safe_summary: `Bridge heartbeat: n8n=${n8n.status}, ollama=${ollama.status} (no inference, no workflow).`,
     capabilities: ["n8n_health", "n8n_metadata", "ollama_health", "ollama_models", "signed_callbacks", "outbound_https"],

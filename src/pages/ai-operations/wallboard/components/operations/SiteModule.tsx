@@ -2,6 +2,7 @@ import {
   brandAccent,
   toneHex,
   type SiteModule as SiteModuleData,
+  type SiteHeartbeat,
 } from '@/pages/ai-operations/wallboard/operationsWallSelectors';
 
 function metric(label: string, value: number | null, accent: string) {
@@ -12,6 +13,21 @@ function metric(label: string, value: number | null, accent: string) {
       </span>
       <span className="text-[7.5px] font-label tracking-[0.2em] text-slate-500 mt-0.5">{label}</span>
     </div>
+  );
+}
+
+/** Compact secondary heartbeat — monitoring signal, not operational state. */
+function Heartbeat({ hb }: { hb: SiteHeartbeat }) {
+  const tone = toneHex(hb.tone);
+  const live = hb.state === 'live';
+  return (
+    <span className="flex items-center gap-1 text-[8px] font-label tracking-[0.08em] whitespace-nowrap" style={{ color: tone }}>
+      <span className={`w-3 h-3 flex items-center justify-center ${live ? 'ow-pulse' : ''}`}>
+        <i className="ri-heart-pulse-line text-[11px]" style={{ color: tone }} />
+      </span>
+      <span className="font-semibold">{hb.label}</span>
+      {hb.age ? <span className="font-mono text-slate-500">· {hb.age}</span> : null}
+    </span>
   );
 }
 
@@ -63,6 +79,7 @@ export default function SiteModule({ site }: { site: SiteModuleData }) {
           className={`w-1.5 h-1.5 rounded-full ${site.stateTone === 'red' ? 'ow-alert' : site.stateTone === 'green' ? 'ow-pulse' : ''}`}
           style={{ background: health }}
         />
+        <span className="ml-auto"><Heartbeat hb={site.heartbeat} /></span>
       </div>
 
       <div className="flex items-center justify-between mt-2 pt-2 border-t border-cyan-400/10">
@@ -105,6 +122,7 @@ function HubModule({ site, accent, health }: { site: SiteModuleData; accent: { c
           className={`w-1.5 h-1.5 rounded-full ${site.stateTone === 'green' ? 'ow-pulse' : site.stateTone === 'red' ? 'ow-alert' : ''}`}
           style={{ background: health }}
         />
+        <Heartbeat hb={site.heartbeat} />
       </div>
 
       <div className="flex items-center justify-center gap-5 mt-2 pt-2 w-full border-t border-cyan-400/10">

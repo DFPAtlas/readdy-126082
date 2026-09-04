@@ -253,6 +253,30 @@ function safeIpClass(v: unknown): string | null {
   return allowed.has(s) ? s : null;
 }
 
+// PROMPT 4 — optional host CPU/memory telemetry whitelist. Bridges may now send
+// local_services.host with five fixed fields. Only finite, in-range values are
+// accepted; arbitrary nested host properties are rejected. Bridges that do not
+// yet send host telemetry remain fully compatible.
+function sanitiseHostTelemetry(localServices: Record<string, unknown>): Record<string, unknown> | null {
+  const host = localServices.host;
+  if (!host || typeof host !== "object") return null;
+  const h = host as Record<string, unknown>;
+
+  const percent = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100 ? v : null;
+  const bytes = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
+  const sampledAt = typeof h.sampled_at === "string" ? (h.sampled_at as string) : null;
+
+  return {
+    cpu_percent: percent(h.cpu_percent),
+    memory_percent: percent(h.memory_percent),
+    memory_used_bytes: bytes(h.memory_used_bytes),
+    memory_total_bytes: bytes(h.memory_total_bytes),
+    sampled_at: sampledAt,
+  };
+}
+
 function mapRuntimeFailureCategory(cat: string | null): string {
   if (cat && RUNTIME_FAILURE_CATEGORIES.has(cat)) return cat;
   return "runtime_result_failed";
@@ -1191,7 +1215,15 @@ serve(async (req: Request) => {
     const latencyMs = typeof body.latency_ms === "number" && body.latency_ms >= 0 ? body.latency_ms : null;
     const n8nStatus = ALLOWED_STATUSES.has(str(body.n8n_status)) ? str(body.n8n_status) : null;
     const ollamaStatus = ALLOWED_STATUSES.has(str(body.ollama_status)) ? str(body.ollama_status) : null;
-    const localServices = typeof body.local_services === "object" && body.local_services !== null ? body.local_services : null;
+    const localServicesRaw = typeof body.local_services === "object" && body.local_services !== null
+      ? (body.local_services as Record<string, unknown>)
+      : null;
+    let localServices: Record<string, unknown> | null = localServicesRaw;
+    if (localServices) {
+      const host = sanitiseHostTelemetry(localServices);
+      if (host) localServices.host = host;
+      else delete localServices.host;
+    }
     const capabilities = Array.isArray(body.capabilities)
       ? (body.capabilities as string[]).filter((c) => ALLOWED_CAPABILITIES.has(c))
       : [];

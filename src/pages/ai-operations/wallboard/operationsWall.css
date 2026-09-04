@@ -107,15 +107,143 @@
   animation: ow-flow-y 13s linear infinite;
 }
 
-/* HAL ↔ TRON link pulse. */
-@keyframes ow-link {
-  0% { transform: translateX(0); opacity: 0; }
-  15% { opacity: 1; }
-  85% { opacity: 1; }
-  100% { transform: translateX(100%); opacity: 0; }
+/* DFP relay — HAL ⇄ DFP COMMAND ⇄ TRON data-flow graphic.
+   Two outbound bridges exchange signed telemetry + acknowledgements through
+   DFP Command. No direct HAL → TRON control channel is implied. */
+.ow-relay {
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
-.ow-link {
-  animation: ow-link 3.6s ease-in-out infinite;
+
+.ow-relay-track {
+  position: relative;
+  width: 30px;
+  height: 2px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  transition: opacity 0.4s ease;
+}
+
+.ow-relay-track-hal {
+  background: linear-gradient(90deg, rgba(251, 146, 60, 0.55), rgba(34, 211, 238, 0.3));
+}
+
+.ow-relay-track-tron {
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.3), rgba(167, 139, 250, 0.55));
+}
+
+.ow-relay-core {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(34, 211, 238, 0.5);
+  background: radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.18), rgba(34, 211, 238, 0.04));
+  color: #67e8f9;
+  box-shadow: 0 0 12px 0 rgba(34, 211, 238, 0.25), inset 0 0 10px 0 rgba(34, 211, 238, 0.15);
+}
+
+.ow-relay-packet {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translate(-50%, -50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.ow-relay-packet-hal {
+  background: #fb923c;
+  box-shadow: 0 0 6px 1px rgba(251, 146, 60, 0.85);
+}
+
+.ow-relay-packet-tron {
+  background: #a78bfa;
+  box-shadow: 0 0 6px 1px rgba(167, 139, 250, 0.85);
+}
+
+.ow-relay-ack-hal,
+.ow-relay-ack-tron {
+  background: #67e8f9;
+  box-shadow: 0 0 6px 1px rgba(103, 232, 249, 0.85);
+}
+
+/* Packet paths — staggered so the four packets never move in lockstep.
+   ~4s cycles, calm, non-strobing. */
+@keyframes ow-relay-hal-to-dfp {
+  0% { left: 0; opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+@keyframes ow-relay-dfp-to-hal {
+  0% { left: 100%; opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { left: 0; opacity: 0; }
+}
+@keyframes ow-relay-tron-to-dfp {
+  0% { left: 100%; opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { left: 0; opacity: 0; }
+}
+@keyframes ow-relay-dfp-to-tron {
+  0% { left: 0; opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+/* Healthy — full data-flow animation. */
+.ow-relay-active .ow-relay-packet-hal {
+  animation: ow-relay-hal-to-dfp 4s linear infinite;
+}
+.ow-relay-active .ow-relay-ack-hal {
+  animation: ow-relay-dfp-to-hal 4s linear infinite;
+  animation-delay: 0.5s;
+}
+.ow-relay-active .ow-relay-packet-tron {
+  animation: ow-relay-tron-to-dfp 4s linear infinite;
+  animation-delay: 1s;
+}
+.ow-relay-active .ow-relay-ack-tron {
+  animation: ow-relay-dfp-to-tron 4s linear infinite;
+  animation-delay: 1.5s;
+}
+
+/* Degraded — packets stop, core glows a slow static amber. */
+@keyframes ow-relay-amber {
+  0%, 100% { box-shadow: 0 0 8px 0 rgba(245, 158, 11, 0.2), inset 0 0 8px 0 rgba(245, 158, 11, 0.1); }
+  50% { box-shadow: 0 0 16px 0 rgba(245, 158, 11, 0.45), inset 0 0 10px 0 rgba(245, 158, 11, 0.2); }
+}
+.ow-relay-degraded .ow-relay-track {
+  opacity: 0.45;
+}
+.ow-relay-degraded .ow-relay-core {
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fbbf24;
+  background: radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.16), rgba(245, 158, 11, 0.03));
+  animation: ow-relay-amber 3s ease-in-out infinite;
+}
+
+/* Offline / partial — all motion stops, tracks dim, core muted. */
+.ow-relay-idle .ow-relay-track {
+  opacity: 0.3;
+}
+.ow-relay-idle .ow-relay-core {
+  opacity: 0.5;
+  border-color: rgba(100, 116, 139, 0.4);
+  color: #64748b;
+  box-shadow: none;
+  background: radial-gradient(circle at 50% 50%, rgba(100, 116, 139, 0.12), rgba(100, 116, 139, 0.02));
 }
 
 /* Event arrival transition. */
@@ -140,7 +268,8 @@
 
 /* Respect reduced-motion users. */
 @media (prefers-reduced-motion: reduce) {
-  .ow-pulse, .ow-alert, .ow-alert-row, .ow-ring, .ow-flow, .ow-flow-y, .ow-link, .ow-arrive, .ow-progress {
+  .ow-pulse, .ow-alert, .ow-alert-row, .ow-ring, .ow-flow, .ow-flow-y, .ow-arrive, .ow-progress,
+  .ow-relay-packet-hal, .ow-relay-ack-hal, .ow-relay-packet-tron, .ow-relay-ack-tron, .ow-relay-core {
     animation: none !important;
   }
 }

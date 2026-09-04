@@ -10,8 +10,10 @@
 // Honesty rules honoured here:
 //   * A site without a registry row is surfaced as NOT CONFIGURED, never
 //     fabricated into a healthy state.
-//   * CPU / RAM / GPU / disk metrics have no authoritative source and are
-//     shown as "not monitored" — never invented percentages.
+//   * CPU / RAM come from live host telemetry relayed by HAL's bridge heartbeat
+//     (never invented; absent telemetry is honestly labelled NOT MONITORED).
+//   * GPU / disk metrics have no authoritative source and are shown as
+//     "not monitored".
 //   * TRON / Overwatch has no registry → NOT CONNECTED.
 //   * UNKNOWN / NO DATA is never reported as healthy.
 //   * No credentials, keys, PII, or message bodies are ever selected.
@@ -34,9 +36,11 @@ import {
 } from '@/pages/ai-operations/wallboard/infrastructureSelectors';
 import { getN8nInstances } from '@/pages/ai-operations/wallboard/n8nSelectors';
 import { getDatabaseSummary } from '@/pages/ai-operations/wallboard/databaseSelectors';
-import { getHalHost, getOllamaStatus, getOversight } from '@/pages/ai-operations/wallboard/aiInfraSelectors';
+import { getHalHost, getTronHost, getOllamaStatus, getOversight } from '@/pages/ai-operations/wallboard/aiInfraSelectors';
+import { getRuntimeHealthState, HAL_RUNTIME_NODE_KEY } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import { getVectorHealth } from '@/pages/ai-operations/wallboard/knowledgeSelectors';
 import { getSecuritySummary } from '@/pages/ai-operations/wallboard/securitySelectors';
+import { getSitesServicesList } from '@/pages/ai-operations/wallboard/siteSelectors';
 
 // ---------------------------------------------------------------------------
 // Brand colour palette
@@ -130,6 +134,74 @@ export interface SiteModule {
   users: number | null;
   agents: number | null;
   alerts: number | null;
+  heartbeat: SiteHeartbeat;
+}
+
+// ---------------------------------------------------------------------------
+// Site heartbeat (authoritative website monitor)
+// ---------------------------------------------------------------------------
+
+export type HeartbeatState = 'live' | 'stale' | 'no_heartbeat' | 'not_monitored';
+
+export interface SiteHeartbeat {
+  state: HeartbeatState;
+  label: string;
+  tone: Tone;
+  age: string | null;
+}
+
+const HEARTBEAT_LABEL: Record<HeartbeatState, string> = {
+  live: 'LIVE',
+  stale: 'STALE',
+  no_heartbeat: 'NO HEARTBEAT',
+  not_monitored: 'NOT MONITORED',
+};
+
+const HEARTBEAT_TONE: Record<HeartbeatState, Tone> = {
+  live: 'green',
+  stale: 'amber',
+  no_heartbeat: 'red',
+  not_monitored: 'muted',
+};
+
+// Authoritative monitor failure states (internal_monitored_websites.status).
+const FAILING_MONITOR_STATUS = new Set(['offline', 'error', 'failed']);
+
+function heartbeatAge(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  let diff = Date.now() - d.getTime();
+  if (diff < 0) diff = 0;
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  return `${Math.floor(hr / 24)}d`;
+}
+
+/**
+ * Resolve a monitoring heartbeat from the existing authoritative monitor join.
+ * LIVE requires a fresh, non-failing monitor reading — never inferred from the
+ * site's operational state alone.
+ */
+function resolveHeartbeat(
+  monitoring: 'monitored' | 'not_monitored' | 'stale',
+  monitorStatus: string | null,
+  lastCheck: string | null,
+): SiteHeartbeat {
+  if (monitoring === 'not_monitored') {
+    return { state: 'not_monitored', label: HEARTBEAT_LABEL.not_monitored, tone: HEARTBEAT_TONE.not_monitored, age: null };
+  }
+  if (monitoring === 'stale') {
+    return { state: 'stale', label: HEARTBEAT_LABEL.stale, tone: HEARTBEAT_TONE.stale, age: null };
+  }
+  if (monitorStatus && FAILING_MONITOR_STATUS.has(monitorStatus)) {
+    return { state: 'no_heartbeat', label: HEARTBEAT_LABEL.no_heartbeat, tone: HEARTBEAT_TONE.no_heartbeat, age: null };
+  }
+  return { state: 'live', label: HEARTBEAT_LABEL.live, tone: HEARTBEAT_TONE.live, age: heartbeatAge(lastCheck) };
 }
 
 function siteState(status: string | null | undefined): SiteModuleState {
@@ -174,13 +246,22 @@ export function getSiteModules(): SiteModule[] {
   const data = getGroupLiveData();
   const health = getSiteHealth();
   const presence = getUsersOnline();
+  const services = getSitesServicesList();
 
   const healthByKey = new Map(health.map((h) => [h.id, h]));
   const presenceByKey = new Map(presence.sites.map((s) => [s.siteKey, s.count]));
+  const servicesByKey = new Map(services.map((s) => [s.key, s]));
 
   return SITE_BRANDS.map((brand) => {
     const site = data.sites.find((s) => s.site_key === brand.siteKey);
     const card = brand.siteKey ? healthByKey.get(brand.siteKey) : undefined;
+    const service = brand.siteKey ? servicesByKey.get(brand.siteKey) : undefined;
+
+    const heartbeat = resolveHeartbeat(
+      service?.monitoring ?? 'not_monitored',
+      service?.monitorStatus ?? null,
+      service?.lastCheck ?? null,
+    );
 
     if (!site || !card) {
       return {
@@ -193,6 +274,7 @@ export function getSiteModules(): SiteModule[] {
         state: 'not_configured' as const,
         stateLabel: STATE_LABEL.not_configured,
         stateTone: STATE_TONE.not_configured,
+        heartbeat,
         users: null,
         agents: null,
         alerts: null,
@@ -210,6 +292,7 @@ export function getSiteModules(): SiteModule[] {
       state,
       stateLabel: STATE_LABEL[state],
       stateTone: STATE_TONE[state],
+      heartbeat,
       users: presenceByKey.get(brand.siteKey!) ?? null,
       agents: card.activeAgents,
       alerts: card.alerts,
@@ -223,7 +306,12 @@ export function getSiteModules(): SiteModule[] {
 
 export interface GroupMetrics {
   sitesOnline: number;
-  sitesTotal: number;
+  /** Configured sites (valid registry/health relationship) — operational denominator. */
+  sitesConfigured: number;
+  /** Full planned estate (all wall modules). */
+  sitesPlanned: number;
+  /** Planned modules without a live configuration. */
+  sitesNotConfigured: number;
   usersActive: number | null;
   agentsRunning: number;
   alerts: number;
@@ -236,14 +324,23 @@ export function getGroupMetrics(): GroupMetrics {
   const modules = getSiteModules();
 
   const onlineModules = modules.filter((x) => x.state === 'online').length;
-  const configured = modules.filter((x) => x.state !== 'not_configured').length;
+  const configuredModules = modules.filter((x) => x.state !== 'not_configured');
+  const configured = configuredModules.length;
+  const planned = modules.length;
+  const notConfigured = planned - configured;
 
+  // Operational estate is measured over CONFIGURED sites only, so the header
+  // `4/6 SITES ONLINE` and the ring `67%` share the same denominator. Planned
+  // (NOT CONFIGURED) modules stay visible in the planned count but never make
+  // operational health look worse than it is.
   const estatePercent =
     configured > 0 ? Math.round((onlineModules / configured) * 100) : null;
 
   return {
     sitesOnline: onlineModules,
-    sitesTotal: modules.length,
+    sitesConfigured: configured,
+    sitesPlanned: planned,
+    sitesNotConfigured: notConfigured,
     usersActive: presence.total,
     agentsRunning: m.agentsWorking,
     alerts: m.criticalAlerts,
@@ -326,6 +423,22 @@ function halStatus(): { status: CoreSystemStatus; tone: Tone } {
   }
 }
 
+function tronStatus(): { status: CoreSystemStatus; tone: Tone } {
+  const oversight = getOversight();
+  switch (oversight.state) {
+    case 'healthy':
+    case 'busy':
+      return { status: 'healthy', tone: 'green' };
+    case 'degraded':
+    case 'stale':
+      return { status: 'degraded', tone: 'amber' };
+    case 'offline':
+      return { status: 'offline', tone: 'red' };
+    default:
+      return { status: 'unknown', tone: 'muted' };
+  }
+}
+
 function n8nStatus(instanceIndex = 0): { status: CoreSystemStatus; tone: Tone } {
   const instances = getN8nInstances();
   const inst = instances[instanceIndex];
@@ -381,7 +494,7 @@ const CORE_STATUS_LABEL: Record<CoreSystemStatus, string> = {
 
 export function getCoreSystems(): CoreSystemRow[] {
   const hal = halStatus();
-  const oversight = getOversight();
+  const tron = tronStatus();
   const n8n1 = n8nStatus(0);
   const n8n2 = n8nStatus(1);
   const supabase = supabaseStatus();
@@ -398,13 +511,7 @@ export function getCoreSystems(): CoreSystemRow[] {
 
   return [
     make('hal', 'HAL', 'ORCHESTRATION NODE', hal.status, hal.tone),
-    make(
-      'tron',
-      'TRON',
-      'AI OVERWATCH',
-      oversight.state === 'not_connected' ? 'unknown' : 'unknown',
-      'muted',
-    ),
+    make('tron', 'TRON', 'AI OVERWATCH', tron.status, tron.tone),
     make('n8n-01', 'N8N-01', 'AUTOMATION ENGINE', n8n1.status, n8n1.tone),
     make('n8n-02', 'N8N-02', 'AUTOMATION ENGINE', n8n2.status, n8n2.tone),
     make('supabase', 'SUPABASE', 'DATA PLATFORM', supabase.status, supabase.tone),
@@ -564,11 +671,30 @@ export interface ComputeNode {
   metrics: { label: string; value: string }[];
 }
 
-export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: { label: string; tone: Tone } } {
+/** Read HAL's own bridge heartbeat host telemetry (CPU / memory). Never falls
+ *  back to TRON or any other node. Missing/invalid telemetry → null → NOT
+ *  MONITORED (never fabricated zero). */
+function getHalHostTelemetry(): { cpuPercent: number | null; memoryPercent: number | null } {
+  const health = getRuntimeHealthState();
+  const hb = health.latestHeartbeatByNodeKey[HAL_RUNTIME_NODE_KEY];
+  const host = hb?.local_services && typeof hb.local_services === 'object'
+    ? (hb.local_services as Record<string, unknown>).host
+    : null;
+  if (!host || typeof host !== 'object') return { cpuPercent: null, memoryPercent: null };
+  const h = host as Record<string, unknown>;
+  const num = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? (v as number) : null;
+  return {
+    cpuPercent: num(h.cpu_percent),
+    memoryPercent: num(h.memory_percent),
+  };
+}
+
+export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: { label: string; sublabel: string; tone: Tone } } {
   const halHost = getHalHost();
-  const oversight = getOversight();
-  const ollama = getOllamaStatus();
+  const tronHost = getTronHost();
   const m = getStatusBarMetrics();
+  const hostTelemetry = getHalHostTelemetry();
 
   const halState: ComputeNode['state'] =
     halHost == null ? 'offline'
@@ -585,33 +711,77 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
     stateLabel: halState === 'nominal' ? 'NOMINAL' : halState === 'offline' ? 'OFFLINE' : 'DEGRADED',
     tone: halTone,
     metrics: [
-      { label: 'CPU', value: 'NOT MONITORED' },
-      { label: 'MEMORY', value: 'NOT MONITORED' },
+      { label: 'CPU', value: hostTelemetry.cpuPercent != null ? `${hostTelemetry.cpuPercent.toFixed(1)}%` : 'NOT MONITORED' },
+      { label: 'MEMORY', value: hostTelemetry.memoryPercent != null ? `${hostTelemetry.memoryPercent.toFixed(1)}%` : 'NOT MONITORED' },
       { label: 'AGENT RUNS', value: String(m.activeRuns) },
       { label: 'UPTIME', value: halHost?.lastHeartbeat ? 'LINKED' : '—' },
       { label: 'STATE', value: halState === 'nominal' ? 'NOMINAL' : halState === 'offline' ? 'OFFLINE' : 'DEGRADED' },
     ],
   };
 
+  // TRON resolved ONLY from its own bridge node + heartbeat (never HAL data).
+  const tronState: ComputeNode['state'] =
+    tronHost == null ? 'offline'
+      : tronHost.state === 'healthy' ? 'nominal'
+        : tronHost.state === 'offline' ? 'offline'
+          : 'degraded';
+
+  const tronTone: Tone =
+    tronHost == null ? 'muted'
+      : tronState === 'nominal' ? 'green'
+        : tronState === 'offline' ? 'red'
+          : 'amber';
+
+  const tronStateLabel =
+    tronHost == null ? 'NOT CONNECTED'
+      : tronState === 'nominal' ? 'NOMINAL'
+        : tronState === 'offline' ? 'OFFLINE'
+          : 'DEGRADED';
+
   const tron: ComputeNode = {
     name: 'TRON',
     subtitle: 'AI OVERWATCH',
-    state: 'offline',
-    stateLabel: 'NOT CONNECTED',
-    tone: 'muted',
+    state: tronState,
+    stateLabel: tronStateLabel,
+    tone: tronTone,
     metrics: [
-      { label: 'MODEL', value: ollama.localModels > 0 ? `${ollama.localModels} LOCAL` : 'UNKNOWN' },
-      { label: 'INFERENCE TIME', value: '—' },
-      { label: 'REQUESTS / MIN', value: '—' },
-      { label: 'UPTIME', value: '—' },
-      { label: 'STATE', value: 'NOT CONNECTED' },
+      { label: 'MODELS', value: tronHost?.ollamaModelCount != null ? `${tronHost.ollamaModelCount} LOCAL` : '—' },
+      { label: 'OLLAMA', value: tronHost?.ollamaStatus === 'healthy' ? 'HEALTHY' : tronHost?.ollamaStatus != null ? tronHost.ollamaStatus.toUpperCase() : '—' },
+      { label: 'N8N', value: tronHost?.n8nStatus === 'not_configured' ? 'NOT CONFIGURED' : tronHost?.n8nStatus != null ? tronHost.n8nStatus.toUpperCase() : '—' },
+      { label: 'HEARTBEAT', value: tronHost == null ? '—' : tronHost.state === 'healthy' ? 'LIVE' : tronHost.state === 'stale' ? 'STALE' : 'OFFLINE' },
+      { label: 'STATE', value: tronStateLabel },
     ],
   };
 
-  const linkLabel = halState === 'nominal' ? 'LINK ESTABLISHED' : halState === 'degraded' ? 'LINK DEGRADED' : 'NO LINK';
-  const linkTone: Tone = halState === 'nominal' ? 'green' : halState === 'degraded' ? 'amber' : 'muted';
+  // DFP relay honesty: both nodes connect independently to DFP Command via
+  // outbound bridges. No direct HAL → TRON control channel exists.
+  const bothNominal = halState === 'nominal' && tronState === 'nominal';
+  const halDown = halState === 'offline';
+  const tronDown = tronState === 'offline';
 
-  return { hal, tron, link: { label: linkLabel, tone: linkTone } };
+  let linkLabel: string;
+  let linkSublabel: string;
+  let linkTone: Tone;
+
+  if (bothNominal) {
+    linkLabel = 'BOTH CONNECTED';
+    linkSublabel = 'VIA DFP COMMAND';
+    linkTone = 'green';
+  } else if (halDown && tronDown) {
+    linkLabel = 'OFFLINE';
+    linkSublabel = 'NO RELAY';
+    linkTone = 'red';
+  } else if (halDown || tronDown) {
+    linkLabel = 'PARTIAL CONNECTION';
+    linkSublabel = 'VIA DFP COMMAND';
+    linkTone = 'amber';
+  } else {
+    linkLabel = 'RELAY DEGRADED';
+    linkSublabel = 'VIA DFP COMMAND';
+    linkTone = 'amber';
+  }
+
+  return { hal, tron, link: { label: linkLabel, sublabel: linkSublabel, tone: linkTone } };
 }
 
 // ---------------------------------------------------------------------------

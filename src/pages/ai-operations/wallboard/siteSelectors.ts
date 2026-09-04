@@ -104,6 +104,8 @@ export interface SitesServiceTile {
   responseTimeMs: number | null;
   sslStatus: 'valid' | 'warning' | 'expired' | null;
   lastCheck: string | null;
+  /** Raw authoritative monitor status (online/offline/error/unknown). */
+  monitorStatus: string | null;
 }
 
 function normalizeSsl(ssl: string | null | undefined): SitesServiceTile['sslStatus'] {
@@ -147,17 +149,20 @@ export function getSitesServicesList(): SitesServiceTile[] {
     let responseTimeMs: number | null = null;
     let sslStatus: SitesServiceTile['sslStatus'] = null;
     let lastCheck: string | null = null;
+    let monitorStatus: string | null = null;
 
     if (!match) {
       monitoring = 'not_monitored';
     } else if (isStale(match.last_checked_at, now)) {
       monitoring = 'stale';
       lastCheck = match.last_checked_at;
+      monitorStatus = match.status;
     } else {
       monitoring = 'monitored';
       responseTimeMs = match.last_response_time_ms ?? null;
       sslStatus = normalizeSsl(match.ssl_status);
       lastCheck = match.last_checked_at;
+      monitorStatus = match.status;
     }
 
     return {
@@ -172,6 +177,7 @@ export function getSitesServicesList(): SitesServiceTile[] {
       responseTimeMs,
       sslStatus,
       lastCheck,
+      monitorStatus,
     };
   });
 }

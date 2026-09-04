@@ -4,24 +4,29 @@
 // Pure read-only derivations over the EXISTING shared sources — no new store
 // beyond the Ollama probe status read (aiInfraStore.ts), no new fetches, no
 // new tables, no new monitoring platform:
-//   * getRuntimeHealthState()   → HAL bridge node + heartbeat (n8n/Ollama
-//                                 local health, local_services, capabilities).
+//   * getRuntimeHealthState()   → HAL + TRON bridge nodes + per-node heartbeats
+//                                 (n8n/Ollama local health, local_services).
 //   * getAiInfraData()          → read-only Ollama inference probe status.
 //   * getOllamaCatalogueState() → relayed local Ollama model catalogue.
 //   * getN8nData()/selectors    → n8n automation state (reused from Wallboard 45).
 //   * getGroupLiveData()        → master-agent summary (orchestration category).
 //
 // Honesty rules honoured here:
-//   * HAL state is derived ONLY from the authoritative bridge node state.
-//   * Tron / Atlas Tron / Overwatch have NO authoritative registry — they are
-//     NOT CONNECTED (never simulated). The HAL → Tron relationship is PLANNED.
+//   * HAL and TRON state are each derived ONLY from their own authoritative
+//     bridge node + heartbeat — never shared across nodes.
+//   * Both nodes connect independently to DFP Command via outbound bridges.
+//     No direct HAL → TRON control/oversight channel is established.
 //   * CPU / RAM / GPU / storage / temperature are "not monitored" — never
 //     fabricated. No percentages are invented.
 //   * A probe that has never run is UNKNOWN, never VERIFIED.
 //   * Unknown is never reported as healthy.
 // ============================================================================
 
-import { getRuntimeHealthState } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
+import {
+  getRuntimeHealthState,
+  HAL_RUNTIME_NODE_KEY,
+  TRON_RUNTIME_NODE_KEY,
+} from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import { getAiInfraData } from '@/pages/ai-operations/wallboard/aiInfraStore';
 import { getOllamaCatalogueState } from '@/pages/ai-operations/models/ollamaCatalogueStore';
 import { getN8nInstances, getN8nWorkflows, getFailedWorkflows, getRunningWorkflows } from '@/pages/ai-operations/wallboard/n8nSelectors';
@@ -53,8 +58,8 @@ export const AI_INFRA_STATE_META: Record<
   not_connected: { label: 'NOT CONNECTED', tone: 'secondary' },
 };
 
-/** Normalise the authoritative bridge node state onto the wallboard levels. */
-function halStateFromNode(node: AiRuntimeBridgeNode | null | undefined): AiInfraState {
+/** Normalise a bridge node state onto the wallboard levels (shared by HAL + TRON). */
+function bridgeNodeStateToInfra(node: AiRuntimeBridgeNode | null | undefined): AiInfraState {
   if (!node) return 'not_connected';
   switch (deriveBridgeNodeState(node)) {
     case 'reachable':
@@ -92,13 +97,14 @@ export interface HostStatus {
   executionEnabled: boolean;
 }
 
-/** The single authoritative HAL runtime host (from the bridge node). */
-export function getHalHost(): HostStatus | null {
+/** Build a HostStatus for one runtime node from ITS OWN bridge node + heartbeat.
+ *  Never shares node/heartbeat data across runtime keys. */
+function buildHostStatus(nodeKey: string, role: string): HostStatus | null {
   const health = getRuntimeHealthState();
-  const node = health.bridgeNode;
+  const node = health.bridgeNodesByKey[nodeKey];
   if (!node) return null;
 
-  const hb = health.latestHeartbeat;
+  const hb = health.latestHeartbeatByNodeKey[nodeKey];
   const local = hb?.local_services as
     | { ollama?: { model_count?: unknown }; n8n?: { status?: unknown } }
     | null;
@@ -107,8 +113,8 @@ export function getHalHost(): HostStatus | null {
     key: node.node_key,
     name: node.name ?? node.node_key,
     hostname: node.node_key,
-    role: 'Operational Automation Host',
-    state: halStateFromNode(node),
+    role,
+    state: bridgeNodeStateToInfra(node),
     environment: node.environment,
     softwareVersion: node.software_version,
     platform: node.platform,
@@ -124,6 +130,16 @@ export function getHalHost(): HostStatus | null {
   };
 }
 
+/** The authoritative HAL runtime host (resolves ONLY HAL's node + heartbeat). */
+export function getHalHost(): HostStatus | null {
+  return buildHostStatus(HAL_RUNTIME_NODE_KEY, 'Operational Automation Host');
+}
+
+/** The authoritative TRON runtime host (resolves ONLY TRON's node + heartbeat). */
+export function getTronHost(): HostStatus | null {
+  return buildHostStatus(TRON_RUNTIME_NODE_KEY, 'AI Oversight · Analysis · Verification');
+}
+
 // --- Tron / Overwatch (honest NOT CONNECTED) ----------------------------------
 
 export interface OversightStatus {
@@ -134,16 +150,45 @@ export interface OversightStatus {
 }
 
 /**
- * Tron / Atlas Tron / Overwatch has NO authoritative registry anywhere in the
- * system (no bridge node, no service identity, no monitor row). It is surfaced
- * as NOT CONNECTED — never invented or simulated.
+ * TRON / Atlas Tron / Overwatch — derived from TRON's own authoritative bridge
+ * node + heartbeat. n8n is intentionally left on HAL, so TRON's n8n
+ * `not_configured` is never treated as a TRON failure. Missing TRON data is
+ * honestly surfaced as NOT CONNECTED (never simulated).
  */
 export function getOversight(): OversightStatus {
+  const tron = getTronHost();
+
+  if (!tron) {
+    return {
+      name: 'TRON / OVERWATCH',
+      role: 'AI Oversight · Analysis · Verification',
+      state: 'not_connected',
+      detail: 'No TRON oversight runtime node is registered.',
+    };
+  }
+
+  // Reachable bridge + unhealthy configured Ollama → degraded. n8n not_configured
+  // is by design and does NOT degrade TRON.
+  let state: AiInfraState = tron.state;
+  if (tron.state === 'healthy' && tron.ollamaStatus !== 'healthy') {
+    state = 'degraded';
+  }
+
+  const bridgeText =
+    tron.state === 'healthy' ? 'reachable'
+      : tron.state === 'stale' ? 'stale'
+        : tron.state === 'offline' ? 'offline'
+          : tron.state === 'degraded' ? 'degraded'
+            : 'not connected';
+  const ollamaText = tron.ollamaStatus === 'healthy' ? 'Ollama healthy' : `Ollama ${tron.ollamaStatus ?? 'unhealthy'}`;
+  const modelText = tron.ollamaModelCount != null ? `${tron.ollamaModelCount} models` : 'model count unavailable';
+  const n8nText = tron.n8nStatus === 'not_configured' ? 'n8n not configured by design' : `n8n ${tron.n8nStatus ?? 'unknown'}`;
+
   return {
     name: 'TRON / OVERWATCH',
     role: 'AI Oversight · Analysis · Verification',
-    state: 'not_connected',
-    detail: 'No oversight system is registered. Oversight is planned, not yet live.',
+    state,
+    detail: `Runtime bridge ${bridgeText} · ${ollamaText} · ${modelText} · ${n8nText}.`,
   };
 }
 
@@ -154,15 +199,20 @@ export interface SystemLink {
   to: string;
   state: 'active' | 'planned' | 'not_connected';
   label: string;
+  detail: string;
 }
 
-/** The HAL → Tron relationship is PLANNED (no live oversight channel exists). */
+/**
+ * No direct HAL → TRON control/oversight channel is established. Both nodes are
+ * monitored independently through DFP Command via their own outbound bridges.
+ */
 export function getHalTronLink(): SystemLink {
   return {
     from: 'HAL',
     to: 'TRON',
     state: 'not_connected',
-    label: 'PLANNED',
+    label: 'DIRECT CHANNEL NOT CONFIGURED',
+    detail: 'Both nodes are monitored through DFP Command, but direct runtime-to-runtime control is not enabled.',
   };
 }
 
@@ -452,15 +502,17 @@ export interface AiInfraSummary {
 
 export function getAiInfraSummary(): AiInfraSummary {
   const hal = getHalHost();
+  const tron = getTronHost();
   const oversight = getOversight();
   const ollama = getOllamaStatus();
   const masters = getMasterAgentSummary();
   const health = getRuntimeHealthState();
 
   const halState = hal?.state ?? 'not_connected';
+  const tronState = tron?.state ?? 'not_connected';
 
-  const hasAnySource = hal != null || health.latestHeartbeat != null || oversight.state === 'not_connected';
-  const loading = health.historyLoading && !health.latestHeartbeat;
+  const hasAnySource = hal != null || tron != null;
+  const loading = health.historyLoading && hal == null && tron == null;
 
   let sourceState: AiInfraSummary['sourceState'];
   if (loading) sourceState = 'unavailable';
@@ -477,11 +529,19 @@ export function getAiInfraSummary(): AiInfraSummary {
     tone = 'secondary';
   } else if (halState === 'offline') {
     label = 'HAL OFFLINE';
-    detail = 'The primary runtime host is not reachable.';
+    detail = 'The operational automation host is not reachable.';
     tone = 'red';
-  } else if (halState === 'stale') {
-    label = 'HAL STALE';
-    detail = 'The runtime host heartbeat is stale.';
+  } else if (tronState === 'offline') {
+    label = 'TRON OFFLINE';
+    detail = 'The oversight runtime node is not reachable.';
+    tone = 'red';
+  } else if (halState === 'stale' || tronState === 'stale') {
+    label = 'RUNTIME STALE';
+    detail = 'A runtime bridge heartbeat is stale.';
+    tone = 'amber';
+  } else if (halState === 'degraded' || oversight.state === 'degraded') {
+    label = 'AI INFRASTRUCTURE DEGRADED';
+    detail = 'A runtime node is reporting degraded local services.';
     tone = 'amber';
   } else if (ollama.state === 'offline') {
     label = 'OLLAMA OFFLINE';
@@ -493,7 +553,7 @@ export function getAiInfraSummary(): AiInfraSummary {
     tone = 'amber';
   } else {
     label = 'AI INFRASTRUCTURE HEALTHY';
-    detail = 'HAL reachable · local models available · automation online.';
+    detail = 'HAL and TRON reachable · local model services available.';
     tone = 'emerald';
   }
 
@@ -520,11 +580,11 @@ export interface AiInfraGap {
 
 export function getAiInfraGaps(): AiInfraGap[] {
   return [
-    { area: 'Tron / Overwatch registry', note: 'No authoritative oversight-system registry exists — shown as NOT CONNECTED.' },
+    { area: 'HAL → TRON direct channel', note: 'No direct runtime-to-runtime control channel is established — both nodes are monitored independently through DFP Command.' },
     { area: 'CPU / RAM metrics', note: 'No host resource telemetry is relayed by the bridge.' },
     { area: 'GPU utilisation', note: 'No GPU metric source exists.' },
     { area: 'Storage / temperature', note: 'No host storage or thermal metric source.' },
-    { area: 'Oversight monitoring process', note: 'No active Overwatch monitoring/verification process is registered.' },
+    { area: 'TRON n8n', note: 'n8n remains on HAL by design — TRON reports n8n not_configured without degradation.' },
   ];
 }
 
@@ -551,8 +611,8 @@ export interface AiInfraIncident {
  *   * agent error / total AI capacity unavailable (ai-capacity / core selectors).
  *
  * New signal added here: local Ollama model serving offline (authoritative
- * bridge heartbeat path = unavailable) → HIGH. Tron/Overwatch being absent is a
- * gap, NOT an incident — no failure has occurred.
+ * bridge heartbeat path = unavailable) → HIGH. The absence of a direct
+ * HAL → TRON channel is an architecture gap, NOT an incident.
  */
 export function getAiInfrastructureIncidents(): AiInfraIncident[] {
   const incidents: AiInfraIncident[] = [];
