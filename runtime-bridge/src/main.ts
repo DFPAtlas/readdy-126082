@@ -19,8 +19,10 @@
 // never supplied by the cloud — the cloud cannot instruct the bridge to
 // request arbitrary URLs/IPs/ports/files/commands.
 //
-// Run locally with: deno run --allow-env --allow-net src/main.ts
+// Run locally with: deno run --allow-env --allow-net --allow-sys=cpus,systemMemoryInfo src/main.ts
 // ============================================================================
+
+import { cpus } from "node:os";
 
 const enc = new TextEncoder();
 
@@ -1539,14 +1541,15 @@ async function handleApprovalGatedDiagnosticProbe(m: ControlMessage): Promise<vo
   await report(status, verified, result.n8n, result.ollama, result.ollama_model_count, latencyMs, errorCategory);
 }
 
-// --- Host CPU + memory telemetry (DFP COMMAND — PROMPT 4) ---------------------
-// Reads aggregate CPU counters from the first "cpu" line in /proc/stat and
-// memory from /proc/meminfo. CPU utilisation is derived from the DELTA between
-// two samples; the first heartbeat returns null (no previous sample exists).
-// idle + iowait are counted as idle. Memory percent = (total - available) / total.
+// --- Host CPU + memory telemetry (DFP COMMAND — PROMPT 4A) --------------------
+// CPU counters are aggregated from node:os cpus() (user/nice/sys/idle/irq across
+// every logical CPU); memory is read from Deno.systemMemoryInfo(). CPU
+// utilisation is derived from the DELTA between two samples; the first heartbeat
+// returns null (no previous sample exists). Memory percent = (total - available)
+// / total. No direct filesystem access is performed.
 //
-// A telemetry failure (missing file, invalid value, or missing --allow-read
-// permission) NEVER stops heartbeat delivery — it simply reports null.
+// A telemetry failure (invalid value or missing --allow-sys permission) NEVER
+// stops heartbeat delivery — it simply reports null.
 //
 // This NEVER collects process lists, environment variables, usernames, IP
 // addresses, filesystem listings, command output, prompts or workflow data.
@@ -1559,14 +1562,21 @@ let previousCpuSample: CpuSample | null = null;
 
 async function readCpuSample(): Promise<CpuSample | null> {
   try {
-    const stat = await Deno.readTextFile("/proc/stat");
-    const cpuLine = stat.split("\n").find((line) => line.startsWith("cpu "));
-    if (!cpuLine) return null;
-    // Format: "cpu  user nice system idle iowait irq softirq steal guest guest_nice"
-    const fields = cpuLine.trim().split(/\s+/).slice(1).map((f) => Number(f));
-    if (fields.length < 5 || fields.some((n) => !Number.isFinite(n))) return null;
-    const total = fields.reduce((sum, n) => sum + n, 0);
-    const idle = fields[3] + fields[4]; // idle + iowait
+    const cpuList = cpus();
+    if (!Array.isArray(cpuList) || cpuList.length === 0) return null;
+    let total = 0;
+    let idle = 0;
+    for (const cpu of cpuList) {
+      const t = cpu.times as { user?: number; nice?: number; sys?: number; idle?: number; irq?: number };
+      const user = typeof t.user === "number" ? t.user : 0;
+      const nice = typeof t.nice === "number" ? t.nice : 0;
+      const sys = typeof t.sys === "number" ? t.sys : 0;
+      const idleT = typeof t.idle === "number" ? t.idle : 0;
+      const irq = typeof t.irq === "number" ? t.irq : 0;
+      total += user + nice + sys + idleT + irq;
+      idle += idleT;
+    }
+    if (!Number.isFinite(total) || !Number.isFinite(idle) || total <= 0) return null;
     return { total, idle };
   } catch {
     return null;
@@ -1584,18 +1594,13 @@ function computeCpuPercent(prev: CpuSample, curr: CpuSample): number | null {
 
 async function readMemory(): Promise<{ used: number | null; total: number | null; percent: number | null }> {
   try {
-    const meminfo = await Deno.readTextFile("/proc/meminfo");
-    const values: Record<string, number> = {};
-    for (const line of meminfo.split("\n")) {
-      const match = line.match(/^(\w+):\s+(\d+)\s*kB$/);
-      if (match) values[match[1]] = Number(match[2]) * 1024; // kB → bytes
-    }
-    const total = typeof values.MemTotal === "number" && values.MemTotal > 0 ? values.MemTotal : null;
-    const available = typeof values.MemAvailable === "number" && values.MemAvailable >= 0 ? values.MemAvailable : null;
+    const info = Deno.systemMemoryInfo();
+    const total = Number.isFinite(info.total) && info.total > 0 ? info.total : null;
+    const available = Number.isFinite(info.available) && info.available >= 0 ? info.available : null;
     if (total == null || available == null) return { used: null, total: null, percent: null };
     const used = Math.max(0, total - available);
-    const percent = Math.round((used / total) * 1000) / 10;
-    return { used, total, percent: Math.max(0, Math.min(100, percent)) };
+    const percent = Math.max(0, Math.min(100, Math.round((used / total) * 1000) / 10));
+    return { used, total, percent };
   } catch {
     return { used: null, total: null, percent: null };
   }

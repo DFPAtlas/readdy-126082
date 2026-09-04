@@ -10,6 +10,7 @@ WORKDIR /app
 # Copy the bridge source (only the service code — no secrets).
 COPY src/main.ts ./src/main.ts
 
-# Runs with only --allow-env (config) and --allow-net (outbound HTTPS + local
-# health checks). NO shell/filesystem/arbitrary-execution permissions.
-CMD ["run", "--allow-env", "--allow-net", "--allow-read=/proc/stat,/proc/meminfo", "src/main.ts"]
+# Runs with --allow-env (config), --allow-net (outbound HTTPS + local health
+# checks) and --allow-sys=cpus,systemMemoryInfo (CPU/memory telemetry only).
+# NO shell/filesystem/arbitrary-execution permissions.
+CMD ["run", "--allow-env", "--allow-net", "--allow-sys=cpus,systemMemoryInfo", "src/main.ts"]
