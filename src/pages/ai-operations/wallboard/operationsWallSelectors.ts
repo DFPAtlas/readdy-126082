@@ -101,20 +101,20 @@ export interface SiteBrand {
 }
 
 // The approved estate layout (8 brands). Display names use the REAL registry
-// names (The Forge, Wedora) per the owner decision; GarageFlow + Synqoro are
-// planned modules that render NOT CONFIGURED until registered.
+// names (The Forge, Wedora) per the owner decision; Synqoro remains a planned
+// module that renders NOT CONFIGURED until registered.
 export const SITE_BRANDS: SiteBrand[] = [
   { key: 'dfp', siteKey: 'digital-footprint', name: 'DFP', shortCode: 'DFP', subtitle: 'AGENCY & OPERATIONS', color: 'cyan', hub: true },
   { key: 'quickguard', siteKey: 'quickguard', name: 'QuickGuard', shortCode: 'QG', subtitle: 'SECURITY MARKETPLACE', color: 'blue', hub: false },
   { key: 'guardianhub', siteKey: 'guardianhub', name: 'GuardianHub', shortCode: 'GH', subtitle: 'SECURITY COMPANIES', color: 'teal', hub: false },
   { key: 'buildnerve', siteKey: 'the-forge', name: 'The Forge', shortCode: 'TF', subtitle: 'AI BUILD PLATFORM', color: 'orange', hub: false },
   { key: 'lethub', siteKey: 'lethub', name: 'LetHub', shortCode: 'LH', subtitle: 'LETTINGS PLATFORM', color: 'purple', hub: false },
-  { key: 'garageflow', siteKey: null, name: 'GarageFlow', shortCode: 'GF', subtitle: 'VEHICLE CARE', color: 'yellow', hub: false },
+  { key: 'garageflow', siteKey: 'garageflow', name: 'GarageFlow', shortCode: 'GF', subtitle: 'VEHICLE CARE', color: 'yellow', hub: false },
   { key: 'vowora', siteKey: 'wedora', name: 'Vowora', shortCode: 'VW', subtitle: 'WEDDING PLANNING', color: 'pink', hub: false },
   { key: 'synqoro', siteKey: null, name: 'Synqoro', shortCode: 'SQ', subtitle: 'AI & DATA SOLUTIONS', color: 'violet', hub: false },
 ];
 
-export type SiteModuleState = 'active' | 'degraded' | 'offline' | 'not_configured';
+export type SiteModuleState = 'active' | 'degraded' | 'offline' | 'unknown' | 'not_configured';
 
 export interface SiteModule {
   key: string;
@@ -218,6 +218,8 @@ function siteState(status: string | null | undefined): SiteModuleState {
     case 'offline':
     case 'down':
       return 'offline';
+    case 'unknown':
+      return 'unknown';
     default:
       return 'not_configured';
   }
@@ -227,6 +229,7 @@ const STATE_LABEL: Record<SiteModuleState, string> = {
   active: 'ACTIVE',
   degraded: 'DEGRADED',
   offline: 'OFFLINE',
+  unknown: 'UNKNOWN',
   not_configured: 'NOT CONFIGURED',
 };
 
@@ -234,6 +237,7 @@ const STATE_TONE: Record<SiteModuleState, Tone> = {
   active: 'cyan',
   degraded: 'amber',
   offline: 'red',
+  unknown: 'muted',
   not_configured: 'muted',
 };
 

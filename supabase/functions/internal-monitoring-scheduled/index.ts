@@ -287,14 +287,27 @@ serve(async (req: Request) => {
 
   // Load enabled website monitors server-side. Target URLs are NEVER taken from
   // the request body — only the monitor records already in the database.
+  // Group Operations scope: only site-keyed monitors (site_key non-null and
+  // non-empty). Legacy rows with site_key NULL are excluded defensively here.
   const { data: monitors, error: monErr } = await admin
     .from("internal_monitored_websites")
     .select("*")
-    .not("url", "is", null);
+    .not("url", "is", null)
+    .not("site_key", "is", null);
 
   if (monErr) return json({ error: "Failed to load website monitors" }, 500);
 
-  const enabled = (monitors ?? []).filter((m) => !DISABLED_STATUSES.has(String(m.status ?? "")));
+  const enabled = (monitors ?? []).filter((monitor) => {
+    const siteKey =
+      typeof monitor.site_key === "string"
+        ? monitor.site_key.trim()
+        : "";
+
+    return (
+      siteKey.length > 0 &&
+      !DISABLED_STATUSES.has(String(monitor.status ?? ""))
+    );
+  });
   if (enabled.length === 0) {
     return json({ checked: 0, summary: "No enabled website monitors." });
   }

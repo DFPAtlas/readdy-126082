@@ -67,6 +67,10 @@ import {
   getAiBudgetEvents,
   getOnlinePresence,
 } from '@/lib/ai-operations';
+import {
+  isConfirmedDemoAlert,
+  isConfirmedDemoIncident,
+} from '@/pages/ai-operations/live/demoFixtureProvenance';
 
 // ---------------------------------------------------------------------------
 // Source state
@@ -348,8 +352,8 @@ export async function refreshGroupLiveData(): Promise<void> {
   const runSteps = stepsRes.data ?? [];
   const approvals = (approvalsRes.data ?? []).filter((r) => r.environment !== 'sandbox');
   const auditEvents = (auditRes.data ?? []).filter((r) => r.environment !== 'sandbox');
-  const alerts = (alertsRes.data ?? []).filter((r) => !isTestOrSandbox(r));
-  const incidents = (incidentsRes.data ?? []).filter((r) => !isTestOrSandbox(r));
+  const alerts = (alertsRes.data ?? []).filter((r) => !isTestOrSandbox(r) && !isConfirmedDemoAlert(r));
+  const incidents = (incidentsRes.data ?? []).filter((r) => !isTestOrSandbox(r) && !isConfirmedDemoIncident(r));
   const orchestrations = orchRes.data ?? [];
   const tools = (toolsRes.data ?? []).filter((r) => !isTestOrSandbox(r));
   const toolAccess = toolAccessRes.data ?? [];
