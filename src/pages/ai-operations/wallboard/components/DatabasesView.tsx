@@ -17,6 +17,8 @@ const STATE_TEXT: Record<DatabaseState, string> = {
   healthy: 'text-emerald-400',
   degraded: 'text-amber-400',
   offline: 'text-red-400',
+  stale: 'text-amber-400',
+  check_error: 'text-secondary-300',
   unknown: 'text-secondary-300',
   not_configured: 'text-secondary-300',
 };
@@ -25,6 +27,8 @@ const STATE_BADGE: Record<DatabaseState, string> = {
   healthy: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25',
   degraded: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
   offline: 'text-red-400 bg-red-500/10 border-red-500/30',
+  stale: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+  check_error: 'text-secondary-300 bg-secondary-500/10 border-secondary-500/25',
   unknown: 'text-secondary-300 bg-secondary-500/10 border-secondary-500/25',
   not_configured: 'text-secondary-300 bg-secondary-500/10 border-secondary-500/25',
 };
@@ -70,7 +74,7 @@ function ServiceDot({ service }: { service: CoreService }) {
   const tone =
     service.status === 'healthy'
       ? 'bg-emerald-400'
-      : service.status === 'degraded'
+      : service.status === 'degraded' || service.status === 'stale'
         ? 'bg-amber-400'
         : service.status === 'offline'
           ? 'bg-red-400'

@@ -19,10 +19,15 @@ import { useDatabaseData } from '@/pages/ai-operations/wallboard/databaseStore';
 import { useOperationsHealthData } from '@/pages/ai-operations/wallboard/operationsHealthStore';
 import { useSecurityData } from '@/pages/ai-operations/wallboard/securityStore';
 import { useOllamaCatalogue } from '@/pages/ai-operations/models/ollamaCatalogueStore';
+import { useSiteMonitorData } from '@/pages/ai-operations/wallboard/siteStore';
 
 /**
  * Subscribe to every source the wall depends on. Returns nothing — the
  * subscriptions themselves trigger re-renders when a snapshot changes.
+ * 
+ * useSiteMonitorData is included so that GroupOperationsCenter/SiteModule
+ * re-render automatically whenever refreshSiteMonitorData() resolves a new
+ * snapshot — e.g. when GarageFlow (or any other site) changes state.
  */
 export function useWallData(): void {
   useGroupLiveData();
@@ -33,4 +38,5 @@ export function useWallData(): void {
   useOperationsHealthData();
   useSecurityData();
   useOllamaCatalogue();
+  useSiteMonitorData();
 }

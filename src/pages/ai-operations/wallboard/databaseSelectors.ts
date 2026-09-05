@@ -29,7 +29,14 @@ import { getBackupSummary } from '@/pages/ai-operations/wallboard/backupSelector
 
 // --- Normalised wallboard status ---------------------------------------------
 
-export type DatabaseState = 'healthy' | 'degraded' | 'offline' | 'unknown' | 'not_configured';
+export type DatabaseState =
+  | 'healthy'
+  | 'degraded'
+  | 'offline'
+  | 'stale'
+  | 'check_error'
+  | 'unknown'
+  | 'not_configured';
 
 export const DATABASE_STATE_META: Record<
   DatabaseState,
@@ -38,6 +45,8 @@ export const DATABASE_STATE_META: Record<
   healthy: { label: 'HEALTHY', tone: 'emerald' },
   degraded: { label: 'DEGRADED', tone: 'amber' },
   offline: { label: 'OFFLINE', tone: 'red' },
+  stale: { label: 'STALE', tone: 'amber' },
+  check_error: { label: 'CHECK ERROR', tone: 'secondary' },
   unknown: { label: 'UNKNOWN', tone: 'secondary' },
   not_configured: { label: 'NOT CONFIGURED', tone: 'secondary' },
 };
@@ -48,14 +57,42 @@ function normalizeServiceStatus(status: string | null | undefined): DatabaseStat
     case 'healthy':
       return 'healthy';
     case 'warning':
+    case 'degraded':
       return 'degraded';
     case 'failed':
     case 'error':
+    case 'offline':
       return 'offline';
+    case 'stale':
+      return 'stale';
+    case 'check_error':
+      return 'check_error';
     case 'unknown':
     default:
       return 'unknown';
   }
+}
+
+// Heartbeat freshness threshold — a database heartbeat older than this is STALE
+// (it has missed multiple expected monitoring cycles). Kept as a single named
+// constant so it is configurable in one place.
+const DB_HEARTBEAT_STALE_MS = 15 * 60_000; // 15 minutes
+
+/**
+ * Normalise the DATABASE heartbeat onto the wallboard states, honouring
+ * freshness. A reading older than the freshness threshold is STALE — an old
+ * success must never read healthy, and an old failure must never be trusted as
+ * confirmed offline. `check_error` (monitor failure) is kept distinct from
+ * `offline` (confirmed database unreachable).
+ */
+function normalizeDatabaseHeartbeat(
+  rawStatus: string | null | undefined,
+  lastCheckedAt: string | null | undefined,
+): DatabaseState {
+  if (!lastCheckedAt) return 'unknown';
+  const age = Date.now() - new Date(lastCheckedAt).getTime();
+  if (Number.isNaN(age) || age > DB_HEARTBEAT_STALE_MS) return 'stale';
+  return normalizeServiceStatus(rawStatus);
 }
 
 // --- Core service labels ------------------------------------------------------
@@ -69,7 +106,7 @@ export interface CoreService {
 /** Extract the five core service states for a single monitor. */
 function coreServices(m: SupabaseMonitorRow): CoreService[] {
   return [
-    { key: 'database', label: 'Database', status: normalizeServiceStatus(m.database_status) },
+    { key: 'database', label: 'Database', status: normalizeDatabaseHeartbeat(m.database_status, m.last_checked_at) },
     { key: 'auth', label: 'Auth', status: normalizeServiceStatus(m.auth_status) },
     { key: 'realtime', label: 'Realtime', status: normalizeServiceStatus(m.realtime_status) },
     { key: 'storage', label: 'Storage', status: normalizeServiceStatus(m.storage_status) },
@@ -83,11 +120,19 @@ export interface DatabaseCard {
   key: string;
   name: string;
   site: string;
+  siteKey: string | null;
   state: DatabaseState;
   services: CoreService[];
   anonKeyConfigured: boolean;
   serviceRoleConfigured: boolean;
   lastChecked: string | null;
+  /** Safe database heartbeat display fields (no credentials / URLs / keys). */
+  databaseStatus: DatabaseState;
+  databaseLatencyMs: number | null;
+  databaseLastCheckedAt: string | null;
+  databaseLastHeartbeatAt: string | null;
+  databaseErrorCode: string | null;
+  databaseErrorReason: string | null;
   liveLatency: { database: number | null; auth: number | null; storage: number | null };
 }
 
@@ -118,11 +163,13 @@ function overallState(services: CoreService[]): DatabaseState {
   const database = services.find((s) => s.key === 'database')?.status;
   const hasOffline = services.some((s) => s.status === 'offline');
   const hasDegraded = services.some((s) => s.status === 'degraded');
+  const hasStale = services.some((s) => s.status === 'stale');
+  const hasCheckError = services.some((s) => s.status === 'check_error');
   const allHealthy = services.every((s) => s.status === 'healthy');
   const allUnknown = services.every((s) => s.status === 'unknown');
 
   if (database === 'offline') return 'offline';
-  if (hasOffline || hasDegraded) return 'degraded';
+  if (hasOffline || hasDegraded || hasStale || hasCheckError) return 'degraded';
   if (allHealthy) return 'healthy';
   if (allUnknown) return 'unknown';
   return 'unknown';
@@ -139,11 +186,18 @@ export function getDatabaseCards(): DatabaseCard[] {
       key: `db-${m.id}`,
       name: m.supabase_project_name,
       site: projectName(m.project_id),
+      siteKey: m.site_key,
       state: overallState(services),
       services,
       anonKeyConfigured: m.anon_key_configured,
       serviceRoleConfigured: m.service_role_configured,
       lastChecked: m.last_checked_at,
+      databaseStatus: normalizeDatabaseHeartbeat(m.database_status, m.last_checked_at),
+      databaseLatencyMs: m.database_latency_ms,
+      databaseLastCheckedAt: m.last_checked_at,
+      databaseLastHeartbeatAt: m.database_last_heartbeat_at,
+      databaseErrorCode: m.database_error_code,
+      databaseErrorReason: m.database_error_reason,
       liveLatency: lat,
     };
   });
@@ -156,6 +210,40 @@ export function getUnconfiguredDatabases(): { id: number; name: string }[] {
   return data.projects
     .filter((p) => !monitoredProjectIds.has(p.id))
     .map((p) => ({ id: p.id, name: p.project_name }));
+}
+
+// --- Per-site database heartbeat (safe display model) -----------------------
+
+export interface SiteDatabaseHealth {
+  status: DatabaseState;
+  latencyMs: number | null;
+  lastCheckedAt: string | null;
+  lastHeartbeatAt: string | null;
+  errorCode: string | null;
+  errorReason: string | null;
+}
+
+/**
+ * Map each monitored site_key to its safe database heartbeat view. Joins by the
+ * canonical site_key (never the project display-name spelling). Only monitors
+ * carrying a site_key participate, so sites without a database monitor are
+ * simply absent (their website health is unchanged).
+ */
+export function getDatabaseHealthBySiteKey(): Map<string, SiteDatabaseHealth> {
+  const data = getDatabaseData();
+  const map = new Map<string, SiteDatabaseHealth>();
+  for (const m of data.monitors) {
+    if (!m.site_key) continue;
+    map.set(m.site_key, {
+      status: normalizeDatabaseHeartbeat(m.database_status, m.last_checked_at),
+      latencyMs: m.database_latency_ms,
+      lastCheckedAt: m.last_checked_at,
+      lastHeartbeatAt: m.database_last_heartbeat_at,
+      errorCode: m.database_error_code,
+      errorReason: m.database_error_reason,
+    });
+  }
+  return map;
 }
 
 // --- Core services (group-level) ---------------------------------------------

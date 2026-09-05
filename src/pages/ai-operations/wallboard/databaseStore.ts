@@ -35,10 +35,15 @@ import { supabase } from '@/lib/supabase';
 export interface SupabaseMonitorRow {
   id: number;
   project_id: number;
+  site_key: string | null;
   supabase_project_name: string;
   anon_key_configured: boolean;
   service_role_configured: boolean;
   database_status: string | null;
+  database_latency_ms: number | null;
+  database_last_heartbeat_at: string | null;
+  database_error_code: string | null;
+  database_error_reason: string | null;
   auth_status: string | null;
   storage_status: string | null;
   edge_functions_status: string | null;
@@ -128,7 +133,7 @@ export async function refreshDatabaseData(): Promise<void> {
     supabase
       .from('internal_supabase_monitors')
       .select(
-        'id,project_id,supabase_project_name,anon_key_configured,service_role_configured,database_status,auth_status,storage_status,edge_functions_status,realtime_status,last_checked_at',
+        'id,project_id,site_key,supabase_project_name,anon_key_configured,service_role_configured,database_status,database_latency_ms,database_last_heartbeat_at,database_error_code,database_error_reason,auth_status,storage_status,edge_functions_status,realtime_status,last_checked_at',
       )
       .order('id', { ascending: true }),
     supabase

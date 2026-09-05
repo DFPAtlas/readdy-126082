@@ -35,6 +35,9 @@ import { getRuntimeHealthState, HAL_RUNTIME_NODE_KEY, TRON_RUNTIME_NODE_KEY } fr
 import { getVectorHealth } from '@/pages/ai-operations/wallboard/knowledgeSelectors';
 import { getSecuritySummary, getSecurityConnections } from '@/pages/ai-operations/wallboard/securitySelectors';
 import { getSitesServicesList } from '@/pages/ai-operations/wallboard/siteSelectors';
+import { getDatabaseHealthBySiteKey, type SiteDatabaseHealth } from '@/pages/ai-operations/wallboard/databaseSelectors';
+import { getN8nInstances } from '@/pages/ai-operations/wallboard/n8nSelectors';
+import { getN8nData, type N8nCallbackRow } from '@/pages/ai-operations/wallboard/n8nStore';
 
 // ---------------------------------------------------------------------------
 // Brand colour palette
@@ -114,7 +117,14 @@ export const SITE_BRANDS: SiteBrand[] = [
   { key: 'synqoro', siteKey: null, name: 'Synqoro', shortCode: 'SQ', subtitle: 'AI & DATA SOLUTIONS', color: 'violet', hub: false },
 ];
 
-export type SiteModuleState = 'active' | 'degraded' | 'offline' | 'unknown' | 'not_configured';
+export type WebsiteState =
+  | 'online'
+  | 'offline'
+  | 'degraded'
+  | 'stale'
+  | 'unknown'
+  | 'not_monitored'
+  | 'not_configured';
 
 export interface SiteModule {
   key: string;
@@ -123,7 +133,7 @@ export interface SiteModule {
   subtitle: string;
   color: BrandColor;
   hub: boolean;
-  state: SiteModuleState;
+  state: WebsiteState;
   stateLabel: string;
   stateTone: Tone;
   users: number | null;
@@ -132,10 +142,19 @@ export interface SiteModule {
   responseTimeMs: number | null;
   sslStatus: 'valid' | 'warning' | 'expired' | null;
   heartbeat: SiteHeartbeat;
+  /** Raw website-monitor last-check timestamp (drives the one-shot heartbeat pulse). */
+  lastCheckAt: string | null;
+  /** Separate database-health signal (null when the site has no database monitor). */
+  database: SiteDatabaseHealth | null;
+  /** n8n service reachability + per-site workflow health. */
+  n8n: SiteN8nHealth;
+  /** Human-readable reason when website + database combine into a degraded state. */
+  reason: string | null;
 }
 
 // ---------------------------------------------------------------------------
-// Site heartbeat (authoritative website monitor)
+// Site heartbeat — the SAME authoritative website-monitor result as `state`,
+// shown compactly with a pulse + reading age. It is never a competing signal.
 // ---------------------------------------------------------------------------
 
 export type HeartbeatState = 'live' | 'stale' | 'no_heartbeat' | 'not_monitored';
@@ -147,22 +166,31 @@ export interface SiteHeartbeat {
   age: string | null;
 }
 
-const HEARTBEAT_LABEL: Record<HeartbeatState, string> = {
-  live: 'LIVE',
+const WEBSITE_STATE_LABEL: Record<WebsiteState, string> = {
+  online: 'ONLINE',
+  offline: 'OFFLINE',
+  degraded: 'DEGRADED',
   stale: 'STALE',
-  no_heartbeat: 'OFFLINE',
+  unknown: 'UNKNOWN',
   not_monitored: 'NOT MONITORED',
+  not_configured: 'NOT CONFIGURED',
 };
 
-const HEARTBEAT_TONE: Record<HeartbeatState, Tone> = {
-  live: 'green',
+const WEBSITE_STATE_TONE: Record<WebsiteState, Tone> = {
+  online: 'green',
+  offline: 'red',
+  degraded: 'amber',
   stale: 'amber',
-  no_heartbeat: 'red',
+  unknown: 'muted',
   not_monitored: 'muted',
+  not_configured: 'muted',
 };
 
 // Authoritative monitor failure states (internal_monitored_websites.status).
 const FAILING_MONITOR_STATUS = new Set(['offline', 'error', 'failed']);
+// Monitor warning states that map to DEGRADED (surfaced only where the monitor
+// actually emits them; the scheduled runner currently emits online/offline/error).
+const WARNING_MONITOR_STATUS = new Set(['degraded', 'warning']);
 
 function heartbeatAge(iso: string | null | undefined): string | null {
   if (!iso) return null;
@@ -179,67 +207,198 @@ function heartbeatAge(iso: string | null | undefined): string | null {
   return `${Math.floor(hr / 24)}d`;
 }
 
+/** Map the unified website state onto the compact heartbeat pulse category. */
+function heartbeatStateOf(state: WebsiteState): HeartbeatState {
+  switch (state) {
+    case 'online':
+      return 'live';
+    case 'stale':
+      return 'stale';
+    case 'not_monitored':
+    case 'not_configured':
+      return 'not_monitored';
+    default:
+      return 'no_heartbeat';
+  }
+}
+
 /**
- * Resolve a monitoring heartbeat from the existing authoritative monitor join.
- * LIVE requires a fresh, non-failing monitor reading — never inferred from the
- * site's operational state alone.
+ * SINGLE authoritative website-health resolver — shared by the main label, the
+ * heartbeat and the group online count. ONLINE requires a fresh, explicitly
+ * successful monitor result; a status is never inferred online merely because
+ * it is not a recognised failure.
  */
-function resolveHeartbeat(
+function resolveWebsiteHealth(
+  hasRegistry: boolean,
   monitoring: 'monitored' | 'not_monitored' | 'stale',
   monitorStatus: string | null,
   lastCheck: string | null,
-): SiteHeartbeat {
-  if (monitoring === 'not_monitored') {
-    return { state: 'not_monitored', label: HEARTBEAT_LABEL.not_monitored, tone: HEARTBEAT_TONE.not_monitored, age: null };
+): { state: WebsiteState; heartbeat: SiteHeartbeat; lastCheckAt: string | null } {
+  let state: WebsiteState;
+  if (!hasRegistry) {
+    state = 'not_configured';
+  } else if (monitoring === 'not_monitored') {
+    state = 'not_monitored';
+  } else if (monitoring === 'stale') {
+    state = 'stale';
+  } else {
+    const status = (monitorStatus ?? '').toLowerCase();
+    if (status === 'online') state = 'online';
+    else if (FAILING_MONITOR_STATUS.has(status)) state = 'offline';
+    else if (WARNING_MONITOR_STATUS.has(status)) state = 'degraded';
+    else state = 'unknown';
   }
-  if (monitoring === 'stale') {
-    return { state: 'stale', label: HEARTBEAT_LABEL.stale, tone: HEARTBEAT_TONE.stale, age: null };
-  }
-  if (monitorStatus && FAILING_MONITOR_STATUS.has(monitorStatus)) {
-    return { state: 'no_heartbeat', label: HEARTBEAT_LABEL.no_heartbeat, tone: HEARTBEAT_TONE.no_heartbeat, age: null };
-  }
-  return { state: 'live', label: HEARTBEAT_LABEL.live, tone: HEARTBEAT_TONE.live, age: heartbeatAge(lastCheck) };
+
+  const fresh =
+    state === 'online' || state === 'offline' || state === 'degraded' || state === 'unknown';
+
+  return {
+    state,
+    heartbeat: {
+      state: heartbeatStateOf(state),
+      label: WEBSITE_STATE_LABEL[state],
+      tone: WEBSITE_STATE_TONE[state],
+      age: fresh ? heartbeatAge(lastCheck) : null,
+    },
+    lastCheckAt: lastCheck,
+  };
 }
 
-// Registry operational state only — configuration, never a live monitor reading.
-// A registry `active` site is labelled ACTIVE, NOT ONLINE (ONLINE requires a
-// fresh website-monitor result, surfaced separately via the heartbeat).
-function siteState(status: string | null | undefined): SiteModuleState {
-  switch ((status ?? '').toLowerCase()) {
-    case 'healthy':
-    case 'active':
-    case 'online':
-      return 'active';
-    case 'warning':
-    case 'partial':
-    case 'degraded':
-      return 'degraded';
-    case 'critical':
-    case 'offline':
-    case 'down':
-      return 'offline';
-    case 'unknown':
-      return 'unknown';
-    default:
-      return 'not_configured';
+/**
+ * Combine website health and database health into a single overall site state.
+ * Website and database remain SEPARATE signals; the combination only degrades
+ * (never declares offline) a LIVE website when its database is offline, stale,
+ * degraded or in check-error. A database problem is never confused with a
+ * website outage, and a monitoring failure is never presented as downtime.
+ */
+function combineSiteHealth(
+  websiteState: WebsiteState,
+  database: SiteDatabaseHealth | null,
+): { state: WebsiteState; reason: string | null } {
+  if (websiteState === 'online' && database) {
+    switch (database.status) {
+      case 'healthy':
+      case 'unknown':
+      case 'not_configured':
+        return { state: 'online', reason: null };
+      case 'offline':
+        return { state: 'degraded', reason: 'Website responding / Database unavailable' };
+      case 'stale':
+        return { state: 'degraded', reason: 'Website responding / Database heartbeat stale' };
+      case 'check_error':
+        return { state: 'degraded', reason: 'Website responding / Database check error' };
+      case 'degraded':
+        return { state: 'degraded', reason: 'Website responding / Database degraded' };
+    }
   }
+  return { state: websiteState, reason: null };
 }
 
-const STATE_LABEL: Record<SiteModuleState, string> = {
-  active: 'ACTIVE',
-  degraded: 'DEGRADED',
-  offline: 'OFFLINE',
-  unknown: 'UNKNOWN',
-  not_configured: 'NOT CONFIGURED',
+// ---------------------------------------------------------------------------
+// n8n service health (shared runtime reachability + per-site workflow health)
+// ---------------------------------------------------------------------------
+
+export type N8nHealthStatus = 'online' | 'degraded' | 'offline' | 'unknown' | 'not_configured';
+
+export interface SiteN8nHealth {
+  status: N8nHealthStatus;
+  label: string;
+  tone: Tone;
+  /** Number of this site's workflows whose latest callback is a failure (null = none registered). */
+  workflowErrors: number | null;
+  /** Timestamp of the most recent successful n8n signal for this site. */
+  lastSuccessAt: string | null;
+}
+
+const N8N_HEALTH_META: Record<N8nHealthStatus, { label: string; tone: Tone }> = {
+  online: { label: 'LIVE', tone: 'green' },
+  degraded: { label: 'DEGRADED', tone: 'amber' },
+  offline: { label: 'UNREACHABLE', tone: 'red' },
+  unknown: { label: 'UNKNOWN', tone: 'muted' },
+  not_configured: { label: 'NOT CONFIGURED', tone: 'muted' },
 };
 
-const STATE_TONE: Record<SiteModuleState, Tone> = {
-  active: 'cyan',
-  degraded: 'amber',
-  offline: 'red',
-  unknown: 'muted',
-  not_configured: 'muted',
-};
+function callbackFailed(c: N8nCallbackRow): boolean {
+  const type = (c.callback_type ?? '').toLowerCase();
+  const outcome = (c.outcome ?? '').toLowerCase();
+  return type.includes('error') || outcome === 'failed' || outcome === 'error';
+}
+
+function callbackSucceeded(c: N8nCallbackRow): boolean {
+  const type = (c.callback_type ?? '').toLowerCase();
+  const outcome = (c.outcome ?? '').toLowerCase();
+  return type.includes('result') && !['failed', 'error'].includes(outcome);
+}
+
+/**
+ * n8n reachability is a SHARED runtime signal (one N8N_URL for DFP Command),
+ * surfaced per-site so the QuickGuard widget can show "service reachable" —
+ * which never proves that site's workflows are succeeding. Workflow health is
+ * resolved separately from the per-site workflow registry + callbacks.
+ */
+function resolveN8nHealth(siteKey: string | null): SiteN8nHealth {
+  const instance = getN8nInstances()[0] ?? null;
+  const status: N8nHealthStatus = !instance
+    ? 'unknown'
+    : instance.state === 'healthy' ? 'online'
+      : instance.state === 'degraded' ? 'degraded'
+        : instance.state === 'offline' ? 'offline'
+          : instance.state === 'not_configured' ? 'not_configured'
+            : 'unknown';
+  const meta = N8N_HEALTH_META[status];
+
+  const data = getN8nData();
+  const live = getGroupLiveData();
+
+  let siteUuid: string | null = null;
+  if (siteKey) {
+    for (const [uuid, key] of live.siteKeyByUuid.entries()) {
+      if (key === siteKey) {
+        siteUuid = uuid;
+        break;
+      }
+    }
+  }
+
+  const siteWorkflows = data.workflows.filter((w) => w.site_id === siteUuid);
+  const workflowKeys = new Set(siteWorkflows.map((w) => w.workflow_key));
+
+  // Latest callback per site workflow (callbacks arrive newest-first).
+  const latestByKey = new Map<string, N8nCallbackRow>();
+  for (const c of data.callbacks) {
+    if (!c.workflow_key || !workflowKeys.has(c.workflow_key)) continue;
+    if (!latestByKey.has(c.workflow_key)) latestByKey.set(c.workflow_key, c);
+  }
+
+  let workflowErrors = 0;
+  for (const c of latestByKey.values()) {
+    if (callbackFailed(c)) workflowErrors += 1;
+  }
+
+  let lastSuccessAt: string | null = null;
+  for (const c of data.callbacks) {
+    if (!c.workflow_key || !workflowKeys.has(c.workflow_key)) continue;
+    if (callbackSucceeded(c)) {
+      lastSuccessAt = c.occurred_at;
+      break;
+    }
+  }
+  if (!lastSuccessAt) {
+    const verified = siteWorkflows
+      .map((w) => w.last_verified_at)
+      .filter((t): t is string => Boolean(t))
+      .sort((a, b) => b.localeCompare(a))[0];
+    lastSuccessAt = verified ?? null;
+  }
+
+  return {
+    status,
+    label: meta.label,
+    tone: meta.tone,
+    workflowErrors: siteWorkflows.length > 0 ? workflowErrors : null,
+    lastSuccessAt,
+  };
+}
 
 /**
  * The connected site ecosystem — one module per approved brand, joined to the
@@ -255,39 +414,26 @@ export function getSiteModules(): SiteModule[] {
   const healthByKey = new Map(health.map((h) => [h.id, h]));
   const presenceByKey = new Map(presence.sites.map((s) => [s.siteKey, s.count]));
   const servicesByKey = new Map(services.map((s) => [s.key, s]));
+  const databaseByKey = getDatabaseHealthBySiteKey();
 
   return SITE_BRANDS.map((brand) => {
     const site = data.sites.find((s) => s.site_key === brand.siteKey);
     const card = brand.siteKey ? healthByKey.get(brand.siteKey) : undefined;
     const service = brand.siteKey ? servicesByKey.get(brand.siteKey) : undefined;
 
-    const heartbeat = resolveHeartbeat(
+    // One shared website-health resolution for the main label, heartbeat and
+    // group counts. Registry existence only determines configured vs not —
+    // website availability comes exclusively from the monitor result.
+    const hasRegistry = Boolean(site && card);
+    const website = resolveWebsiteHealth(
+      hasRegistry,
       service?.monitoring ?? 'not_monitored',
       service?.monitorStatus ?? null,
       service?.lastCheck ?? null,
     );
+    const database = brand.siteKey ? (databaseByKey.get(brand.siteKey) ?? null) : null;
+    const combined = combineSiteHealth(website.state, database);
 
-    if (!site || !card) {
-      return {
-        key: brand.key,
-        name: brand.name,
-        shortCode: brand.shortCode,
-        subtitle: brand.subtitle,
-        color: brand.color,
-        hub: brand.hub,
-        state: 'not_configured' as const,
-        stateLabel: STATE_LABEL.not_configured,
-        stateTone: STATE_TONE.not_configured,
-        heartbeat,
-        users: null,
-        agents: null,
-        alerts: null,
-        responseTimeMs: null,
-        sslStatus: null,
-      };
-    }
-
-    const state = siteState(site.operational_status);
     return {
       key: brand.key,
       name: brand.name,
@@ -295,13 +441,17 @@ export function getSiteModules(): SiteModule[] {
       subtitle: brand.subtitle,
       color: brand.color,
       hub: brand.hub,
-      state,
-      stateLabel: STATE_LABEL[state],
-      stateTone: STATE_TONE[state],
-      heartbeat,
-      users: presenceByKey.get(brand.siteKey!) ?? null,
-      agents: card.activeAgents,
-      alerts: card.alerts,
+      state: combined.state,
+      stateLabel: WEBSITE_STATE_LABEL[combined.state],
+      stateTone: WEBSITE_STATE_TONE[combined.state],
+      heartbeat: website.heartbeat,
+      lastCheckAt: website.lastCheckAt,
+      database,
+      n8n: resolveN8nHealth(brand.siteKey),
+      reason: combined.reason,
+      users: hasRegistry ? (presenceByKey.get(brand.siteKey!) ?? null) : null,
+      agents: hasRegistry ? card!.activeAgents : null,
+      alerts: hasRegistry ? card!.alerts : null,
       responseTimeMs: service?.responseTimeMs ?? null,
       sslStatus: service?.sslStatus ?? null,
     };
@@ -342,26 +492,29 @@ export function getGroupMetrics(): GroupMetrics {
   const presence = getUsersOnline();
   const modules = getSiteModules();
 
-  // ONLINE is authoritative only when backed by a fresh successful monitor
-  // (heartbeat LIVE). Registry-active sites are NEVER counted online.
-  const configuredModules = modules.filter((x) => x.state !== 'not_configured');
-  const configured = configuredModules.length;
+  // ONLINE is authoritative only when backed by a fresh, explicitly successful
+  // monitor result. Registry-configured sites are NEVER counted online from
+  // configuration alone — availability comes only from the website monitor.
+  const configured = modules.filter((x) => x.state !== 'not_configured').length;
   const planned = modules.length;
   const notConfigured = planned - configured;
 
-  const onlineMonitored = modules.filter((x) => x.heartbeat.state === 'live').length;
-  // Monitored configured sites = configured sites with any monitor reading
-  // (fresh success, fresh failure, or stale). This is the estate denominator.
-  const monitoredConfigured = modules.filter((x) => x.heartbeat.state !== 'not_monitored').length;
+  const online = modules.filter((x) => x.state === 'online').length;
+  // Monitored = configured sites that have a monitor record (fresh success,
+  // fresh failure, stale, or unknown — anything except NOT MONITORED / NOT
+  // CONFIGURED). This is the estate denominator, never derived from health.
+  const monitored = modules.filter(
+    (x) => x.state !== 'not_monitored' && x.state !== 'not_configured',
+  ).length;
+  const unmonitored = modules.filter((x) => x.state === 'not_monitored').length;
 
-  const estatePercent =
-    monitoredConfigured > 0 ? Math.round((onlineMonitored / monitoredConfigured) * 100) : null;
+  const estatePercent = monitored > 0 ? Math.round((online / monitored) * 100) : null;
 
   const estateLabel: GroupMetrics['estateLabel'] =
-    monitoredConfigured > 0 ? 'ONLINE' : configured > 0 ? 'NOT MONITORED' : 'NOT CONFIGURED';
+    monitored > 0 ? 'ONLINE' : configured > 0 ? 'NOT MONITORED' : 'NOT CONFIGURED';
 
   return {
-    sitesOnline: onlineMonitored,
+    sitesOnline: online,
     sitesConfigured: configured,
     sitesPlanned: planned,
     sitesNotConfigured: notConfigured,
@@ -369,9 +522,9 @@ export function getGroupMetrics(): GroupMetrics {
     agentsRunning: m.agentsWorking,
     alerts: m.criticalAlerts,
     estatePercent,
-    monitoringCoverage: monitoredConfigured > 0,
-    monitored: monitoredConfigured,
-    unmonitored: configured - monitoredConfigured,
+    monitoringCoverage: monitored > 0,
+    monitored,
+    unmonitored,
     estateLabel,
   };
 }
@@ -412,8 +565,16 @@ export function getGlobalSystemState(): GlobalSystemState {
   }
 
   const modules = getSiteModules();
-  const degraded = modules.filter((x) => x.state === 'degraded' || x.state === 'offline').length;
-  if (degraded > 0) {
+  // Website contribution to global state — offline/degraded failures plus stale
+  // and unknown (unverifiable) results all prevent an unsupported NOMINAL claim.
+  const websiteDegraded = modules.filter(
+    (x) =>
+      x.state === 'degraded' ||
+      x.state === 'offline' ||
+      x.state === 'stale' ||
+      x.state === 'unknown',
+  ).length;
+  if (websiteDegraded > 0) {
     return { state: 'degraded', label: 'DEGRADED', tone: 'amber' };
   }
   return { state: 'nominal', label: 'NOMINAL', tone: 'green' };
@@ -681,7 +842,7 @@ const MASTER_ROWS: { key: string; label: string; siteKey: string | null }[] = [
   { key: 'bn', label: 'BN MASTER', siteKey: 'the-forge' },
   { key: 'gh', label: 'GH MASTER', siteKey: 'guardianhub' },
   { key: 'lethub', label: 'LETHUB MASTER', siteKey: 'lethub' },
-  { key: 'gg', label: 'GG MASTER', siteKey: null },
+  { key: 'gg', label: 'GG MASTER', siteKey: 'garageflow' },
   { key: 'vowora', label: 'VOWORA MASTER', siteKey: 'wedora' },
   { key: 'synq', label: 'SYNQ MASTER', siteKey: null },
 ];
