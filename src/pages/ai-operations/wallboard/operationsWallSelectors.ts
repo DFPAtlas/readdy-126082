@@ -104,8 +104,8 @@ export interface SiteBrand {
 }
 
 // The approved estate layout (8 brands). Display names use the REAL registry
-// names (The Forge, Wedora) per the owner decision; Synqoro remains a planned
-// module that renders NOT CONFIGURED until registered.
+// names (The Forge, Wedora) per the owner decision. Each module is linked to
+// its registry site_key; missing registry entries render NOT CONFIGURED.
 export const SITE_BRANDS: SiteBrand[] = [
   { key: 'dfp', siteKey: 'digital-footprint', name: 'DFP', shortCode: 'DFP', subtitle: 'AGENCY & OPERATIONS', color: 'cyan', hub: true },
   { key: 'quickguard', siteKey: 'quickguard', name: 'QuickGuard', shortCode: 'QG', subtitle: 'SECURITY MARKETPLACE', color: 'blue', hub: false },
@@ -114,7 +114,7 @@ export const SITE_BRANDS: SiteBrand[] = [
   { key: 'lethub', siteKey: 'lethub', name: 'LetHub', shortCode: 'LH', subtitle: 'LETTINGS PLATFORM', color: 'purple', hub: false },
   { key: 'garageflow', siteKey: 'garageflow', name: 'GarageFlow', shortCode: 'GF', subtitle: 'VEHICLE CARE', color: 'yellow', hub: false },
   { key: 'vowora', siteKey: 'wedora', name: 'Vowora', shortCode: 'VW', subtitle: 'WEDDING PLANNING', color: 'pink', hub: false },
-  { key: 'synqoro', siteKey: null, name: 'Synqoro', shortCode: 'SQ', subtitle: 'AI & DATA SOLUTIONS', color: 'violet', hub: false },
+  { key: 'synqoro', siteKey: 'synqoro', name: 'Synqoro', shortCode: 'SQ', subtitle: 'AI & DATA SOLUTIONS', color: 'violet', hub: false },
 ];
 
 export type WebsiteState =
