@@ -33,6 +33,7 @@ import { supabase } from '@/lib/supabase';
 
 export interface MonitoredWebsiteRow {
   id: number;
+  site_key: string | null;
   website_name: string | null;
   url: string | null;
   environment: string | null;
@@ -99,7 +100,7 @@ export async function refreshSiteMonitorData(): Promise<void> {
   const res = await supabase
     .from('internal_monitored_websites')
     .select(
-      'id,website_name,url,environment,status,last_status_code,last_response_time_ms,last_checked_at,ssl_status,expected_status_code',
+      'id,site_key,website_name,url,environment,status,last_status_code,last_response_time_ms,last_checked_at,ssl_status,expected_status_code',
     )
     .order('website_name', { ascending: true });
 

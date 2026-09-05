@@ -133,8 +133,12 @@ export function getSitesServicesList(): SitesServiceTile[] {
   const presence = getUsersOnline();
   const now = new Date();
 
+  // Join by stable site_key first; normalised-domain matching is only a legacy
+  // fallback for monitor rows that predate the site_key pairing.
+  const monitorBySiteKey = new Map<string, (typeof monitor.websites)[number]>();
   const monitorByDomain = new Map<string, (typeof monitor.websites)[number]>();
   for (const w of monitor.websites) {
+    if (w.site_key) monitorBySiteKey.set(w.site_key, w);
     const key = normalizeDomain(w.url);
     if (key) monitorByDomain.set(key, w);
   }
@@ -142,8 +146,7 @@ export function getSitesServicesList(): SitesServiceTile[] {
   const presenceByKey = new Map(presence.sites.map((s) => [s.siteKey, s.count]));
 
   return data.sites.map((s) => {
-    const domainKey = normalizeDomain(s.domain);
-    const match = monitorByDomain.get(domainKey);
+    const match = monitorBySiteKey.get(s.site_key) ?? monitorByDomain.get(normalizeDomain(s.domain));
 
     let monitoring: SitesServiceTile['monitoring'];
     let responseTimeMs: number | null = null;

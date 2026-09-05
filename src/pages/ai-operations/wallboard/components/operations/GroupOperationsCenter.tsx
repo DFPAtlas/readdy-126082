@@ -88,7 +88,7 @@ export default function GroupOperationsCenter() {
 
   const byKey = (key: string): SiteModuleData => modules.find((m) => m.key === key)!;
   const top = [byKey('quickguard'), byKey('guardianhub'), byKey('buildnerve')];
-  const middle = [byKey('lethub'), byKey('dfp'), byKey('garageglow')];
+  const middle = [byKey('lethub'), byKey('dfp'), byKey('garageflow')];
 
   return (
     <section className="flex flex-col min-h-0 flex-1">

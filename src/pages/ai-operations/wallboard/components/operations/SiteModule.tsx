@@ -16,6 +16,19 @@ function metric(label: string, value: number | null, accent: string) {
   );
 }
 
+function sslLabel(s: 'valid' | 'warning' | 'expired' | null): string | null {
+  switch (s) {
+    case 'valid':
+      return 'VALID';
+    case 'warning':
+      return 'WARNING';
+    case 'expired':
+      return 'EXPIRED';
+    default:
+      return null;
+  }
+}
+
 /** Compact secondary heartbeat — monitoring signal, not operational state. */
 function Heartbeat({ hb }: { hb: SiteHeartbeat }) {
   const tone = toneHex(hb.tone);
@@ -82,6 +95,11 @@ export default function SiteModule({ site }: { site: SiteModuleData }) {
         <span className="ml-auto"><Heartbeat hb={site.heartbeat} /></span>
       </div>
 
+      <div className="flex items-center justify-between mt-1 text-[7.5px] font-label tracking-[0.1em] text-slate-500">
+        <span className="font-mono">RT {site.responseTimeMs != null ? `${site.responseTimeMs}ms` : '—'}</span>
+        <span className="font-mono">SSL {sslLabel(site.sslStatus) ?? '—'}</span>
+      </div>
+
       <div className="flex items-center justify-between mt-2 pt-2 border-t border-cyan-400/10">
         {metric('USERS', site.users, '#67e8f9')}
         {metric('AGENTS', site.agents, '#a5b4fc')}
@@ -123,6 +141,11 @@ function HubModule({ site, accent, health }: { site: SiteModuleData; accent: { c
           style={{ background: health }}
         />
         <Heartbeat hb={site.heartbeat} />
+      </div>
+
+      <div className="flex items-center justify-center gap-4 mt-1 text-[7.5px] font-label tracking-[0.1em] text-slate-500">
+        <span className="font-mono">RT {site.responseTimeMs != null ? `${site.responseTimeMs}ms` : '—'}</span>
+        <span className="font-mono">SSL {sslLabel(site.sslStatus) ?? '—'}</span>
       </div>
 
       <div className="flex items-center justify-center gap-5 mt-2 pt-2 w-full border-t border-cyan-400/10">

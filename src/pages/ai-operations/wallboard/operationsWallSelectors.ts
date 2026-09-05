@@ -101,7 +101,7 @@ export interface SiteBrand {
 }
 
 // The approved estate layout (8 brands). Display names use the REAL registry
-// names (The Forge, Wedora) per the owner decision; GarageGlow + Synqoro are
+// names (The Forge, Wedora) per the owner decision; GarageFlow + Synqoro are
 // planned modules that render NOT CONFIGURED until registered.
 export const SITE_BRANDS: SiteBrand[] = [
   { key: 'dfp', siteKey: 'digital-footprint', name: 'DFP', shortCode: 'DFP', subtitle: 'AGENCY & OPERATIONS', color: 'cyan', hub: true },
@@ -109,8 +109,8 @@ export const SITE_BRANDS: SiteBrand[] = [
   { key: 'guardianhub', siteKey: 'guardianhub', name: 'GuardianHub', shortCode: 'GH', subtitle: 'SECURITY COMPANIES', color: 'teal', hub: false },
   { key: 'buildnerve', siteKey: 'the-forge', name: 'The Forge', shortCode: 'TF', subtitle: 'AI BUILD PLATFORM', color: 'orange', hub: false },
   { key: 'lethub', siteKey: 'lethub', name: 'LetHub', shortCode: 'LH', subtitle: 'LETTINGS PLATFORM', color: 'purple', hub: false },
-  { key: 'garageglow', siteKey: null, name: 'GarageGlow', shortCode: 'GG', subtitle: 'VEHICLE CARE', color: 'yellow', hub: false },
-  { key: 'vowora', siteKey: 'wedora', name: 'Wedora', shortCode: 'WD', subtitle: 'WEDDING PLANNING', color: 'pink', hub: false },
+  { key: 'garageflow', siteKey: null, name: 'GarageFlow', shortCode: 'GF', subtitle: 'VEHICLE CARE', color: 'yellow', hub: false },
+  { key: 'vowora', siteKey: 'wedora', name: 'Vowora', shortCode: 'VW', subtitle: 'WEDDING PLANNING', color: 'pink', hub: false },
   { key: 'synqoro', siteKey: null, name: 'Synqoro', shortCode: 'SQ', subtitle: 'AI & DATA SOLUTIONS', color: 'violet', hub: false },
 ];
 
@@ -129,6 +129,8 @@ export interface SiteModule {
   users: number | null;
   agents: number | null;
   alerts: number | null;
+  responseTimeMs: number | null;
+  sslStatus: 'valid' | 'warning' | 'expired' | null;
   heartbeat: SiteHeartbeat;
 }
 
@@ -276,6 +278,8 @@ export function getSiteModules(): SiteModule[] {
         users: null,
         agents: null,
         alerts: null,
+        responseTimeMs: null,
+        sslStatus: null,
       };
     }
 
@@ -294,6 +298,8 @@ export function getSiteModules(): SiteModule[] {
       users: presenceByKey.get(brand.siteKey!) ?? null,
       agents: card.activeAgents,
       alerts: card.alerts,
+      responseTimeMs: service?.responseTimeMs ?? null,
+      sslStatus: service?.sslStatus ?? null,
     };
   });
 }
@@ -319,6 +325,10 @@ export interface GroupMetrics {
   estatePercent: number | null;
   /** Whether any configured site has a website monitor (drives NOT MONITORED state). */
   monitoringCoverage: boolean;
+  /** Configured sites that have a website monitor record (any reading). */
+  monitored: number;
+  /** Configured sites without a website monitor record. */
+  unmonitored: number;
   /** Estate label when a percentage cannot be computed. */
   estateLabel: 'ONLINE' | 'NOT MONITORED' | 'NOT CONFIGURED';
 }
@@ -356,6 +366,8 @@ export function getGroupMetrics(): GroupMetrics {
     alerts: m.criticalAlerts,
     estatePercent,
     monitoringCoverage: monitoredConfigured > 0,
+    monitored: monitoredConfigured,
+    unmonitored: configured - monitoredConfigured,
     estateLabel,
   };
 }
