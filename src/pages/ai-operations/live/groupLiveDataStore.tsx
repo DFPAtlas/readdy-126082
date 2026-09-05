@@ -245,73 +245,6 @@ function isTestOrSandbox(row: { environment?: string | null; is_active?: boolean
   return row.environment === 'sandbox' || row.is_active === false;
 }
 
-// Exact legacy demo fingerprints from 202609140000_ai_operations_alerts_incidents.sql.
-// That migration inserted demo cases with production defaults. Preserve source
-// records for review, but exclude unchanged fixtures from live totals. Match
-// content and event timestamps as well as keys so new occurrences stay visible.
-// This is provenance matching, not an age cutoff or automatic resolution.
-type LegacyDemoFingerprint = readonly [string, string, string, string, string, string, string | null, number | null];
-const LEGACY_DEMO_CASES: readonly LegacyDemoFingerprint[] = [
-  ["ALR-5001", "OpenAI provider degraded — elevated latency", "The shared cloud model provider is reporting elevated response latency and intermittent 5xx errors on completion calls.", "high", "investigating", "2026-08-25T09:12:00Z", "2026-08-25T10:05:00Z", 1],
-  ["ALR-5002", "n8n connection failure — automation queue stalled", "The shared n8n automation connection is unreachable, stalling scheduled workflow execution across the group.", "critical", "escalated", "2026-08-25T08:55:00Z", "2026-08-25T09:50:00Z", 1],
-  ["ALR-5003", "Blocked RED action — production data deletion attempt", "An agent attempted a production data deletion that was blocked by policy and routed to human approval.", "high", "awaiting_approval", "2026-08-25T09:30:00Z", "2026-08-25T10:10:00Z", 1],
-  ["ALR-5004", "Approval expiring — RED deployment authorisation", "A RED deployment approval is approaching expiry without sign-off, risking workflow stall.", "high", "awaiting_approval", "2026-08-25T08:40:00Z", "2026-08-25T10:00:00Z", 1],
-  ["ALR-5005", "Group security anomaly scan blocked", "The group-wide security anomaly scan was blocked at the execution gate pending risk review.", "critical", "investigating", "2026-08-25T09:05:00Z", "2026-08-25T10:15:00Z", 1],
-  ["ALR-5006", "Repeated escalation-policy mismatch", "A recurring mismatch between escalation routing and policy has been detected again.", "medium", "acknowledged", "2026-08-25T07:50:00Z", "2026-08-25T08:30:00Z", 3],
-  ["ALR-5010", "Digital Footprint support diagnostics failure", "The Digital Footprint diagnostics agent failed a support-diagnosis run, delaying ticket resolution.", "high", "investigating", "2026-08-25T09:58:00Z", "2026-08-25T10:20:00Z", 1],
-  ["ALR-5011", "Digital Footprint data health warning", "A data health check flagged a minor inconsistency in project records.", "medium", "monitoring", "2026-08-25T08:30:00Z", "2026-08-25T09:00:00Z", 1],
-  ["ALR-5020", "QuickGuard guard matching run failure", "The guard matching agent failed a shift-matching run, leaving a shift unassigned.", "high", "investigating", "2026-08-25T10:31:00Z", "2026-08-25T10:45:00Z", 1],
-  ["ALR-5021", "QuickGuard compliance licence warning", "A licence renewal window is approaching for several guards, flagged by the compliance agent.", "medium", "waiting", "2026-08-25T08:10:00Z", "2026-08-25T09:00:00Z", 1],
-  ["ALR-5022", "QuickGuard timesheet sync failure", "Timesheet data failed to sync to payroll, flagged for reconciliation.", "medium", "acknowledged", "2026-08-25T07:30:00Z", "2026-08-25T08:10:00Z", 1],
-  ["ALR-5030", "GuardianHub check-call failure (repeating)", "The check-call agent failed again on a welfare check-call, matching a previously documented incident.", "critical", "escalated", "2026-08-25T09:20:00Z", "2026-08-25T10:10:00Z", 3],
-  ["ALR-5031", "GuardianHub Supabase degraded", "The GuardianHub Supabase connection is degraded, slowing database operations.", "high", "investigating", "2026-08-25T09:00:00Z", "2026-08-25T10:00:00Z", 1],
-  ["ALR-5032", "GuardianHub welfare escalation blocked", "A welfare escalation was blocked pending human approval.", "critical", "awaiting_approval", "2026-08-25T09:40:00Z", "2026-08-25T10:20:00Z", 1],
-  ["ALR-5040", "LetHub tenancy compliance warning", "A tenancy compliance review flagged documents approaching expiry.", "medium", "monitoring", "2026-08-25T08:20:00Z", "2026-08-25T09:10:00Z", 1],
-  ["ALR-5041", "LetHub maintenance triage failure", "The maintenance agent failed to triage an incoming maintenance request.", "high", "investigating", "2026-08-25T09:50:00Z", "2026-08-25T10:15:00Z", 1],
-  ["ALR-5050", "Wedora RSVP notification failure", "The RSVP agent failed to send guest notifications due to an email connection issue.", "high", "investigating", "2026-08-25T09:15:00Z", "2026-08-25T10:05:00Z", 1],
-  ["ALR-5051", "Wedora supplier quote chase failure", "The supplier agent failed to chase an outstanding quote.", "medium", "acknowledged", "2026-08-25T08:05:00Z", "2026-08-25T08:50:00Z", 1],
-  ["ALR-5060", "The Forge UAT failure", "A release UAT cycle failed validation, blocking the release gate.", "high", "investigating", "2026-08-25T09:35:00Z", "2026-08-25T10:20:00Z", 1],
-  ["ALR-5061", "The Forge code agent error", "The code agent entered an error state during a generation task.", "high", "escalated", "2026-08-25T10:00:00Z", "2026-08-25T10:25:00Z", 1],
-  ["ALR-5062", "The Forge n8n degraded", "The Forge n8n connection is degraded, slowing build automation.", "medium", "monitoring", "2026-08-25T08:45:00Z", "2026-08-25T09:30:00Z", 1],
-  ["ALR-5007", "Group billing threshold warning", "Group AI spend approached its daily cost threshold.", "low", "acknowledged", "2026-08-25T08:00:00Z", "2026-08-25T08:40:00Z", 1],
-  ["ALR-5008", "Group backup failure", "A scheduled backup failed to complete.", "medium", "investigating", "2026-08-25T09:10:00Z", "2026-08-25T10:00:00Z", 1],
-  ["ALR-5090", "LetHub property sync resolved", "A property sync issue was diagnosed and fixed.", "medium", "resolved", "2026-08-24T16:20:00Z", "2026-08-24T18:00:00Z", 1],
-  ["ALR-5091", "Wedora seating validation resolved", "A seating chart validation failure was fixed and re-verified.", "medium", "resolved", "2026-08-24T15:40:00Z", "2026-08-24T17:30:00Z", 1],
-  ["ALR-5092", "QuickGuard payroll reconciliation closed", "A payroll reconciliation run failure was resolved and closed.", "high", "closed", "2026-08-24T14:10:00Z", "2026-08-24T16:40:00Z", 2],
-  ["ALR-5093", "The Forge sandbox isolation resolved", "A sandbox isolation breach attempt was contained and resolved.", "high", "resolved", "2026-08-24T13:30:00Z", "2026-08-24T15:50:00Z", 1],
-  ["INC-8101", "OpenAI provider degraded — elevated latency", "The shared cloud model provider is reporting elevated response latency and intermittent 5xx errors on completion calls.", "high", "investigating", "2026-08-25T09:18:00Z", null, null],
-  ["INC-8102", "n8n connection failure — automation queue stalled", "The shared n8n automation connection is unreachable, stalling scheduled workflow execution across the group.", "critical", "escalated", "2026-08-25T09:00:00Z", null, null],
-  ["INC-8103", "Blocked RED action — production data deletion attempt", "An agent attempted a production data deletion that was blocked by policy and routed to human approval.", "high", "awaiting_approval", "2026-08-25T09:35:00Z", null, null],
-  ["INC-8104", "Approval expiring — RED deployment authorisation", "A RED deployment approval is approaching expiry without sign-off, risking workflow stall.", "high", "awaiting_approval", "2026-08-25T08:45:00Z", null, null],
-  ["INC-8105", "Group security anomaly scan blocked", "The group-wide security anomaly scan was blocked at the execution gate pending risk review.", "critical", "investigating", "2026-08-25T09:10:00Z", null, null],
-  ["INC-8106", "Repeated escalation-policy mismatch", "A recurring mismatch between escalation routing and policy has been detected again.", "medium", "acknowledged", "2026-08-25T08:00:00Z", null, null],
-  ["INC-8110", "Digital Footprint support diagnostics failure", "The Digital Footprint diagnostics agent failed a support-diagnosis run, delaying ticket resolution.", "high", "investigating", "2026-08-25T10:02:00Z", null, null],
-  ["INC-8120", "QuickGuard guard matching run failure", "The guard matching agent failed a shift-matching run, leaving a shift unassigned.", "high", "investigating", "2026-08-25T10:35:00Z", null, null],
-  ["INC-8130", "GuardianHub check-call failure (repeating)", "The check-call agent failed again on a welfare check-call, matching a previously documented incident.", "critical", "escalated", "2026-08-25T09:25:00Z", null, null],
-  ["INC-8131", "GuardianHub Supabase degraded", "The GuardianHub Supabase connection is degraded, slowing database operations.", "high", "investigating", "2026-08-25T09:05:00Z", null, null],
-  ["INC-8132", "GuardianHub welfare escalation blocked", "A welfare escalation was blocked pending human approval.", "critical", "awaiting_approval", "2026-08-25T09:45:00Z", null, null],
-  ["INC-8141", "LetHub maintenance triage failure", "The maintenance agent failed to triage an incoming maintenance request.", "high", "investigating", "2026-08-25T09:55:00Z", null, null],
-  ["INC-8150", "Wedora RSVP notification failure", "The RSVP agent failed to send guest notifications due to an email connection issue.", "high", "investigating", "2026-08-25T09:20:00Z", null, null],
-  ["INC-8160", "The Forge UAT failure", "A release UAT cycle failed validation, blocking the release gate.", "high", "investigating", "2026-08-25T09:40:00Z", null, null],
-  ["INC-8161", "The Forge code agent error", "The code agent entered an error state during a generation task.", "high", "escalated", "2026-08-25T10:05:00Z", null, null],
-  ["INC-8192", "QuickGuard payroll reconciliation closed", "A payroll reconciliation run failure was resolved and closed.", "high", "closed", "2026-08-24T14:20:00Z", null, null],
-  ["INC-8193", "The Forge sandbox isolation resolved", "A sandbox isolation breach attempt was contained and resolved.", "high", "resolved", "2026-08-24T13:40:00Z", null, null],
-];
-
-function isLegacyDemoCase(row: AiAlertRow | AiIncidentRow): boolean {
-  const alert = 'alert_key' in row;
-  const key = alert ? row.alert_key : row.incident_key;
-  const seed = LEGACY_DEMO_CASES.find((entry) => entry[0] === key);
-  if (!seed || (alert && row.source_reference)) return false;
-  const sameInstant = (value: string | null, expected: string | null) =>
-    value != null && expected != null && Date.parse(value) === Date.parse(expected);
-  return row.title === seed[1] && row.summary === seed[2] &&
-    row.severity === seed[3] && row.status === seed[4] &&
-    sameInstant(alert ? row.first_seen_at : row.started_at, seed[5]) &&
-    (!alert || (sameInstant(row.last_seen_at, seed[6]) && row.occurrence_count === seed[7])) &&
-    !row.correlation_id;
-}
-
 function buildResolutionMaps(
   sites: AiSiteRow[],
   agents: AiAgentRow[],
@@ -415,8 +348,8 @@ export async function refreshGroupLiveData(): Promise<void> {
   const runSteps = stepsRes.data ?? [];
   const approvals = (approvalsRes.data ?? []).filter((r) => r.environment !== 'sandbox');
   const auditEvents = (auditRes.data ?? []).filter((r) => r.environment !== 'sandbox');
-  const alerts = (alertsRes.data ?? []).filter((r) => !isTestOrSandbox(r) && !isLegacyDemoCase(r));
-  const incidents = (incidentsRes.data ?? []).filter((r) => !isTestOrSandbox(r) && !isLegacyDemoCase(r));
+  const alerts = (alertsRes.data ?? []).filter((r) => !isTestOrSandbox(r));
+  const incidents = (incidentsRes.data ?? []).filter((r) => !isTestOrSandbox(r));
   const orchestrations = orchRes.data ?? [];
   const tools = (toolsRes.data ?? []).filter((r) => !isTestOrSandbox(r));
   const toolAccess = toolAccessRes.data ?? [];
