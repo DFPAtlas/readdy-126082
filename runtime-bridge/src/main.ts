@@ -34,6 +34,7 @@ const config = {
   nodeKey: (Deno.env.get("DFP_BRIDGE_NODE_KEY") ?? "").trim(),
   nodeName: (Deno.env.get("DFP_BRIDGE_NODE_NAME") ?? "").trim(),
   n8nUrl: (Deno.env.get("N8N_LOCAL_URL") ?? "").trim(),
+  n8nSecondaryUrl: (Deno.env.get("N8N_SECONDARY_URL") ?? "").trim(),
   n8nSandboxWebhookPath: (Deno.env.get("N8N_SANDBOX_WEBHOOK_PATH") ?? "").trim(),
   ollamaUrl: (Deno.env.get("OLLAMA_LOCAL_URL") ?? "").trim(),
   heartbeatSeconds: parseInt(Deno.env.get("HEARTBEAT_INTERVAL_SECONDS") ?? "60", 10),
@@ -136,17 +137,20 @@ async function sendRequest(operation: string, body: Record<string, unknown>): Pr
 }
 
 // --- Local safe health checks (read-only, sanitised) -------------------------
-async function checkN8n(): Promise<{ status: string; latency_ms: number | null }> {
-  if (!config.n8nUrl) return { status: "not_configured", latency_ms: null };
+async function checkN8nUrl(url: string): Promise<{ configured: boolean; status: string; latency_ms: number | null; sampled_at: string }> {
+  if (!url) return { configured: false, status: "not_configured", latency_ms: null, sampled_at: new Date().toISOString() };
   const started = Date.now();
   try {
-    const res = await fetch(config.n8nUrl.replace(/\/+$/, "") + "/healthz", { method: "GET" });
+    const res = await fetch(url.replace(/\/+$/, "") + "/healthz", { method: "GET" });
     const latencyMs = Date.now() - started;
-    return res.ok
-      ? { status: "healthy", latency_ms: latencyMs }
-      : { status: "degraded", latency_ms: latencyMs };
+    return {
+      configured: true,
+      status: res.ok ? "healthy" : "degraded",
+      latency_ms: latencyMs,
+      sampled_at: new Date().toISOString(),
+    };
   } catch {
-    return { status: "unavailable", latency_ms: null };
+    return { configured: true, status: "unavailable", latency_ms: null, sampled_at: new Date().toISOString() };
   }
 }
 
@@ -1647,7 +1651,8 @@ async function handshake(): Promise<boolean> {
 }
 
 async function heartbeat(): Promise<void> {
-  const n8n = await checkN8n();
+  const n8n = await checkN8nUrl(config.n8nUrl);
+  const n8nSecondary = await checkN8nUrl(config.n8nSecondaryUrl);
   const ollama = await checkOllama();
   const host = await sampleHostTelemetry();
   const started = Date.now();
@@ -1659,11 +1664,12 @@ async function heartbeat(): Promise<void> {
     n8n_status: n8n.status,
     ollama_status: ollama.status,
     local_services: {
-      n8n: { configured: !!config.n8nUrl, status: n8n.status },
+      n8n: { configured: n8n.configured, status: n8n.status, latency_ms: n8n.latency_ms, sampled_at: n8n.sampled_at },
+      n8n_secondary: { configured: n8nSecondary.configured, status: n8nSecondary.status, latency_ms: n8nSecondary.latency_ms, sampled_at: n8nSecondary.sampled_at },
       ollama: { configured: !!config.ollamaUrl, status: ollama.status, model_count: ollama.models },
       host,
     },
-    safe_summary: `Bridge heartbeat: n8n=${n8n.status}, ollama=${ollama.status} (no inference, no workflow).`,
+    safe_summary: `Bridge heartbeat: n8n=${n8n.status}, n8n_secondary=${n8nSecondary.status}, ollama=${ollama.status} (no inference, no workflow).`,
     capabilities: ["n8n_health", "n8n_metadata", "ollama_health", "ollama_models", "signed_callbacks", "outbound_https"],
   });
   if (result) {

@@ -43,6 +43,17 @@ function metricColor(value: string, accentColor: string): string {
     : accentColor;
 }
 
+/** Amber provenance badge — shown on a runtime card when its latest heartbeat
+ *  is simulated (heartbeat_key starts with SIM-). A following real heartbeat
+ *  clears it automatically. */
+function SimulatedBadge() {
+  return (
+    <span className="text-[7px] font-bold tracking-[0.1em] px-1 py-0.5 rounded-sm border shrink-0" style={{ color: '#f59e0b', borderColor: '#f59e0b55', background: '#f59e0b14' }}>
+      SIMULATED
+    </span>
+  );
+}
+
 function NodeMetrics({ node, accentColor, single = false }: { node: ComputeNode; accentColor: string; single?: boolean }) {
   if (single) {
     return (
@@ -111,7 +122,7 @@ function TelemetryDial({ gauge, nodeName }: { gauge: ComputeGauge; nodeName: str
           className={`w-1 h-1 rounded-full ${hasValue ? 'ow-dial-pulse' : ''}`}
           style={{ background: hasValue ? accent : '#64748b' }}
         />
-        <span className="text-[6.5px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: hasValue ? accent : '#64748b' }}>
+        <span className="text-[7.5px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: hasValue ? accent : '#64748b' }}>
           {hasValue ? 'LIVE' : 'NOT MONITORED'}
         </span>
       </span>
@@ -160,7 +171,7 @@ function TronInstrument({ dial, nodeName }: { dial: TronDial; nodeName: string }
           className={`w-1 h-1 rounded-full ${pulseLive ? 'ow-tron-pulse' : ''}`}
           style={{ background: hasValue ? tone : '#64748b', '--ow-tron-glow': glow } as CSSProperties}
         />
-        <span className="text-[6.5px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: hasValue ? tone : '#64748b' }}>
+        <span className="text-[7.5px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: hasValue ? tone : '#64748b' }}>
           {dial.statusLabel}
         </span>
       </span>
@@ -172,6 +183,7 @@ const AI_INSTRUMENT_ACCENT: Record<Tone, { accent: string; glow: string }> = {
   green: { accent: '#22c55e', glow: 'rgba(34, 197, 94, 0.4)' },
   amber: { accent: '#f59e0b', glow: 'rgba(245, 158, 11, 0.35)' },
   red: { accent: '#ef4444', glow: 'rgba(239, 68, 68, 0.35)' },
+  cyan: { accent: '#22d3ee', glow: 'rgba(34, 211, 238, 0.4)' },
   muted: { accent: '#64748b', glow: 'rgba(100, 116, 139, 0.15)' },
 };
 
@@ -180,7 +192,7 @@ const AI_INSTRUMENT_ACCENT: Record<Tone, { accent: string; glow: string }> = {
 const VECTOR_CONNECTED = { accent: '#22d3ee', glow: 'rgba(34, 211, 238, 0.4)' };
 
 function vectorAccent(tone: Tone): { accent: string; glow: string } {
-  return tone === 'green' ? VECTOR_CONNECTED : AI_INSTRUMENT_ACCENT[tone];
+  return tone === 'cyan' ? VECTOR_CONNECTED : AI_INSTRUMENT_ACCENT[tone];
 }
 
 function AiSystemPanel() {
@@ -193,7 +205,7 @@ function AiSystemPanel() {
 
   return (
     <div className="ow-panel flex flex-col px-3 py-2 min-w-0 max-w-full">
-      <div className="shrink-0 text-[9px] font-label tracking-[0.2em] text-cyan-300 border-b border-cyan-400/10 pb-1.5">
+      <div className="shrink-0 text-[10px] font-label tracking-[0.24em] text-cyan-300 border-b border-cyan-400/10 pb-1.5">
         AI SYSTEMS
       </div>
       <div className="flex-1 flex flex-col justify-center gap-1.5 min-w-0">
@@ -244,7 +256,7 @@ function VectorDbInstrument({ row }: { row: AiSystemRow }) {
       <span className="text-[7.5px] font-label tracking-[0.18em] text-slate-500 whitespace-nowrap">{row.label}</span>
       <span className="flex items-center gap-[3px]">
         <span className="w-1 h-1 rounded-full" style={{ background: accent }} />
-        <span className="text-[6.5px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: accent }}>
+        <span className="text-[7.5px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: accent }}>
           {row.value}
         </span>
       </span>
@@ -282,7 +294,7 @@ function ToolsInstrument({ row }: { row: AiSystemRow }) {
       <span className="text-[7.5px] font-label tracking-[0.18em] text-slate-500 whitespace-nowrap">{row.label}</span>
       <span className="flex items-center gap-[3px]">
         <span className="w-1 h-1 rounded-full" style={{ background: accent }} />
-        <span className="text-[6.5px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: accent }}>
+        <span className="text-[7.5px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: accent }}>
           {row.value}
         </span>
       </span>
@@ -351,8 +363,11 @@ export default function ComputeCore() {
               <span className="text-[12px] font-bold tracking-[0.1em]" style={{ color: '#fb923c' }}>HAL</span>
               <span className="block text-[7.5px] font-label tracking-[0.18em] text-slate-500">ORCHESTRATION NODE</span>
             </div>
-            <span className="ml-auto text-[8.5px] font-label tracking-[0.12em]" style={{ color: toneHex(hal.tone) }}>
-              {hal.stateLabel}
+            <span className="ml-auto flex items-center gap-1.5">
+              <span className="text-[8.5px] font-label tracking-[0.12em]" style={{ color: toneHex(hal.tone) }}>
+                {hal.stateLabel}
+              </span>
+              {hal.simulated && <SimulatedBadge />}
             </span>
           </div>
 
@@ -385,7 +400,7 @@ export default function ComputeCore() {
             </div>
           </div>
 
-          <span className="text-[6.5px] font-label tracking-[0.12em] text-slate-500 mt-1.5 text-center leading-tight">
+          <span className="text-[7.5px] font-label tracking-[0.12em] text-slate-500 mt-1.5 text-center leading-tight">
             HEARTBEATS · HEALTH · MODEL CATALOGUE
           </span>
 
@@ -405,8 +420,11 @@ export default function ComputeCore() {
               <span className="text-[12px] font-bold tracking-[0.1em]" style={{ color: '#a78bfa' }}>TRON</span>
               <span className="block text-[7.5px] font-label tracking-[0.18em] text-slate-500">AI OVERWATCH</span>
             </div>
-            <span className="ml-auto text-[8.5px] font-label tracking-[0.12em]" style={{ color: toneHex(tron.tone) }}>
-              {tron.stateLabel}
+            <span className="ml-auto flex items-center gap-1.5">
+              <span className="text-[8.5px] font-label tracking-[0.12em]" style={{ color: toneHex(tron.tone) }}>
+                {tron.stateLabel}
+              </span>
+              {tron.simulated && <SimulatedBadge />}
             </span>
           </div>
 

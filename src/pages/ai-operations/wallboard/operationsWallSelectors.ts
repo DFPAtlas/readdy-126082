@@ -29,15 +29,9 @@ import {
   getSiteMasterCards,
   getGroupOrchestrator,
 } from '@/pages/ai-operations/wallboard/masterAgentsSelectors';
-import {
-  getInfrastructureHosts,
-  getInfrastructureNetwork,
-  getInfrastructureStorage,
-} from '@/pages/ai-operations/wallboard/infrastructureSelectors';
-import { getN8nInstances } from '@/pages/ai-operations/wallboard/n8nSelectors';
-import { getDatabaseSummary } from '@/pages/ai-operations/wallboard/databaseSelectors';
-import { getHalHost, getTronHost, getOllamaStatus, getOversight } from '@/pages/ai-operations/wallboard/aiInfraSelectors';
-import { getRuntimeHealthState, HAL_RUNTIME_NODE_KEY } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
+import { getOperationsHealthData } from '@/pages/ai-operations/wallboard/operationsHealthStore';
+import { getHalHost, getTronHost } from '@/pages/ai-operations/wallboard/aiInfraSelectors';
+import { getRuntimeHealthState, HAL_RUNTIME_NODE_KEY, TRON_RUNTIME_NODE_KEY } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import { getVectorHealth } from '@/pages/ai-operations/wallboard/knowledgeSelectors';
 import { getSecuritySummary, getSecurityConnections } from '@/pages/ai-operations/wallboard/securitySelectors';
 import { getSitesServicesList } from '@/pages/ai-operations/wallboard/siteSelectors';
@@ -120,7 +114,7 @@ export const SITE_BRANDS: SiteBrand[] = [
   { key: 'synqoro', siteKey: null, name: 'Synqoro', shortCode: 'SQ', subtitle: 'AI & DATA SOLUTIONS', color: 'violet', hub: false },
 ];
 
-export type SiteModuleState = 'online' | 'degraded' | 'offline' | 'not_configured';
+export type SiteModuleState = 'active' | 'degraded' | 'offline' | 'not_configured';
 
 export interface SiteModule {
   key: string;
@@ -154,7 +148,7 @@ export interface SiteHeartbeat {
 const HEARTBEAT_LABEL: Record<HeartbeatState, string> = {
   live: 'LIVE',
   stale: 'STALE',
-  no_heartbeat: 'NO HEARTBEAT',
+  no_heartbeat: 'OFFLINE',
   not_monitored: 'NOT MONITORED',
 };
 
@@ -205,12 +199,15 @@ function resolveHeartbeat(
   return { state: 'live', label: HEARTBEAT_LABEL.live, tone: HEARTBEAT_TONE.live, age: heartbeatAge(lastCheck) };
 }
 
+// Registry operational state only — configuration, never a live monitor reading.
+// A registry `active` site is labelled ACTIVE, NOT ONLINE (ONLINE requires a
+// fresh website-monitor result, surfaced separately via the heartbeat).
 function siteState(status: string | null | undefined): SiteModuleState {
   switch ((status ?? '').toLowerCase()) {
     case 'healthy':
     case 'active':
     case 'online':
-      return 'online';
+      return 'active';
     case 'warning':
     case 'partial':
     case 'degraded':
@@ -225,14 +222,14 @@ function siteState(status: string | null | undefined): SiteModuleState {
 }
 
 const STATE_LABEL: Record<SiteModuleState, string> = {
-  online: 'ONLINE',
+  active: 'ACTIVE',
   degraded: 'DEGRADED',
   offline: 'OFFLINE',
   not_configured: 'NOT CONFIGURED',
 };
 
 const STATE_TONE: Record<SiteModuleState, Tone> = {
-  online: 'green',
+  active: 'cyan',
   degraded: 'amber',
   offline: 'red',
   not_configured: 'muted',
@@ -306,8 +303,9 @@ export function getSiteModules(): SiteModule[] {
 // ---------------------------------------------------------------------------
 
 export interface GroupMetrics {
+  /** Sites with a fresh successful website-monitor result (ONLINE), never registry-active. */
   sitesOnline: number;
-  /** Configured sites (valid registry/health relationship) — operational denominator. */
+  /** Registry-configured sites (have a registry row). */
   sitesConfigured: number;
   /** Full planned estate (all wall modules). */
   sitesPlanned: number;
@@ -316,7 +314,13 @@ export interface GroupMetrics {
   usersActive: number | null;
   agentsRunning: number;
   alerts: number;
+  /** Monitored-estate percentage (online / monitored-configured), or null when no
+   *  authoritative monitored denominator exists. Never derived from configuration alone. */
   estatePercent: number | null;
+  /** Whether any configured site has a website monitor (drives NOT MONITORED state). */
+  monitoringCoverage: boolean;
+  /** Estate label when a percentage cannot be computed. */
+  estateLabel: 'ONLINE' | 'NOT MONITORED' | 'NOT CONFIGURED';
 }
 
 export function getGroupMetrics(): GroupMetrics {
@@ -324,21 +328,26 @@ export function getGroupMetrics(): GroupMetrics {
   const presence = getUsersOnline();
   const modules = getSiteModules();
 
-  const onlineModules = modules.filter((x) => x.state === 'online').length;
+  // ONLINE is authoritative only when backed by a fresh successful monitor
+  // (heartbeat LIVE). Registry-active sites are NEVER counted online.
   const configuredModules = modules.filter((x) => x.state !== 'not_configured');
   const configured = configuredModules.length;
   const planned = modules.length;
   const notConfigured = planned - configured;
 
-  // Operational estate is measured over CONFIGURED sites only, so the header
-  // `4/6 SITES ONLINE` and the ring `67%` share the same denominator. Planned
-  // (NOT CONFIGURED) modules stay visible in the planned count but never make
-  // operational health look worse than it is.
+  const onlineMonitored = modules.filter((x) => x.heartbeat.state === 'live').length;
+  // Monitored configured sites = configured sites with any monitor reading
+  // (fresh success, fresh failure, or stale). This is the estate denominator.
+  const monitoredConfigured = modules.filter((x) => x.heartbeat.state !== 'not_monitored').length;
+
   const estatePercent =
-    configured > 0 ? Math.round((onlineModules / configured) * 100) : null;
+    monitoredConfigured > 0 ? Math.round((onlineMonitored / monitoredConfigured) * 100) : null;
+
+  const estateLabel: GroupMetrics['estateLabel'] =
+    monitoredConfigured > 0 ? 'ONLINE' : configured > 0 ? 'NOT MONITORED' : 'NOT CONFIGURED';
 
   return {
-    sitesOnline: onlineModules,
+    sitesOnline: onlineMonitored,
     sitesConfigured: configured,
     sitesPlanned: planned,
     sitesNotConfigured: notConfigured,
@@ -346,6 +355,8 @@ export function getGroupMetrics(): GroupMetrics {
     agentsRunning: m.agentsWorking,
     alerts: m.criticalAlerts,
     estatePercent,
+    monitoringCoverage: monitoredConfigured > 0,
+    estateLabel,
   };
 }
 
@@ -400,7 +411,15 @@ function isActiveAlert(a: { status?: string | null }): boolean {
 // Core Systems (left rail)
 // ---------------------------------------------------------------------------
 
-export type CoreSystemStatus = 'online' | 'active' | 'healthy' | 'degraded' | 'offline' | 'unknown';
+export type CoreSystemStatus =
+  | 'online'
+  | 'active'
+  | 'healthy'
+  | 'degraded'
+  | 'offline'
+  | 'unknown'
+  | 'not_configured'
+  | 'not_monitored';
 
 export interface CoreSystemRow {
   key: string;
@@ -409,79 +428,134 @@ export interface CoreSystemRow {
   status: CoreSystemStatus;
   statusLabel: string;
   tone: Tone;
+  /** True when this system's latest heartbeat was operator-injected (SIM-). */
+  simulated: boolean;
 }
 
-function halStatus(): { status: CoreSystemStatus; tone: Tone } {
-  const hosts = getInfrastructureHosts();
-  const hal = hosts[0];
-  if (!hal) return { status: 'unknown', tone: 'muted' };
-  switch (hal.status) {
-    case 'healthy': return { status: 'healthy', tone: 'green' };
-    case 'warning':
-    case 'degraded': return { status: 'degraded', tone: 'amber' };
-    case 'offline': return { status: 'offline', tone: 'red' };
-    default: return { status: 'unknown', tone: 'muted' };
-  }
+// Centralised freshness thresholds (single source of truth for the wall):
+//   LIVE:   sample age up to 150 seconds.
+//   STALE:  over 150 seconds and up to 5 minutes.
+//   OFFLINE: over 5 minutes.
+const LIVE_AGE_MS = 150_000;
+const STALE_AGE_MS = 5 * 60_000;
+
+type Freshness = 'live' | 'stale' | 'offline';
+
+function freshnessOf(iso: string | null | undefined): Freshness {
+  if (!iso) return 'offline';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 'offline';
+  const age = Date.now() - t;
+  if (age < 0) return 'live';
+  if (age <= LIVE_AGE_MS) return 'live';
+  if (age <= STALE_AGE_MS) return 'stale';
+  return 'offline';
 }
 
-function tronStatus(): { status: CoreSystemStatus; tone: Tone } {
-  const oversight = getOversight();
-  switch (oversight.state) {
-    case 'healthy':
-    case 'busy':
-      return { status: 'healthy', tone: 'green' };
-    case 'degraded':
+interface CoreStatusResult {
+  status: CoreSystemStatus;
+  tone: Tone;
+  simulated: boolean;
+}
+
+/** Resolve a runtime node's status from ITS OWN newest paired heartbeat, using
+ *  the stable node key (never array order, never another node's data). A SIM-
+ *  heartbeat is surfaced as SIMULATED (amber) and never as LIVE/HEALTHY. */
+function runtimeNodeStatus(nodeKey: string): CoreStatusResult {
+  const health = getRuntimeHealthState();
+  const node = health.bridgeNodesByKey[nodeKey];
+  const hb = health.latestHeartbeatByNodeKey[nodeKey];
+  const simulated = hb?.heartbeat_key?.startsWith('SIM') ?? false;
+  if (!node) return { status: 'not_monitored', tone: 'muted', simulated: false };
+  if (simulated) return { status: 'degraded', tone: 'amber', simulated: true };
+  switch (freshnessOf(hb?.received_at ?? node.last_heartbeat_at ?? node.last_seen_at)) {
+    case 'live':
+      return { status: 'healthy', tone: 'green', simulated: false };
     case 'stale':
-      return { status: 'degraded', tone: 'amber' };
-    case 'offline':
-      return { status: 'offline', tone: 'red' };
+      return { status: 'degraded', tone: 'amber', simulated: false };
     default:
-      return { status: 'unknown', tone: 'muted' };
+      return { status: 'offline', tone: 'red', simulated: false };
   }
 }
 
-function n8nStatus(instanceIndex = 0): { status: CoreSystemStatus; tone: Tone } {
-  const instances = getN8nInstances();
-  const inst = instances[instanceIndex];
-  if (!inst) return { status: 'unknown', tone: 'muted' };
-  switch (inst.state) {
-    case 'healthy': return { status: 'online', tone: 'green' };
-    case 'degraded': return { status: 'degraded', tone: 'amber' };
-    case 'offline': return { status: 'offline', tone: 'red' };
-    case 'not_configured':
-    case 'unknown':
-    default: return { status: 'unknown', tone: 'muted' };
-  }
+/** Whether a runtime node's own heartbeat is fresh (≤ 150s). */
+function isNodeFresh(nodeKey: string): boolean {
+  const health = getRuntimeHealthState();
+  const node = health.bridgeNodesByKey[nodeKey];
+  const hb = health.latestHeartbeatByNodeKey[nodeKey];
+  return freshnessOf(hb?.received_at ?? node?.last_heartbeat_at ?? node?.last_seen_at) === 'live';
 }
 
-function supabaseStatus(): { status: CoreSystemStatus; tone: Tone } {
-  const summary = getDatabaseSummary();
-  switch (summary.tone) {
-    case 'emerald': return { status: 'healthy', tone: 'green' };
-    case 'amber': return { status: 'degraded', tone: 'amber' };
-    case 'red': return { status: 'offline', tone: 'red' };
-    default: return { status: 'unknown', tone: 'muted' };
+/** Resolve an n8n container row from HAL's own heartbeat `local_services`. */
+function n8nServiceStatus(serviceKey: 'n8n' | 'n8n_secondary'): CoreStatusResult {
+  const health = getRuntimeHealthState();
+  const hb = health.latestHeartbeatByNodeKey[HAL_RUNTIME_NODE_KEY];
+  const local = hb?.local_services as Record<string, unknown> | null | undefined;
+  const service = local?.[serviceKey];
+  if (!service || typeof service !== 'object') {
+    return { status: 'not_monitored', tone: 'muted', simulated: false };
   }
+  const s = service as Record<string, unknown>;
+  if (s.configured !== true) {
+    return { status: 'not_configured', tone: 'muted', simulated: false };
+  }
+  const status = typeof s.status === 'string' ? s.status : null;
+  const sampledAt = typeof s.sampled_at === 'string' ? s.sampled_at : null;
+  const fresh = freshnessOf(sampledAt);
+  if (status === 'healthy') {
+    if (fresh === 'live') return { status: 'online', tone: 'green', simulated: false };
+    if (fresh === 'stale') return { status: 'degraded', tone: 'amber', simulated: false };
+    return { status: 'offline', tone: 'red', simulated: false };
+  }
+  if (status === 'degraded') return { status: 'degraded', tone: 'amber', simulated: false };
+  if (status === 'unavailable') return { status: 'offline', tone: 'red', simulated: false };
+  return { status: 'unknown', tone: 'muted', simulated: false };
 }
 
-function networkStatus(): { status: CoreSystemStatus; tone: Tone } {
-  const net = getInfrastructureNetwork();
-  switch (net.bridgeStatus) {
-    case 'healthy': return { status: 'healthy', tone: 'green' };
-    case 'warning':
-    case 'degraded': return { status: 'degraded', tone: 'amber' };
-    case 'offline': return { status: 'offline', tone: 'red' };
-    default: return { status: 'unknown', tone: 'muted' };
+/** SUPABASE — the DFP cloud database/API, from the operations-health snapshot. */
+function supabaseStatus(): CoreStatusResult {
+  const ops = getOperationsHealthData();
+  const snap = ops.snapshot;
+  if (!ops.availability || !snap) return { status: 'unknown', tone: 'muted', simulated: false };
+  const fresh = freshnessOf(snap.sampled_at);
+  if (snap.database.status === 'healthy') {
+    if (fresh === 'live') return { status: 'healthy', tone: 'green', simulated: false };
+    if (fresh === 'stale') return { status: 'degraded', tone: 'amber', simulated: false };
+    return { status: 'offline', tone: 'red', simulated: false };
   }
+  if (snap.database.status === 'degraded') return { status: 'degraded', tone: 'amber', simulated: false };
+  return { status: 'offline', tone: 'red', simulated: false };
 }
 
-function storageStatus(): { status: CoreSystemStatus; tone: Tone } {
-  const storage = getInfrastructureStorage();
-  const items = storage.items;
-  if (items.length === 0) return { status: 'unknown', tone: 'muted' };
-  if (items.some((i) => i.status === 'offline')) return { status: 'offline', tone: 'red' };
-  if (items.some((i) => i.status === 'degraded' || i.status === 'warning')) return { status: 'degraded', tone: 'amber' };
-  return { status: 'healthy', tone: 'green' };
+/** STORAGE — DFP Supabase Storage, from the operations-health Storage check. */
+function storageStatus(): CoreStatusResult {
+  const ops = getOperationsHealthData();
+  const snap = ops.snapshot;
+  if (!ops.availability || !snap) return { status: 'unknown', tone: 'muted', simulated: false };
+  if (snap.storage.status === 'healthy') return { status: 'healthy', tone: 'green', simulated: false };
+  if (snap.storage.status === 'degraded') return { status: 'degraded', tone: 'amber', simulated: false };
+  return { status: 'offline', tone: 'red', simulated: false };
+}
+
+/** NETWORK — DFP CONNECTIVITY (not whole-LAN monitoring), derived from the
+ *  operations-health cloud round trip + HAL/TRON bridge freshness. */
+function networkStatus(): CoreStatusResult {
+  const ops = getOperationsHealthData();
+  const snap = ops.snapshot;
+  const cloudFresh = freshnessOf(snap?.sampled_at ?? null);
+
+  // Cloud health request unavailable beyond the offline threshold → OFFLINE.
+  if (cloudFresh === 'offline') return { status: 'offline', tone: 'red', simulated: false };
+
+  const halFresh = isNodeFresh(HAL_RUNTIME_NODE_KEY);
+  const tronFresh = isNodeFresh(TRON_RUNTIME_NODE_KEY);
+
+  // Cloud succeeds and both bridges fresh → HEALTHY.
+  if (cloudFresh === 'live' && halFresh && tronFresh) {
+    return { status: 'healthy', tone: 'green', simulated: false };
+  }
+  // Cloud succeeds but not both bridges fresh → DEGRADED.
+  return { status: 'degraded', tone: 'amber', simulated: false };
 }
 
 const CORE_STATUS_LABEL: Record<CoreSystemStatus, string> = {
@@ -491,13 +565,15 @@ const CORE_STATUS_LABEL: Record<CoreSystemStatus, string> = {
   degraded: 'DEGRADED',
   offline: 'OFFLINE',
   unknown: 'UNKNOWN',
+  not_configured: 'NOT CONFIGURED',
+  not_monitored: 'NOT MONITORED',
 };
 
 export function getCoreSystems(): CoreSystemRow[] {
-  const hal = halStatus();
-  const tron = tronStatus();
-  const n8n1 = n8nStatus(0);
-  const n8n2 = n8nStatus(1);
+  const hal = runtimeNodeStatus(HAL_RUNTIME_NODE_KEY);
+  const tron = runtimeNodeStatus(TRON_RUNTIME_NODE_KEY);
+  const n8n1 = n8nServiceStatus('n8n');
+  const n8n2 = n8nServiceStatus('n8n_secondary');
   const supabase = supabaseStatus();
   const network = networkStatus();
   const storage = storageStatus();
@@ -508,16 +584,17 @@ export function getCoreSystems(): CoreSystemRow[] {
     subtitle: string,
     status: CoreSystemStatus,
     tone: Tone,
-  ): CoreSystemRow => ({ key, name, subtitle, status, statusLabel: CORE_STATUS_LABEL[status], tone });
+    simulated = false,
+  ): CoreSystemRow => ({ key, name, subtitle, status, statusLabel: CORE_STATUS_LABEL[status], tone, simulated });
 
   return [
-    make('hal', 'HAL', 'ORCHESTRATION NODE', hal.status, hal.tone),
-    make('tron', 'TRON', 'AI OVERWATCH', tron.status, tron.tone),
-    make('n8n-01', 'N8N-01', 'AUTOMATION ENGINE', n8n1.status, n8n1.tone),
-    make('n8n-02', 'N8N-02', 'AUTOMATION ENGINE', n8n2.status, n8n2.tone),
-    make('supabase', 'SUPABASE', 'DATA PLATFORM', supabase.status, supabase.tone),
-    make('network', 'NETWORK', 'CORE INFRASTRUCTURE', network.status, network.tone),
-    make('storage', 'STORAGE', 'DATA LAYER', storage.status, storage.tone),
+    make('hal', 'HAL', 'ORCHESTRATION NODE', hal.status, hal.tone, hal.simulated),
+    make('tron', 'TRON', 'AI OVERWATCH', tron.status, tron.tone, tron.simulated),
+    make('n8n-01', 'N8N-01', 'AUTOMATION ENGINE', n8n1.status, n8n1.tone, n8n1.simulated),
+    make('n8n-02', 'N8N-02', 'AUTOMATION ENGINE', n8n2.status, n8n2.tone, n8n2.simulated),
+    make('supabase', 'SUPABASE', 'DATA PLATFORM', supabase.status, supabase.tone, supabase.simulated),
+    make('network', 'NETWORK', 'DFP CONNECTIVITY', network.status, network.tone, network.simulated),
+    make('storage', 'STORAGE', 'SUPABASE STORAGE', storage.status, storage.tone, storage.simulated),
   ];
 }
 
@@ -534,8 +611,10 @@ export interface MasterAgentRow {
   stateLabel: string;
   tone: Tone;
   task: string;
-  taskId: string;
-  progress: number; // 0–8 segments
+  /** Stable persisted reference key (real agent/run key) — never a synthetic id. */
+  refKey: string;
+  /** Authoritative numeric progress, or null when no real progress source exists. */
+  progress: number | null;
 }
 
 const MASTER_ROW_STATE_LABEL: Record<MasterRowState, string> = {
@@ -576,20 +655,9 @@ function toRowState(state: string | null | undefined): MasterRowState {
   }
 }
 
-/** Monospaced task id from a stable key + a deterministic hash. */
-function taskIdFor(key: string): string {
-  let h = 0;
-  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  return `T-${(h % 9000 + 1000).toString()}`;
-}
-
-function progressFor(state: MasterRowState, task: string | null): number {
-  if (state === 'running') return 6;
-  if (state === 'review') return 4;
-  if (state === 'standby') return task ? 3 : 0;
-  if (state === 'failed' || state === 'blocked') return 2;
-  return 0;
-}
+// No authoritative numeric progress source exists for master agents — the
+// segmented progress bar is intentionally left inactive (null → —) and the real
+// agent state is preserved separately via `state`.
 
 const MASTER_ROWS: { key: string; label: string; siteKey: string | null }[] = [
   { key: 'dfp', label: 'DFP MASTER', siteKey: 'digital-footprint' },
@@ -626,8 +694,8 @@ export function getMasterAgentRows(): MasterAgentRow[] {
         stateLabel: MASTER_ROW_STATE_LABEL[state],
         tone: MASTER_ROW_STATE_TONE[state],
         task: group?.currentTask ?? 'No active task',
-        taskId: group ? taskIdFor(group.agentKey) : 'T-0000',
-        progress: progressFor(state, group?.currentTask ?? null),
+        refKey: group?.agentKey ?? '—',
+        progress: null,
       };
     }
 
@@ -640,8 +708,8 @@ export function getMasterAgentRows(): MasterAgentRow[] {
         stateLabel: MASTER_ROW_STATE_LABEL.unassigned,
         tone: MASTER_ROW_STATE_TONE.unassigned,
         task: 'No master agent',
-        taskId: 'T-0000',
-        progress: 0,
+        refKey: '—',
+        progress: null,
       };
     }
 
@@ -653,8 +721,8 @@ export function getMasterAgentRows(): MasterAgentRow[] {
       stateLabel: MASTER_ROW_STATE_LABEL[state],
       tone: MASTER_ROW_STATE_TONE[state],
       task: card.currentTask ?? 'No active task',
-      taskId: taskIdFor(card.masterAgentKey ?? card.siteKey),
-      progress: progressFor(state, card.currentTask),
+      refKey: card.masterAgentKey ?? '—',
+      progress: null,
     };
   });
 }
@@ -696,6 +764,8 @@ export interface ComputeNode {
   metrics: { label: string; value: string }[];
   gauges?: ComputeGauge[];
   dials?: TronDial[];
+  /** True when this node's latest heartbeat was operator-injected (SIM- key). */
+  simulated: boolean;
 }
 
 /** Read HAL's own bridge heartbeat host telemetry (CPU / memory). Never falls
@@ -715,6 +785,22 @@ function getHalHostTelemetry(): { cpuPercent: number | null; memoryPercent: numb
     cpuPercent: num(h.cpu_percent),
     memoryPercent: num(h.memory_percent),
   };
+}
+
+/** Authoritative bridge state label for a runtime node (LIVE / STALE / OFFLINE /
+ *  UNKNOWN). Never derived from array position or a fabricated uptime value. */
+function bridgeLabel(state: string | null | undefined): string {
+  switch (state) {
+    case 'healthy':
+      return 'LIVE';
+    case 'stale':
+    case 'degraded':
+      return 'STALE';
+    case 'offline':
+      return 'OFFLINE';
+    default:
+      return 'UNKNOWN';
+  }
 }
 
 export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: { label: string; sublabel: string; tone: Tone } } {
@@ -737,9 +823,10 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
     state: halState,
     stateLabel: halState === 'nominal' ? 'NOMINAL' : halState === 'offline' ? 'OFFLINE' : 'DEGRADED',
     tone: halTone,
+    simulated: halHost?.simulated ?? false,
     metrics: [
       { label: 'AGENT RUNS', value: String(m.activeRuns) },
-      { label: 'UPTIME', value: halHost?.lastHeartbeat ? 'LINKED' : '—' },
+      { label: 'BRIDGE', value: bridgeLabel(halHost?.state) },
       { label: 'STATE', value: halState === 'nominal' ? 'NOMINAL' : halState === 'offline' ? 'OFFLINE' : 'DEGRADED' },
     ],
     gauges: [
@@ -829,6 +916,7 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
     state: tronState,
     stateLabel: tronStateLabel,
     tone: tronTone,
+    simulated: tronHost?.simulated ?? false,
     metrics: [
       { label: 'N8N', value: tronHost?.n8nStatus === 'not_configured' ? 'NOT CONFIGURED' : tronHost?.n8nStatus != null ? tronHost.n8nStatus.toUpperCase() : '—' },
       { label: 'HEARTBEAT', value: tronHost == null ? '—' : tronHost.state === 'healthy' ? 'LIVE' : tronHost.state === 'stale' ? 'STALE' : 'OFFLINE' },
@@ -904,21 +992,51 @@ export interface AiSystemRow {
 }
 
 export function getAiSystemsStatus(): AiSystemRow[] {
-  const ollama = getOllamaStatus();
+  const tron = getTronHost();
   const vector = getVectorHealth();
   const security = getSecuritySummary();
   const connections = getSecurityConnections();
   const data = getGroupLiveData();
 
-  // MODEL STATUS — OPERATIONAL / DEGRADED / OFFLINE / UNKNOWN.
-  const modelTone: Tone = ollama.state === 'healthy' ? 'green' : ollama.state === 'offline' ? 'red' : ollama.state === 'stale' ? 'amber' : 'muted';
-  const modelValue = ollama.state === 'healthy' ? 'OPERATIONAL' : ollama.state === 'offline' ? 'OFFLINE' : ollama.state === 'stale' ? 'DEGRADED' : 'UNKNOWN';
-  const modelLive = ollama.state === 'healthy' || ollama.state === 'offline' || ollama.state === 'stale';
+  // MODEL STATUS — OPERATIONAL / DEGRADED / OFFLINE / UNKNOWN. One explicit
+  // source: TRON's own paired Ollama heartbeat (this card is the live Compute
+  // Core, so it uses TRON, never a blended HAL/TRON/registry state).
+  const tronOllama = tron?.ollamaStatus ?? null;
+  let modelValue: string;
+  let modelTone: Tone;
+  let modelLive: boolean;
+  if (!tron) {
+    modelValue = 'UNKNOWN';
+    modelTone = 'muted';
+    modelLive = false;
+  } else {
+    switch (tronOllama) {
+      case 'healthy':
+        modelValue = 'OPERATIONAL';
+        modelTone = 'green';
+        modelLive = true;
+        break;
+      case 'degraded':
+        modelValue = 'DEGRADED';
+        modelTone = 'amber';
+        modelLive = true;
+        break;
+      case 'offline':
+      case 'unavailable':
+        modelValue = 'OFFLINE';
+        modelTone = 'red';
+        modelLive = true;
+        break;
+      default:
+        modelValue = 'UNKNOWN';
+        modelTone = 'muted';
+        modelLive = false;
+    }
+  }
 
-  // VECTOR DB — embedding count + CONNECTED / DISCONNECTED / UNKNOWN.
-  // embedding_state is a registry marker, not a live vector-store health
-  // check, so a reachable source with zero embeddings is honestly DISCONNECTED
-  // and a missing source is UNKNOWN (never fabricated).
+  // VECTOR DB — embedding count + INDEXED / EMPTY / UNKNOWN. An embedding count
+  // proves indexed data exists, NOT a live database connection (there is no
+  // vector-store health check), so CONNECTED is never shown from the count alone.
   const vectorAvailable = data.availability.knowledge;
   const vectorCount = vectorAvailable ? vector.embedded : null;
   let vectorValue: string;
@@ -927,11 +1045,11 @@ export function getAiSystemsStatus(): AiSystemRow[] {
     vectorValue = 'UNKNOWN';
     vectorTone = 'muted';
   } else if (vector.embedded > 0) {
-    vectorValue = 'CONNECTED';
-    vectorTone = 'green';
+    vectorValue = 'INDEXED';
+    vectorTone = 'cyan';
   } else {
-    vectorValue = 'DISCONNECTED';
-    vectorTone = 'red';
+    vectorValue = 'EMPTY';
+    vectorTone = 'muted';
   }
 
   // TOOLS — online count + ONLINE / DEGRADED / UNAVAILABLE / UNKNOWN.

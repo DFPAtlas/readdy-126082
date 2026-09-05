@@ -36,6 +36,7 @@ import { refreshGithubData } from '@/pages/ai-operations/wallboard/githubStore';
 import { refreshDatabaseData } from '@/pages/ai-operations/wallboard/databaseStore';
 import { refreshN8nData } from '@/pages/ai-operations/wallboard/n8nStore';
 import { refreshAiInfraData } from '@/pages/ai-operations/wallboard/aiInfraStore';
+import { refreshOperationsHealthData } from '@/pages/ai-operations/wallboard/operationsHealthStore';
 import { refreshKnowledgeData } from '@/pages/ai-operations/wallboard/knowledgeStore';
 import { refreshCommunicationsData } from '@/pages/ai-operations/wallboard/communicationsStore';
 import { refreshOllamaCatalogue } from '@/pages/ai-operations/models/ollamaCatalogueStore';
@@ -79,6 +80,7 @@ function OperationsWall() {
     void refreshDatabaseData();
     void refreshN8nData();
     void refreshAiInfraData();
+    void refreshOperationsHealthData();
     void refreshKnowledgeData();
     void refreshCommunicationsData();
     void refreshOllamaCatalogue();

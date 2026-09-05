@@ -16,6 +16,7 @@ import { useRuntimeHealth } from '@/pages/ai-operations/runtime-health/runtimeHe
 import { useInfrastructureData } from '@/pages/ai-operations/wallboard/infrastructureStore';
 import { useN8nData } from '@/pages/ai-operations/wallboard/n8nStore';
 import { useDatabaseData } from '@/pages/ai-operations/wallboard/databaseStore';
+import { useOperationsHealthData } from '@/pages/ai-operations/wallboard/operationsHealthStore';
 import { useSecurityData } from '@/pages/ai-operations/wallboard/securityStore';
 import { useOllamaCatalogue } from '@/pages/ai-operations/models/ollamaCatalogueStore';
 
@@ -29,6 +30,7 @@ export function useWallData(): void {
   useInfrastructureData();
   useN8nData();
   useDatabaseData();
+  useOperationsHealthData();
   useSecurityData();
   useOllamaCatalogue();
 }

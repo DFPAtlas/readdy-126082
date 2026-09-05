@@ -6,15 +6,22 @@ import {
 
 const TOTAL_SEGMENTS = 8;
 
-function Segments({ progress, tone }: { progress: number; tone: string }) {
-  const segments = Array.from({ length: TOTAL_SEGMENTS }, (_, i) => i < progress);
+function Segments({ progress, tone }: { progress: number | null; tone: string }) {
+  // No authoritative numeric progress source exists for master agents, so the
+  // segmented bar is shown inactive and the real agent state is preserved
+  // separately. A real progress value (if it ever exists) would light segments.
+  const hasProgress = progress != null && Number.isFinite(progress) && progress >= 0;
+  const filled = hasProgress ? Math.max(0, Math.min(TOTAL_SEGMENTS, progress as number)) : 0;
   return (
-    <span className="inline-flex gap-[2px]" aria-label={`${progress} of ${TOTAL_SEGMENTS} segments`}>
-      {segments.map((on, i) => (
+    <span
+      className="inline-flex gap-[2px]"
+      aria-label={hasProgress ? `${filled} of ${TOTAL_SEGMENTS} segments` : 'progress unavailable'}
+    >
+      {Array.from({ length: TOTAL_SEGMENTS }, (_, i) => (
         <span
           key={i}
           className="w-[4px] h-[9px]"
-          style={{ background: on ? tone : 'rgba(34,211,238,0.15)' }}
+          style={{ background: hasProgress && i < filled ? tone : 'rgba(34,211,238,0.15)' }}
         />
       ))}
     </span>
@@ -41,7 +48,7 @@ function AgentRow({ row }: { row: MasterAgentRow }) {
 
       <div className="flex-1 min-w-0 leading-tight">
         <div className="text-[9.5px] text-slate-400 truncate">{row.task}</div>
-        <div className="font-mono text-[8px] tracking-[0.08em] text-slate-600">{row.taskId}</div>
+        <div className="font-mono text-[8px] tracking-[0.08em] text-slate-600">{row.refKey}</div>
       </div>
 
       <div className="shrink-0">

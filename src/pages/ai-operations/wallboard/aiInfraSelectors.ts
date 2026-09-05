@@ -95,6 +95,8 @@ export interface HostStatus {
   latencyMs: number | null;
   lastHeartbeat: string | null;
   executionEnabled: boolean;
+  /** True when this node's latest heartbeat was operator-injected (SIM- key). */
+  simulated: boolean;
 }
 
 /** Build a HostStatus for one runtime node from ITS OWN bridge node + heartbeat.
@@ -127,6 +129,7 @@ function buildHostStatus(nodeKey: string, role: string): HostStatus | null {
     latencyMs: hb?.latency_ms ?? null,
     lastHeartbeat: node.last_heartbeat_at ?? node.last_seen_at,
     executionEnabled: node.execution_enabled === true,
+    simulated: hb?.heartbeat_key?.startsWith('SIM') ?? false,
   };
 }
 

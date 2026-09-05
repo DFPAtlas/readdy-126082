@@ -23,7 +23,7 @@ function Divider() {
   return <span className="w-px h-8 self-center" style={{ background: 'rgba(34,211,238,0.18)' }} />;
 }
 
-function EstateRing({ percent }: { percent: number | null }) {
+function EstateRing({ percent, label }: { percent: number | null; label: 'ONLINE' | 'NOT MONITORED' | 'NOT CONFIGURED' }) {
   const healthy = percent != null && percent >= 100;
   const ringColor =
     percent == null ? '#64748b' : healthy ? '#22c55e' : percent >= 60 ? '#f59e0b' : '#ef4444';
@@ -43,7 +43,7 @@ function EstateRing({ percent }: { percent: number | null }) {
       <div className="flex flex-col leading-tight">
         <span className="text-[9px] font-label tracking-[0.2em] text-slate-400 whitespace-nowrap">ESTATE</span>
         <span className="text-[9px] font-label tracking-[0.2em]" style={{ color: ringColor }}>
-          {percent == null ? 'NOT CONFIGURED' : 'ONLINE'}
+          {label}
         </span>
       </div>
     </div>
@@ -106,9 +106,11 @@ export default function GroupOperationsCenter() {
         <div className="flex items-center flex-1 justify-center min-w-0">
           <Metric
             label="SITES ONLINE"
-            value={`${metrics.sitesOnline}/${metrics.sitesConfigured}`}
-            color="#22d3ee"
-            sub={`${metrics.sitesConfigured} CONFIGURED · ${metrics.sitesNotConfigured} PENDING`}
+            value={metrics.monitoringCoverage ? `${metrics.sitesOnline}/${metrics.sitesConfigured}` : `—/${metrics.sitesConfigured}`}
+            color={metrics.monitoringCoverage ? '#22d3ee' : '#64748b'}
+            sub={metrics.monitoringCoverage
+              ? `${metrics.sitesConfigured} CONFIGURED · ${metrics.sitesNotConfigured} PENDING`
+              : 'NOT MONITORED'}
           />
           <Divider />
           <Metric label="USERS ACTIVE" value={metrics.usersActive == null ? '—' : String(metrics.usersActive)} color="#4ade80" />
@@ -118,7 +120,7 @@ export default function GroupOperationsCenter() {
           <Metric label="ALERTS" value={String(metrics.alerts)} color={metrics.alerts > 0 ? '#ef4444' : '#64748b'} />
         </div>
 
-        <EstateRing percent={metrics.estatePercent} />
+        <EstateRing percent={metrics.estatePercent} label={metrics.estateLabel} />
       </div>
 
       {/* Site network */}
