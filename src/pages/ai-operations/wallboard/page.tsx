@@ -41,6 +41,7 @@ import { refreshKnowledgeData } from '@/pages/ai-operations/wallboard/knowledgeS
 import { refreshCommunicationsData } from '@/pages/ai-operations/wallboard/communicationsStore';
 import { refreshOllamaCatalogue } from '@/pages/ai-operations/models/ollamaCatalogueStore';
 import { refreshManagerReportData } from '@/pages/ai-operations/wallboard/managerReportStore';
+import { refreshWidgetConfigData } from '@/pages/ai-operations/wallboard/widgetConfigStore';
 import './operationsWall.css';
 
 /** Auto-refresh cadence (seconds) for the operational-data snapshot. */
@@ -86,6 +87,7 @@ function OperationsWall() {
     void refreshCommunicationsData();
     void refreshOllamaCatalogue();
     void refreshManagerReportData();
+    void refreshWidgetConfigData();
     return getGroupLiveData().mode !== 'unavailable';
   }, []);
 

@@ -8,19 +8,7 @@ import {
   getQuickGuardManagerReport,
   type QuickGuardManagerReport,
 } from '@/pages/ai-operations/wallboard/managerReportSelectors';
-
-// Stable key → short command code. Authoritative mapping, never array order.
-const SITE_CODE: Record<string, string> = {
-  qg: 'QG',
-  forge: 'TF',
-  gh: 'GH',
-  lethub: 'LH',
-  gg: 'GG',
-  vowora: 'VW',
-  synq: 'SQ',
-};
-
-const SITE_ORDER = ['qg', 'forge', 'gh', 'lethub', 'gg', 'vowora', 'synq'];
+import { useAutoPage } from '@/pages/ai-operations/wallboard/useAutoPage';
 
 // Presentation colours aligned to the command-centre state semantics. Standby
 // is muted cyan and unassigned is dim grey — deliberately distinct from the
@@ -51,6 +39,10 @@ const RING = 78;
 const NODE_R = 16;
 const HUB_R = 25;
 
+// The mission list shows DFP (hub) plus up to seven surrounding masters per
+// page — the same "hub + seven" arrangement as the central wall.
+const MISSION_ROWS_PER_PAGE = 8;
+
 /** Honest task line: MASTER NOT ASSIGNED when unassigned, NO ACTIVE COMMAND
  *  when there is no real task, otherwise the real task text. Never a generated
  *  id, progress value or agent reference. */
@@ -64,22 +56,23 @@ function taskLabel(row: MasterAgentRow): string {
 interface SiteNode {
   key: string;
   code: string;
-  row: MasterAgentRow | undefined;
+  row: MasterAgentRow;
   x: number;
   y: number;
 }
 
-/** Seven site masters arranged radially around the DFP hub, resolved by stable
- *  key (never the array order of getMasterAgentRows()). */
+/** Up to seven surrounding site masters arranged radially around the DFP hub,
+ *  resolved from the configured identities (never a hard-coded list). */
 function siteNodes(rows: MasterAgentRow[]): SiteNode[] {
-  const byKey = new Map(rows.map((r) => [r.key, r]));
-  const n = SITE_ORDER.length;
-  return SITE_ORDER.map((key, i) => {
+  const shown = rows.slice(0, 7);
+  const n = shown.length;
+  if (n === 0) return [];
+  return shown.map((row, i) => {
     const angle = ((-90 + (i * 360) / n) * Math.PI) / 180;
     return {
-      key,
-      code: SITE_CODE[key],
-      row: byKey.get(key),
+      key: row.key,
+      code: row.code,
+      row,
       x: CX + RING * Math.cos(angle),
       y: CY + RING * Math.sin(angle),
     };
@@ -137,8 +130,8 @@ function MissionRow({ row, report }: { row: MasterAgentRow; report?: QuickGuardM
   );
 }
 
-function Constellation({ rows, dfp }: { rows: MasterAgentRow[]; dfp: MasterAgentRow | undefined }) {
-  const nodes = siteNodes(rows);
+function Constellation({ siteRows, dfp }: { siteRows: MasterAgentRow[]; dfp: MasterAgentRow | undefined }) {
+  const nodes = siteNodes(siteRows);
   const dfpClass = dfp ? STATE_CLASS[dfp.state] : 'unassigned';
   const dfpColor = dfp ? STATE_COLOR[dfp.state] : STATE_COLOR.unassigned;
   const dfpStateLabel = dfp ? dfp.stateLabel : 'NOT ASSIGNED';
@@ -160,7 +153,7 @@ function Constellation({ rows, dfp }: { rows: MasterAgentRow[]; dfp: MasterAgent
             y1={CY}
             x2={n.x}
             y2={n.y}
-            className={`ow-const-link ow-const-link-${n.row ? STATE_CLASS[n.row.state] : 'unassigned'}`}
+            className={`ow-const-link ow-const-link-${STATE_CLASS[n.row.state]}`}
           />
         ))}
 
@@ -187,11 +180,11 @@ function Constellation({ rows, dfp }: { rows: MasterAgentRow[]; dfp: MasterAgent
           </text>
         </g>
 
-        {/* Seven site-master nodes. */}
+        {/* Surrounding site-master nodes (up to seven, configured identities). */}
         {nodes.map((n) => {
-          const cls = n.row ? STATE_CLASS[n.row.state] : 'unassigned';
-          const color = n.row ? STATE_COLOR[n.row.state] : STATE_COLOR.unassigned;
-          const stateLabel = n.row ? n.row.stateLabel : 'NOT ASSIGNED';
+          const cls = STATE_CLASS[n.row.state];
+          const color = STATE_COLOR[n.row.state];
+          const stateLabel = n.row.stateLabel;
           const codeColor = cls === 'unassigned' ? '#475569' : '#e2e8f0';
           return (
             <g key={n.key}>
@@ -229,19 +222,34 @@ function Constellation({ rows, dfp }: { rows: MasterAgentRow[]; dfp: MasterAgent
 
 /**
  * Right Autonomous Operations rail — a graphical command constellation
- * (DFP MASTER hub + seven site masters) with live state totals and a compact
- * mission list, all driven by the authoritative getMasterAgentRows() selector.
+ * (DFP MASTER hub + configured site masters) with live state totals and a
+ * compact mission list. Identities come from the SAVED widget configuration
+ * (respecting the separate autonomous-visibility toggle); overflowing mission
+ * rows paginate instead of clipping.
  */
 export default function AutonomousOperationsRail() {
-  const rows = getMasterAgentRows();
-  const dfp = rows.find((r) => r.key === 'dfp');
+  const allRows = getMasterAgentRows();
+  const dfp = allRows.find((r) => r.isHub);
+  const siteRows = allRows.filter((r) => !r.isHub && r.visibleInAutonomous);
+
+  // DFP is always first; then the visible-in-autonomous site masters.
+  const visibleRows: MasterAgentRow[] = [];
+  if (dfp) visibleRows.push(dfp);
+  visibleRows.push(...siteRows);
+
   const qgReport = getQuickGuardManagerReport();
 
-  // Derived counters — straight from the eight returned rows (never hard-coded).
-  const running = rows.filter((r) => r.state === 'running').length;
-  const review = rows.filter((r) => r.state === 'review').length;
-  const blocked = rows.filter((r) => r.state === 'failed' || r.state === 'blocked').length;
-  const assigned = rows.filter((r) => r.state !== 'unassigned').length;
+  // Derived counters over the visible set (never hard-coded).
+  const running = visibleRows.filter((r) => r.state === 'running').length;
+  const review = visibleRows.filter((r) => r.state === 'review').length;
+  const blocked = visibleRows.filter((r) => r.state === 'failed' || r.state === 'blocked').length;
+  const assigned = visibleRows.filter((r) => r.state !== 'unassigned').length;
+
+  // Paginate the mission list (no clipping).
+  const pageCount = Math.max(1, Math.ceil(visibleRows.length / MISSION_ROWS_PER_PAGE));
+  const [page] = useAutoPage(pageCount);
+  const start = page * MISSION_ROWS_PER_PAGE;
+  const pageRows = visibleRows.slice(start, start + MISSION_ROWS_PER_PAGE);
 
   return (
     <aside className="flex flex-col min-h-0 h-full w-full max-w-full overflow-hidden">
@@ -253,7 +261,7 @@ export default function AutonomousOperationsRail() {
         </div>
 
         {/* Command constellation graphic */}
-        <Constellation rows={rows} dfp={dfp} />
+        <Constellation siteRows={siteRows} dfp={dfp} />
 
         {/* Live state totals */}
         <div className="shrink-0 flex items-center justify-around px-2 py-1.5 border-y border-cyan-400/10">
@@ -263,12 +271,24 @@ export default function AutonomousOperationsRail() {
           <Total label="ASSIGNED" value={assigned} tone="cyan" />
         </div>
 
-        {/* Compact master-agent mission list */}
+        {/* Compact master-agent mission list (paginated, never clipped). */}
         <div className="flex-1 min-h-0 overflow-hidden">
-          {rows.map((row) => (
-            <MissionRow key={row.key} row={row} report={row.key === 'qg' ? qgReport : undefined} />
+          {pageRows.map((row) => (
+            <MissionRow key={row.key} row={row} report={row.siteKey === 'quickguard' ? qgReport : undefined} />
           ))}
         </div>
+
+        {/* Pagination footer (only when there is overflow). */}
+        {pageCount > 1 && (
+          <div className="shrink-0 flex items-center justify-center gap-2 py-1.5 border-t border-cyan-400/10">
+            <div className="ow-page-dots">
+              {Array.from({ length: pageCount }).map((_, i) => (
+                <span key={i} className={`ow-page-dot ${i === page ? 'ow-page-dot-active' : ''}`} />
+              ))}
+            </div>
+            <span className="ow-page-label">{page + 1}/{pageCount}</span>
+          </div>
+        )}
       </div>
     </aside>
   );

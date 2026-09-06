@@ -53,14 +53,15 @@ function Heartbeat({ hb }: { hb: SiteHeartbeat }) {
 // + metrics + footer) used by every non-DFP site card.
 // ---------------------------------------------------------------------------
 
-/** Per-site identity icon — one consistent Remix outline family across the wall. */
+/** Per-site identity icon — one consistent Remix outline family across the wall.
+ *  Keyed by registry `site_key` (never a display name or abbreviation). */
 const SITE_IDENTITY_ICON: Record<string, string> = {
   quickguard: 'ri-shield-line',
   guardianhub: 'ri-shield-check-line',
-  buildnerve: 'ri-flask-line',
+  'the-forge': 'ri-flask-line',
   lethub: 'ri-building-line',
   garageflow: 'ri-car-line',
-  vowora: 'ri-heart-2-line',
+  wedora: 'ri-heart-2-line',
   synqoro: 'ri-brain-line',
 };
 

@@ -1233,3 +1233,47 @@
     animation: none !important;
   }
 }
+
+/* ============================================================================
+   WIDGET PAGINATION + CONFIG-STALE WARNING
+   ============================================================================ */
+
+/* Page indicator dots (overflow pages on the site network + mission list). */
+.ow-page-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.ow-page-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(100, 116, 139, 0.45);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+.ow-page-dot-active {
+  background: #22d3ee;
+  box-shadow: 0 0 6px 0 rgba(34, 211, 238, 0.6);
+}
+.ow-page-label {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+/* Visible stale-configuration warning (retained last-good layout). */
+.ow-stale-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}

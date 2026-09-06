@@ -38,6 +38,7 @@ import { getSitesServicesList } from '@/pages/ai-operations/wallboard/siteSelect
 import { getDatabaseHealthBySiteKey, type SiteDatabaseHealth } from '@/pages/ai-operations/wallboard/databaseSelectors';
 import { getN8nInstances } from '@/pages/ai-operations/wallboard/n8nSelectors';
 import { getN8nData, type N8nCallbackRow } from '@/pages/ai-operations/wallboard/n8nStore';
+import { getWidgetConfigData } from '@/pages/ai-operations/wallboard/widgetConfigStore';
 
 // ---------------------------------------------------------------------------
 // Brand colour palette
@@ -89,33 +90,15 @@ export function toneHex(tone: Tone): string {
 }
 
 // ---------------------------------------------------------------------------
-// Site brands → registry mapping
+// Site membership — resolved from the SAVED widget configuration
 // ---------------------------------------------------------------------------
 
-export interface SiteBrand {
-  key: string;
-  /** Registry site_key, or null when the site is not yet in the registry. */
-  siteKey: string | null;
-  name: string;
-  shortCode: string;
-  subtitle: string;
-  color: BrandColor;
-  hub: boolean;
-}
-
-// The approved estate layout (8 brands). Display names use the REAL registry
-// names (The Forge, Vowora) per the owner decision; Synqoro is registered and
-// monitored (synqora.uk), joining the same live-resolved path as every site.
-export const SITE_BRANDS: SiteBrand[] = [
-  { key: 'dfp', siteKey: 'digital-footprint', name: 'DFP', shortCode: 'DFP', subtitle: 'AGENCY & OPERATIONS', color: 'cyan', hub: true },
-  { key: 'quickguard', siteKey: 'quickguard', name: 'QuickGuard', shortCode: 'QG', subtitle: 'SECURITY MARKETPLACE', color: 'blue', hub: false },
-  { key: 'guardianhub', siteKey: 'guardianhub', name: 'GuardianHub', shortCode: 'GH', subtitle: 'SECURITY COMPANIES', color: 'teal', hub: false },
-  { key: 'buildnerve', siteKey: 'the-forge', name: 'The Forge', shortCode: 'TF', subtitle: 'AI BUILD PLATFORM', color: 'orange', hub: false },
-  { key: 'lethub', siteKey: 'lethub', name: 'LetHub', shortCode: 'LH', subtitle: 'LETTINGS PLATFORM', color: 'purple', hub: false },
-  { key: 'garageflow', siteKey: 'garageflow', name: 'GarageFlow', shortCode: 'GF', subtitle: 'VEHICLE CARE', color: 'yellow', hub: false },
-  { key: 'vowora', siteKey: 'wedora', name: 'Vowora', shortCode: 'VW', subtitle: 'WEDDING PLANNING', color: 'pink', hub: false },
-  { key: 'synqoro', siteKey: 'synqoro', name: 'Synqoro', shortCode: 'SQ', subtitle: 'AI & DATA SOLUTIONS', color: 'violet', hub: false },
-];
+// The wall has NO hard-coded site membership. The authoritative list is the
+// persistent `ai_site_widgets` table (one widget per `ai_sites.id`), surfaced
+// through the widget-config store. Each widget is resolved to its live
+// registry row by `ai_sites.id` → `site_key` (never a display name or
+// abbreviation). The Forge is `the-forge` / "TF"; BuildNerve appears only when
+// a manager explicitly adds it through the dashboard.
 
 export type WebsiteState =
   | 'online'
@@ -127,12 +110,19 @@ export type WebsiteState =
   | 'not_configured';
 
 export interface SiteModule {
+  /** Stable identity — the registry `site_key` (never a display name). */
   key: string;
+  /** The authoritative `ai_sites.id` this widget resolves to. */
+  siteId: string;
   name: string;
   shortCode: string;
   subtitle: string;
   color: BrandColor;
   hub: boolean;
+  /** Saved presentation order (0 = hub). */
+  displayOrder: number;
+  visibleOnWall: boolean;
+  visibleInAutonomous: boolean;
   state: WebsiteState;
   stateLabel: string;
   stateTone: Tone;
@@ -402,26 +392,41 @@ function resolveN8nHealth(siteKey: string | null): SiteN8nHealth {
   };
 }
 
+/** Map a saved `brand_color` string onto the wall's BrandColor palette,
+ *  falling back to cyan for any unrecognised value (never crashes the wall). */
+function toBrandColor(color: string): BrandColor {
+  return Object.prototype.hasOwnProperty.call(BRAND_HEX, color)
+    ? (color as BrandColor)
+    : 'cyan';
+}
+
 /**
- * The connected site ecosystem — one module per approved brand, joined to the
- * authoritative Group Site Registry by stable site_key. A brand with no
- * registry row is NOT CONFIGURED (never fabricated healthy).
+ * The connected site ecosystem — one module per SAVED widget, joined to the
+ * authoritative Group Site Registry by `ai_sites.id` → `site_key`. Membership
+ * comes from the widget configuration (no hard-coded brand list); a widget
+ * whose site has no registry row is NOT CONFIGURED (never fabricated healthy).
+ * Hidden widgets remain in this list so estate-wide totals stay estate-wide.
  */
 export function getSiteModules(): SiteModule[] {
   const data = getGroupLiveData();
   const health = getSiteHealth();
   const presence = getUsersOnline();
   const services = getSitesServicesList();
+  const config = getWidgetConfigData();
 
   const healthByKey = new Map(health.map((h) => [h.id, h]));
   const presenceByKey = new Map(presence.sites.map((s) => [s.siteKey, s.count]));
   const servicesByKey = new Map(services.map((s) => [s.key, s]));
   const databaseByKey = getDatabaseHealthBySiteKey();
+  const siteByUuid = new Map(data.sites.map((s) => [s.id, s]));
 
-  return SITE_BRANDS.map((brand) => {
-    const site = data.sites.find((s) => s.site_key === brand.siteKey);
-    const card = brand.siteKey ? healthByKey.get(brand.siteKey) : undefined;
-    const service = brand.siteKey ? servicesByKey.get(brand.siteKey) : undefined;
+  return config.widgets.map((widget) => {
+    const site = siteByUuid.get(widget.site_id);
+    const siteKey = site?.site_key ?? null;
+    const key = siteKey ?? widget.site_id;
+
+    const card = siteKey ? healthByKey.get(siteKey) : undefined;
+    const service = siteKey ? servicesByKey.get(siteKey) : undefined;
 
     // One shared website-health resolution for the main label, heartbeat and
     // group counts. Registry existence only determines configured vs not —
@@ -433,25 +438,29 @@ export function getSiteModules(): SiteModule[] {
       service?.monitorStatus ?? null,
       service?.lastCheck ?? null,
     );
-    const database = brand.siteKey ? (databaseByKey.get(brand.siteKey) ?? null) : null;
+    const database = siteKey ? (databaseByKey.get(siteKey) ?? null) : null;
     const combined = combineSiteHealth(website.state, database);
 
     return {
-      key: brand.key,
-      name: brand.name,
-      shortCode: brand.shortCode,
-      subtitle: brand.subtitle,
-      color: brand.color,
-      hub: brand.hub,
+      key,
+      siteId: widget.site_id,
+      name: widget.display_name,
+      shortCode: widget.initials,
+      subtitle: widget.subtitle ?? '',
+      color: toBrandColor(widget.brand_color),
+      hub: widget.is_hub,
+      displayOrder: widget.display_order,
+      visibleOnWall: widget.visible_on_wall,
+      visibleInAutonomous: widget.visible_in_autonomous,
       state: combined.state,
       stateLabel: WEBSITE_STATE_LABEL[combined.state],
       stateTone: WEBSITE_STATE_TONE[combined.state],
       heartbeat: website.heartbeat,
       lastCheckAt: website.lastCheckAt,
       database,
-      n8n: resolveN8nHealth(brand.siteKey),
+      n8n: resolveN8nHealth(siteKey),
       reason: combined.reason,
-      users: hasRegistry ? (presenceByKey.get(brand.siteKey!) ?? null) : null,
+      users: hasRegistry ? (presenceByKey.get(siteKey!) ?? null) : null,
       agents: hasRegistry ? card!.activeAgents : null,
       alerts: hasRegistry ? card!.alerts : null,
       responseTimeMs: service?.responseTimeMs ?? null,
@@ -784,8 +793,15 @@ export function getCoreSystems(): CoreSystemRow[] {
 export type MasterRowState = 'running' | 'review' | 'standby' | 'failed' | 'blocked' | 'unassigned';
 
 export interface MasterAgentRow {
+  /** Stable identity — the registry `site_key` (never a display name). */
   key: string;
+  /** Short command code from the saved widget initials (e.g. TF, QG). */
+  code: string;
   label: string;
+  /** Registry site_key, or null when the widget's site is not resolved. */
+  siteKey: string | null;
+  isHub: boolean;
+  visibleInAutonomous: boolean;
   state: MasterRowState;
   stateLabel: string;
   tone: Tone;
@@ -838,37 +854,39 @@ function toRowState(state: string | null | undefined): MasterRowState {
 // segmented progress bar is intentionally left inactive (null → —) and the real
 // agent state is preserved separately via `state`.
 
-const MASTER_ROWS: { key: string; label: string; siteKey: string | null }[] = [
-  { key: 'dfp', label: 'DFP MASTER', siteKey: 'digital-footprint' },
-  { key: 'qg', label: 'QG MASTER', siteKey: 'quickguard' },
-  { key: 'forge', label: 'The Forge', siteKey: 'the-forge' },
-  { key: 'gh', label: 'GH MASTER', siteKey: 'guardianhub' },
-  { key: 'lethub', label: 'LETHUB MASTER', siteKey: 'lethub' },
-  { key: 'gg', label: 'GG MASTER', siteKey: 'garageflow' },
-  { key: 'vowora', label: 'VOWORA MASTER', siteKey: 'wedora' },
-  { key: 'synq', label: 'SYNQ MASTER', siteKey: null },
-];
-
 /**
- * Eight master-agent rows, driven by the authoritative per-site master mapping
- * (getSiteMasterCards) + the group orchestrator. A site without a master is
- * surfaced NOT ASSIGNED, never fabricated.
+ * Master-agent rows, driven by the SAVED widget configuration joined to the
+ * authoritative per-site master mapping (getSiteMasterCards) + the group
+ * orchestrator. The hub widget (is_hub) maps to the DFP group orchestrator;
+ * every other widget resolves its master by `ai_sites.id` → `site_key`. A site
+ * without a master is surfaced NOT ASSIGNED, never fabricated. The Forge uses
+ * `the-forge` / "TF"; BuildNerve appears only when a manager adds it.
  */
 export function getMasterAgentRows(): MasterAgentRow[] {
   const cards = getSiteMasterCards();
   const group = getGroupOrchestrator();
+  const data = getGroupLiveData();
+  const config = getWidgetConfigData();
 
-  const cardBySiteKey = new Map(
-    cards.map((c) => [c.siteKey, c]),
-  );
+  const cardBySiteKey = new Map(cards.map((c) => [c.siteKey, c]));
+  const siteByUuid = new Map(data.sites.map((s) => [s.id, s]));
 
-  return MASTER_ROWS.map((row) => {
-    if (row.key === 'dfp') {
+  return config.widgets.map((widget) => {
+    const site = siteByUuid.get(widget.site_id);
+    const siteKey = site?.site_key ?? null;
+    const key = siteKey ?? widget.site_id;
+    const code = widget.initials;
+
+    if (widget.is_hub) {
       // DFP master = the group orchestrator.
       const state = group ? toRowState(group.state) : 'unassigned';
       return {
-        key: row.key,
-        label: row.label,
+        key,
+        code,
+        label: `${widget.display_name} MASTER`,
+        siteKey,
+        isHub: true,
+        visibleInAutonomous: widget.visible_in_autonomous,
         state,
         stateLabel: MASTER_ROW_STATE_LABEL[state],
         tone: MASTER_ROW_STATE_TONE[state],
@@ -878,11 +896,15 @@ export function getMasterAgentRows(): MasterAgentRow[] {
       };
     }
 
-    const card = row.siteKey ? cardBySiteKey.get(row.siteKey) : undefined;
+    const card = siteKey ? cardBySiteKey.get(siteKey) : undefined;
     if (!card || card.masterAgentKey == null) {
       return {
-        key: row.key,
-        label: row.label,
+        key,
+        code,
+        label: widget.display_name,
+        siteKey,
+        isHub: false,
+        visibleInAutonomous: widget.visible_in_autonomous,
         state: 'unassigned' as const,
         stateLabel: MASTER_ROW_STATE_LABEL.unassigned,
         tone: MASTER_ROW_STATE_TONE.unassigned,
@@ -894,8 +916,12 @@ export function getMasterAgentRows(): MasterAgentRow[] {
 
     const state = toRowState(card.masterAgentState);
     return {
-      key: row.key,
-      label: row.label,
+      key,
+      code,
+      label: widget.display_name,
+      siteKey,
+      isHub: false,
+      visibleInAutonomous: widget.visible_in_autonomous,
       state,
       stateLabel: MASTER_ROW_STATE_LABEL[state],
       tone: MASTER_ROW_STATE_TONE[state],

@@ -4,6 +4,11 @@ import {
   getSiteModules,
   type SiteModule as SiteModuleData,
 } from '@/pages/ai-operations/wallboard/operationsWallSelectors';
+import { getWidgetConfigData } from '@/pages/ai-operations/wallboard/widgetConfigStore';
+import { useAutoPage } from '@/pages/ai-operations/wallboard/useAutoPage';
+
+// DFP sits fixed in the centre; up to seven surrounding widgets per page.
+const SURROUNDING_PER_PAGE = 7;
 
 function Metric({ label, value, color, sub }: { label: string; value: string; color: string; sub?: string }) {
   return (
@@ -79,24 +84,71 @@ function NetworkSpine() {
 }
 
 /**
+ * The 3×3 site grid. DFP is pinned in the centre; the seven surrounding slots
+ * are filled from `slots` in reading order (top row → left/right of hub →
+ * bottom sides). This preserves the original first-page arrangement for every
+ * page — later pages reuse the same layout with the next seven widgets.
+ */
+function SiteGrid({ hub, slots }: { hub: SiteModuleData | undefined; slots: SiteModuleData[] }) {
+  const cell = (i: number): SiteModuleData | null => slots[i] ?? null;
+  const row = (indices: number[]) => (
+    <div className="ow-site-row grid grid-cols-3 gap-2">
+      {indices.map((i) => (
+        <div key={i} className="ow-site-cell">
+          {cell(i) ? <SiteModule site={cell(i)!} /> : null}
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <>
+      {row([0, 1, 2])}
+      <div className="ow-site-row grid grid-cols-3 gap-2">
+        <div className="ow-site-cell">{cell(3) ? <SiteModule site={cell(3)!} /> : null}</div>
+        <div className="ow-site-cell">{hub ? <SiteModule site={hub} /> : null}</div>
+        <div className="ow-site-cell">{cell(4) ? <SiteModule site={cell(4)!} /> : null}</div>
+      </div>
+      <div className="ow-site-row grid grid-cols-3 gap-2">
+        <div className="ow-site-cell">{cell(5) ? <SiteModule site={cell(5)!} /> : null}</div>
+        <div className="ow-site-cell" />
+        <div className="ow-site-cell">{cell(6) ? <SiteModule site={cell(6)!} /> : null}</div>
+      </div>
+    </>
+  );
+}
+
+/**
  * Central Group Operations area — top estate metrics bar plus the connected
- * site ecosystem (DFP as the visual hub, seven surrounding brand modules).
+ * site ecosystem. DFP is always the visual hub; up to seven surrounding
+ * widgets per page, with overflow rotating onto further pages in saved order.
+ * Metrics are ESTATE-WIDE (hiding a widget never changes the underlying totals).
  */
 export default function GroupOperationsCenter() {
   const metrics = getGroupMetrics();
-  const modules = getSiteModules();
+  const allModules = getSiteModules();
+  const config = getWidgetConfigData();
 
-  const byKey = (key: string): SiteModuleData => modules.find((m) => m.key === key)!;
-  const top = [byKey('quickguard'), byKey('guardianhub'), byKey('buildnerve')];
-  const middle = [byKey('lethub'), byKey('dfp'), byKey('garageflow')];
+  // Hub = the single central widget; surrounding = visible non-hub widgets in
+  // saved order (the selector preserves display_order).
+  const hub = allModules.find((m) => m.hub);
+  const surrounding = allModules.filter((m) => !m.hub && m.visibleOnWall);
+
+  const pageCount = Math.max(1, Math.ceil(surrounding.length / SURROUNDING_PER_PAGE));
+  const [page] = useAutoPage(pageCount);
+  const start = page * SURROUNDING_PER_PAGE;
+  const slots = surrounding.slice(start, start + SURROUNDING_PER_PAGE);
 
   return (
     <section className="flex flex-col min-h-0 flex-1">
       {/* Top metrics bar */}
       <div className="shrink-0 ow-panel px-4 py-2 flex items-center justify-between">
-        <div className="flex items-baseline gap-3 shrink-0">
+        <div className="flex items-baseline gap-2 shrink-0">
           <span className="text-[13px] font-bold tracking-[0.16em] text-slate-100 whitespace-nowrap">
             GROUP OPERATIONS
+          </span>
+          <span className="text-[7.5px] font-label tracking-[0.18em] px-1.5 py-0.5 border border-cyan-400/30 text-cyan-300 rounded whitespace-nowrap">
+            ESTATE-WIDE
           </span>
           <span className="hidden md:inline text-[8.5px] font-label tracking-[0.18em] text-slate-500 whitespace-nowrap">
             OUR SITES. ONE ECOSYSTEM.
@@ -123,31 +175,30 @@ export default function GroupOperationsCenter() {
         <EstateRing percent={metrics.estatePercent} label={metrics.estateLabel} />
       </div>
 
+      {/* Visible stale-configuration warning (retained last-good layout). */}
+      {config.stale && (
+        <div className="shrink-0 ow-stale-warning mt-2">
+          <i className="ri-error-warning-line text-[12px]" />
+          <span>WIDGET CONFIGURATION STALE — SHOWING LAST SAVED LAYOUT</span>
+        </div>
+      )}
+
       {/* Site network */}
       <div className="ow-site-network relative flex-1 min-h-0 mt-3 grid grid-rows-3 gap-2">
         <NetworkSpine />
 
-        <div className="ow-site-row grid grid-cols-3 gap-2">
-          {top.map((s) => (
-            <div key={s.key} className="ow-site-cell">
-              <SiteModule site={s} />
-            </div>
-          ))}
-        </div>
+        <SiteGrid hub={hub} slots={slots} />
 
-        <div className="ow-site-row grid grid-cols-3 gap-2">
-          {middle.map((s) => (
-            <div key={s.key} className="ow-site-cell">
-              <SiteModule site={s} />
+        {pageCount > 1 && (
+          <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-none">
+            <div className="ow-page-dots">
+              {Array.from({ length: pageCount }).map((_, i) => (
+                <span key={i} className={`ow-page-dot ${i === page ? 'ow-page-dot-active' : ''}`} />
+              ))}
             </div>
-          ))}
-        </div>
-
-        <div className="ow-site-row grid grid-cols-3 gap-2">
-          <div className="ow-site-cell"><SiteModule site={byKey('vowora')} /></div>
-          <div className="ow-site-cell" />
-          <div className="ow-site-cell"><SiteModule site={byKey('synqoro')} /></div>
-        </div>
+            <span className="ow-page-label">{page + 1}/{pageCount}</span>
+          </div>
+        )}
       </div>
     </section>
   );
