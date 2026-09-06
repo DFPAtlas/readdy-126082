@@ -841,7 +841,7 @@ function toRowState(state: string | null | undefined): MasterRowState {
 const MASTER_ROWS: { key: string; label: string; siteKey: string | null }[] = [
   { key: 'dfp', label: 'DFP MASTER', siteKey: 'digital-footprint' },
   { key: 'qg', label: 'QG MASTER', siteKey: 'quickguard' },
-  { key: 'bn', label: 'BN MASTER', siteKey: 'the-forge' },
+  { key: 'forge', label: 'The Forge', siteKey: 'the-forge' },
   { key: 'gh', label: 'GH MASTER', siteKey: 'guardianhub' },
   { key: 'lethub', label: 'LETHUB MASTER', siteKey: 'lethub' },
   { key: 'gg', label: 'GG MASTER', siteKey: 'garageflow' },

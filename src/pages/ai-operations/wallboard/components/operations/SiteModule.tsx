@@ -7,6 +7,7 @@ import {
   type Tone,
 } from '@/pages/ai-operations/wallboard/operationsWallSelectors';
 import QuickGuardManagerReport from '@/pages/ai-operations/wallboard/components/operations/QuickGuardManagerReport';
+import { getQuickGuardManagerReport } from '@/pages/ai-operations/wallboard/managerReportSelectors';
 
 function metric(label: string, value: number | null, accent: string) {
   return (
@@ -61,6 +62,17 @@ const SITE_IDENTITY_ICON: Record<string, string> = {
   garageflow: 'ri-car-line',
   vowora: 'ri-heart-2-line',
   synqoro: 'ri-brain-line',
+};
+
+// QuickGuard's n8n indicator is driven by its autonomous-manager workflow's
+// reporting status (ai_site_manager_reports), NOT the shared n8n service
+// reachability. Fresh (≤ 10 min) → green REPORTING; older → amber STALE;
+// no report → AWAITING REPORT; query failure → UNAVAILABLE.
+const QG_N8N_STATUS: Record<string, { label: string; tone: Tone }> = {
+  fresh: { label: 'REPORTING', tone: 'green' },
+  stale: { label: 'STALE', tone: 'amber' },
+  awaiting: { label: 'AWAITING REPORT', tone: 'muted' },
+  unavailable: { label: 'UNAVAILABLE', tone: 'red' },
 };
 
 /** Human-readable age ("2s", "3m", "1h", "2d") for a heartbeat timestamp. */
@@ -288,6 +300,20 @@ function LiveSiteModule({ site, accent }: { site: SiteModuleData; accent: { colo
   const n8nAge = ageLabel(n8n.lastSuccessAt);
   const n8nErr = n8n.workflowErrors != null && n8n.workflowErrors > 0 ? `${n8n.workflowErrors} err` : null;
 
+  // QuickGuard's n8n indicator reflects its autonomous-manager workflow's
+  // reporting status (ai_site_manager_reports), kept separate from the shared
+  // n8n service reachability (which remains visible in the Core Systems rail).
+  const isQuickGuard = site.key === 'quickguard';
+  const qgReport = isQuickGuard ? getQuickGuardManagerReport() : null;
+
+  const n8nLabel = qgReport ? 'REPORT' : 'N8N';
+  const qgMeta = qgReport ? QG_N8N_STATUS[qgReport.reportingStatus] ?? QG_N8N_STATUS.unavailable : null;
+  const n8nStatus = qgMeta ? qgMeta.label : n8n.label;
+  const n8nTone: Tone = qgMeta ? qgMeta.tone : n8n.tone;
+  const n8nSignal = qgReport ? qgReport.observedAt : n8n.lastSuccessAt;
+  const n8nPrimary = qgReport ? (qgReport.ageLabel ? `${qgReport.ageLabel} ago` : '—') : (n8nAge ? `${n8nAge} ago` : '—');
+  const n8nSecondary = qgReport ? null : n8nErr;
+
   // Counts
   const users = site.users;
   const agents = site.agents;
@@ -345,12 +371,12 @@ function LiveSiteModule({ site, accent }: { site: SiteModuleData; accent: { colo
         />
         <ServicePanel
           icon="ri-flow-chart"
-          label="N8N"
-          status={n8n.label}
-          tone={n8n.tone}
-          signal={n8n.lastSuccessAt}
-          primary={n8nAge ? `${n8nAge} ago` : '—'}
-          secondary={n8nErr}
+          label={n8nLabel}
+          status={n8nStatus}
+          tone={n8nTone}
+          signal={n8nSignal}
+          primary={n8nPrimary}
+          secondary={n8nSecondary}
           secondaryTone="amber"
           accent={accent.color}
         />

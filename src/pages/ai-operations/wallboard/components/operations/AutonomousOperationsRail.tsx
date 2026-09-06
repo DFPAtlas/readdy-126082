@@ -12,7 +12,7 @@ import {
 // Stable key → short command code. Authoritative mapping, never array order.
 const SITE_CODE: Record<string, string> = {
   qg: 'QG',
-  bn: 'BN',
+  forge: 'TF',
   gh: 'GH',
   lethub: 'LH',
   gg: 'GG',
@@ -20,7 +20,7 @@ const SITE_CODE: Record<string, string> = {
   synq: 'SQ',
 };
 
-const SITE_ORDER = ['qg', 'bn', 'gh', 'lethub', 'gg', 'vowora', 'synq'];
+const SITE_ORDER = ['qg', 'forge', 'gh', 'lethub', 'gg', 'vowora', 'synq'];
 
 // Presentation colours aligned to the command-centre state semantics. Standby
 // is muted cyan and unassigned is dim grey — deliberately distinct from the
