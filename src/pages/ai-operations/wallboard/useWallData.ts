@@ -20,6 +20,7 @@ import { useOperationsHealthData } from '@/pages/ai-operations/wallboard/operati
 import { useSecurityData } from '@/pages/ai-operations/wallboard/securityStore';
 import { useOllamaCatalogue } from '@/pages/ai-operations/models/ollamaCatalogueStore';
 import { useSiteMonitorData } from '@/pages/ai-operations/wallboard/siteStore';
+import { useManagerReportData } from '@/pages/ai-operations/wallboard/managerReportStore';
 
 /**
  * Subscribe to every source the wall depends on. Returns nothing — the
@@ -39,4 +40,5 @@ export function useWallData(): void {
   useSecurityData();
   useOllamaCatalogue();
   useSiteMonitorData();
+  useManagerReportData();
 }

@@ -6,6 +6,7 @@ import {
   type SiteHeartbeat,
   type Tone,
 } from '@/pages/ai-operations/wallboard/operationsWallSelectors';
+import QuickGuardManagerReport from '@/pages/ai-operations/wallboard/components/operations/QuickGuardManagerReport';
 
 function metric(label: string, value: number | null, accent: string) {
   return (
@@ -369,6 +370,9 @@ function LiveSiteModule({ site, accent }: { site: SiteModuleData; accent: { colo
       >
         {overall.footer}
       </div>
+
+      {/* 5. Live autonomous-manager report (QuickGuard only) */}
+      {site.key === 'quickguard' && <QuickGuardManagerReport />}
     </div>
   );
 }

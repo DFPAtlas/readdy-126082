@@ -4,6 +4,10 @@ import {
   type MasterAgentRow,
   type MasterRowState,
 } from '@/pages/ai-operations/wallboard/operationsWallSelectors';
+import {
+  getQuickGuardManagerReport,
+  type QuickGuardManagerReport,
+} from '@/pages/ai-operations/wallboard/managerReportSelectors';
 
 // Stable key → short command code. Authoritative mapping, never array order.
 const SITE_CODE: Record<string, string> = {
@@ -101,7 +105,7 @@ function Total({
   );
 }
 
-function MissionRow({ row }: { row: MasterAgentRow }) {
+function MissionRow({ row, report }: { row: MasterAgentRow; report?: QuickGuardManagerReport }) {
   const tone = STATE_COLOR[row.state];
   const task = taskLabel(row);
   return (
@@ -117,6 +121,18 @@ function MissionRow({ row }: { row: MasterAgentRow }) {
       </div>
       <div className="text-[11px] text-slate-300 truncate mt-0.5">{task}</div>
       <div className="font-mono text-[8.5px] tracking-[0.06em] text-slate-600 truncate mt-0.5">{row.refKey}</div>
+      {report && report.source !== 'loading' && (
+        <div className="flex items-center gap-1.5 mt-0.5 leading-none">
+          <span className="text-[8px] font-semibold tracking-[0.04em]" style={{ color: toneHex(report.reportingTone) }}>
+            REPORT {report.reportingLabel}
+          </span>
+          {report.businessHealth && (
+            <span className="text-[8px] font-semibold tracking-[0.04em]" style={{ color: toneHex(report.businessHealthTone) }}>
+              BUSINESS {report.businessHealth}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -219,6 +235,7 @@ function Constellation({ rows, dfp }: { rows: MasterAgentRow[]; dfp: MasterAgent
 export default function AutonomousOperationsRail() {
   const rows = getMasterAgentRows();
   const dfp = rows.find((r) => r.key === 'dfp');
+  const qgReport = getQuickGuardManagerReport();
 
   // Derived counters — straight from the eight returned rows (never hard-coded).
   const running = rows.filter((r) => r.state === 'running').length;
@@ -249,7 +266,7 @@ export default function AutonomousOperationsRail() {
         {/* Compact master-agent mission list */}
         <div className="flex-1 min-h-0 overflow-hidden">
           {rows.map((row) => (
-            <MissionRow key={row.key} row={row} />
+            <MissionRow key={row.key} row={row} report={row.key === 'qg' ? qgReport : undefined} />
           ))}
         </div>
       </div>
