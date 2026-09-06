@@ -317,7 +317,7 @@ FROM (VALUES
   ('NOT-1014','QuickGuard Failed Agent Run','Notify QuickGuard Operations on failed agent runs.','run_failure','site','quickguard','high','high','active','["dfp_command","email"]','QuickGuard Operations',true,20,true,'ESC-NOT-1014','qh-delay-normal',60,true,true,'QuickGuard Operations',true,'Covers guard matching and shift management agents.'),
   ('NOT-1015','GuardianHub Check-Call Degradation','Route GuardianHub check-call / welfare agent issues to the welfare team.','agent_failure','site','guardianhub','critical','critical','active','["dfp_command","email","phone"]','GuardianHub Welfare',true,5,true,'ESC-NOT-1015','qh-critical-bypass',10,true,true,'GuardianHub Welfare',true,'Welfare check-calls are safety-critical; highest priority.'),
   ('NOT-1016','LetHub Compliance Warning','Notify LetHub Operations on compliance review warnings.','policy_violation','site','lethub','high','high','active','["dfp_command","email"]','LetHub Operations',true,30,true,'ESC-NOT-1016','qh-delay-normal',60,true,true,'LetHub Operations',true,'Tenancy compliance is a regulated process.'),
-  ('NOT-1017','Wedora Notification Failure','Route Wedora guest/notification failures to the Wedora planning team.','integration','site','wedora','high','high','active','["dfp_command","email"]','Wedora Planning',true,20,true,'ESC-NOT-1017','qh-delay-normal',45,true,false,'Wedora Planning',true,'Guest-facing notification delivery failures.'),
+  ('NOT-1017','Vowora Notification Failure','Route Vowora guest/notification failures to the Vowora planning team.','integration','site','wedora','high','high','active','["dfp_command","email"]','Vowora Planning',true,20,true,'ESC-NOT-1017','qh-delay-normal',45,true,false,'Vowora Planning',true,'Guest-facing notification delivery failures.'),
   ('NOT-1018','The Forge UAT Failure','Notify Forge engineering on UAT cycle failures for releases.','uat_failure','site','the-forge','high','high','active','["dfp_command","email","slack"]','The Forge Engineering',true,30,true,'ESC-NOT-1018','qh-delay-normal',120,true,true,'The Forge Engineering',true,'Release-blocking UAT failures.'),
   ('NOT-1019','Digital Footprint Support / Diagnostics','Route Digital Footprint support and diagnostics issues to delivery support.','run_failure','site','digital-footprint','high','high','active','["dfp_command","email"]','Digital Footprint Delivery',true,20,true,'ESC-NOT-1019','qh-delay-normal',45,true,true,'Digital Footprint Delivery',true,'Diagnostics and support triage failures.'),
   ('NOT-1020','QuickGuard Payroll Reconciliation','Notify QuickGuard Operations on payroll reconciliation failures.','orchestration_blocked','site','quickguard','high','urgent','active','["dfp_command","email"]','QuickGuard Operations',true,15,true,'ESC-NOT-1020','qh-critical-bypass',30,true,true,'QuickGuard Operations',true,'Payroll has financial impact; flagged urgent.'),
@@ -369,7 +369,7 @@ FROM (VALUES
   ('ESC-NOT-1014','QuickGuard Failed Agent Run Escalation','4-level run failure escalation.','site','quickguard',3,true,'QuickGuard Operations',true,''),
   ('ESC-NOT-1015','GuardianHub Check-Call Degradation Escalation','5-level welfare-critical escalation.','site','guardianhub',4,true,'GuardianHub Welfare',true,''),
   ('ESC-NOT-1016','LetHub Compliance Warning Escalation','3-level compliance escalation.','site','lethub',2,true,'LetHub Operations',true,''),
-  ('ESC-NOT-1017','Wedora Notification Failure Escalation','3-level notification failure escalation.','site','wedora',2,true,'Wedora Planning',true,''),
+  ('ESC-NOT-1017','Vowora Notification Failure Escalation','3-level notification failure escalation.','site','wedora',2,true,'Vowora Planning',true,''),
   ('ESC-NOT-1018','The Forge UAT Failure Escalation','3-level UAT failure escalation.','site','the-forge',2,true,'The Forge Engineering',true,''),
   ('ESC-NOT-1019','Digital Footprint Support Diagnostics Escalation','4-level diagnostics escalation.','site','digital-footprint',3,true,'Digital Footprint Delivery',true,''),
   ('ESC-NOT-1020','QuickGuard Payroll Reconciliation Escalation','4-level payroll escalation.','site','quickguard',3,true,'QuickGuard Operations',true,''),
@@ -459,7 +459,7 @@ FROM (VALUES
   ('ESC-NOT-1016',0,'Initial Notification',0,'LetHub Operations','["dfp_command"]',true),
   ('ESC-NOT-1016',1,'Team Escalation',60,'Security Team','["email"]',true),
   ('ESC-NOT-1016',2,'Technical / Security Escalation',180,'Management','["email"]',true),
-  ('ESC-NOT-1017',0,'Initial Notification',0,'Wedora Planning','["dfp_command"]',true),
+  ('ESC-NOT-1017',0,'Initial Notification',0,'Vowora Planning','["dfp_command"]',true),
   ('ESC-NOT-1017',1,'Team Escalation',45,'Platform Team','["email"]',true),
   ('ESC-NOT-1017',2,'Technical / Security Escalation',120,'Management','["email"]',true),
   ('ESC-NOT-1018',0,'Initial Notification',0,'The Forge Engineering','["dfp_command"]',true),
@@ -526,7 +526,7 @@ FROM (VALUES
   ('NOT-EVT-0013','NOT-1014',NULL,NULL,'RUN-3C9B7','quickguard','Tasks & Runs','high','high','email','QuickGuard Operations','delivered','acknowledged','QuickGuard Operations','2026-08-25 08:12',0,false,NULL,'Agent run failed — guard matching'),
   ('NOT-EVT-0014','NOT-1022',NULL,NULL,NULL,NULL,'Cost & Budgets','low','normal','email','Management','delivered','not_required','','',0,false,'BUD-0001','Budget forecast overage — group budget'),
   ('NOT-EVT-0015','NOT-1005',NULL,NULL,'RUN-5C2F4','lethub','Tasks & Runs','high','high','email','Technical Team','acknowledged','acknowledged','Technical Team','2026-08-24 22:25',0,false,NULL,'Run failed after retries — tenancy compliance'),
-  ('NOT-EVT-0016','NOT-1017','ALR-5030',NULL,NULL,'wedora','Alerts & Incidents','high','high','dfp_command','Wedora Planning','failed','awaiting','','',0,false,NULL,'Notification delivery failure — guest batch'),
+  ('NOT-EVT-0016','NOT-1017','ALR-5030',NULL,NULL,'wedora','Alerts & Incidents','high','high','dfp_command','Vowora Planning','failed','awaiting','','',0,false,NULL,'Notification delivery failure — guest batch'),
   ('NOT-EVT-0017','NOT-1016',NULL,NULL,NULL,'lethub','Security & Policy','high','high','dfp_command','LetHub Operations','acknowledged','acknowledged','LetHub Operations','2026-08-24 21:35',0,false,'POL-PRIVACY','Compliance warning — tenancy review'),
   ('NOT-EVT-0018','NOT-1024',NULL,NULL,NULL,NULL,'Models & Providers','high','high','dfp_command','AI Operations','delivered','acknowledged','AI Operations','2026-08-24 21:00',0,false,'MOD-CLAUDE-SONNET','Model failure — fallback activated'),
   ('NOT-EVT-0019','NOT-1020',NULL,NULL,NULL,'quickguard','Orchestrator','high','urgent','dfp_command','QuickGuard Operations','escalated','acknowledged','QuickGuard Operations','2026-08-24 20:38',2,false,'ORC-7008','Orchestration blocked — payroll reconciliation'),
@@ -540,7 +540,7 @@ FROM (VALUES
   ('NOT-EVT-0027','NOT-1008',NULL,NULL,NULL,'the-forge','Cost & Budgets','high','high','email','Management','suppressed','not_required','','',0,true,'BUD-0007','Budget >90% — The Forge AI'),
   ('NOT-EVT-0028','NOT-1011','ALR-5011',NULL,NULL,'quickguard','Alerts & Incidents','high','urgent','dfp_command','AI Operations','escalated','acknowledged','AI Operations','2026-08-24 16:30',1,false,NULL,'Incident escalation — repeated failure'),
   ('NOT-EVT-0029',NULL,NULL,NULL,NULL,NULL,'Security & Policy','low','informational','dfp_command','Security Team','delivered','not_required','','',0,false,'POL-AUDIT','Policy evaluation recorded — audit only'),
-  ('NOT-EVT-0030','NOT-1010',NULL,NULL,NULL,'wedora','Agents','high','high','email','Wedora Planning','expired','expired','','',1,false,'wd-rsvp','Agent offline — RSVP Agent')
+  ('NOT-EVT-0030','NOT-1010',NULL,NULL,NULL,'wedora','Agents','high','high','email','Vowora Planning','expired','expired','','',1,false,'wd-rsvp','Agent offline — RSVP Agent')
 ) AS v(event_key, rule_key, alert_key, approval_key, run_key, site_key, event_type, severity, priority, channel, recipient_reference, status, acknowledgement_state, acknowledged_by, acknowledged_at, escalation_level, suppressed, correlation_id, summary)
 LEFT JOIN public.ai_notification_rules r ON r.rule_key = v.rule_key
 LEFT JOIN public.ai_alerts al ON al.alert_key = v.alert_key

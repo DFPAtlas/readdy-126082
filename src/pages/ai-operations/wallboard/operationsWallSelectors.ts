@@ -33,7 +33,7 @@ import { getOperationsHealthData } from '@/pages/ai-operations/wallboard/operati
 import { getHalHost, getTronHost } from '@/pages/ai-operations/wallboard/aiInfraSelectors';
 import { getRuntimeHealthState, HAL_RUNTIME_NODE_KEY, TRON_RUNTIME_NODE_KEY } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import { getVectorHealth } from '@/pages/ai-operations/wallboard/knowledgeSelectors';
-import { getSecuritySummary, getSecurityConnections } from '@/pages/ai-operations/wallboard/securitySelectors';
+import { getSafetyAssessment, getSecurityConnections } from '@/pages/ai-operations/wallboard/securitySelectors';
 import { getSitesServicesList } from '@/pages/ai-operations/wallboard/siteSelectors';
 import { getDatabaseHealthBySiteKey, type SiteDatabaseHealth } from '@/pages/ai-operations/wallboard/databaseSelectors';
 import { getN8nInstances } from '@/pages/ai-operations/wallboard/n8nSelectors';
@@ -104,8 +104,8 @@ export interface SiteBrand {
 }
 
 // The approved estate layout (8 brands). Display names use the REAL registry
-// names (The Forge, Wedora) per the owner decision; Synqoro remains a planned
-// module that renders NOT CONFIGURED until registered.
+// names (The Forge, Vowora) per the owner decision; Synqoro is registered and
+// monitored (synqora.uk), joining the same live-resolved path as every site.
 export const SITE_BRANDS: SiteBrand[] = [
   { key: 'dfp', siteKey: 'digital-footprint', name: 'DFP', shortCode: 'DFP', subtitle: 'AGENCY & OPERATIONS', color: 'cyan', hub: true },
   { key: 'quickguard', siteKey: 'quickguard', name: 'QuickGuard', shortCode: 'QG', subtitle: 'SECURITY MARKETPLACE', color: 'blue', hub: false },
@@ -114,7 +114,7 @@ export const SITE_BRANDS: SiteBrand[] = [
   { key: 'lethub', siteKey: 'lethub', name: 'LetHub', shortCode: 'LH', subtitle: 'LETTINGS PLATFORM', color: 'purple', hub: false },
   { key: 'garageflow', siteKey: 'garageflow', name: 'GarageFlow', shortCode: 'GF', subtitle: 'VEHICLE CARE', color: 'yellow', hub: false },
   { key: 'vowora', siteKey: 'wedora', name: 'Vowora', shortCode: 'VW', subtitle: 'WEDDING PLANNING', color: 'pink', hub: false },
-  { key: 'synqoro', siteKey: null, name: 'Synqoro', shortCode: 'SQ', subtitle: 'AI & DATA SOLUTIONS', color: 'violet', hub: false },
+  { key: 'synqoro', siteKey: 'synqoro', name: 'Synqoro', shortCode: 'SQ', subtitle: 'AI & DATA SOLUTIONS', color: 'violet', hub: false },
 ];
 
 export type WebsiteState =
@@ -267,9 +267,11 @@ function resolveWebsiteHealth(
 /**
  * Combine website health and database health into a single overall site state.
  * Website and database remain SEPARATE signals; the combination only degrades
- * (never declares offline) a LIVE website when its database is offline, stale,
- * degraded or in check-error. A database problem is never confused with a
- * website outage, and a monitoring failure is never presented as downtime.
+ * (never declares offline) a LIVE website when its database is CONFIRMED
+ * offline, degraded or in check-error by a fresh reading. A stale heartbeat is
+ * a monitoring gap (no fresh evidence), so it never degrades the site — exactly
+ * like an unknown/not-configured database. A database problem is never confused
+ * with a website outage, and a monitoring failure is never presented as downtime.
  */
 function combineSiteHealth(
   websiteState: WebsiteState,
@@ -280,11 +282,11 @@ function combineSiteHealth(
       case 'healthy':
       case 'unknown':
       case 'not_configured':
+      case 'stale':
+      case 'testing':
         return { state: 'online', reason: null };
       case 'offline':
         return { state: 'degraded', reason: 'Website responding / Database unavailable' };
-      case 'stale':
-        return { state: 'degraded', reason: 'Website responding / Database heartbeat stale' };
       case 'check_error':
         return { state: 'degraded', reason: 'Website responding / Database check error' };
       case 'degraded':
@@ -1166,12 +1168,13 @@ export interface AiSystemRow {
   count: number | null;
   /** Whether the instrument/row has valid live state (drives glow/pulse). */
   live: boolean;
+  /** Short human-readable reason (SAFETY row) — exposed on hover + keyboard focus. */
+  detail?: string;
 }
 
 export function getAiSystemsStatus(): AiSystemRow[] {
   const tron = getTronHost();
   const vector = getVectorHealth();
-  const security = getSecuritySummary();
   const connections = getSecurityConnections();
   const data = getGroupLiveData();
 
@@ -1254,16 +1257,22 @@ export function getAiSystemsStatus(): AiSystemRow[] {
     toolsTone = 'muted';
   }
 
-  // SAFETY — NOMINAL / ALERT / UNKNOWN (degraded collapses into ALERT).
-  const safetyUnavailable = security.sourceState === 'unavailable';
-  const safetyValue = safetyUnavailable ? 'UNKNOWN' : security.tone === 'emerald' ? 'NOMINAL' : 'ALERT';
-  const safetyTone: Tone = safetyUnavailable ? 'muted' : security.tone === 'emerald' ? 'green' : 'red';
+  // SAFETY — UNKNOWN / NOMINAL / WARNING / ALERT (four honest states, never
+  // collapsing a non-critical warning into a red alert).
+  const safety = getSafetyAssessment();
+  const safetyValue = safety.label;
+  const safetyTone: Tone =
+    safety.status === 'nominal' ? 'green'
+      : safety.status === 'warning' ? 'amber'
+        : safety.status === 'alert' ? 'red'
+          : 'muted';
+  const safetyDetail = safety.detail;
 
   return [
     { key: 'model_status', label: 'MODEL STATUS', value: modelValue, tone: modelTone, count: null, live: modelLive },
     { key: 'vector_db', label: 'VECTOR DB', value: vectorValue, tone: vectorTone, count: vectorCount, live: vectorAvailable && vector.embedded > 0 },
     { key: 'tools', label: 'TOOLS', value: toolsValue, tone: toolsTone, count: toolsCount, live: toolsAvailable && onlineTools > 0 },
-    { key: 'safety', label: 'SAFETY', value: safetyValue, tone: safetyTone, count: null, live: !safetyUnavailable },
+    { key: 'safety', label: 'SAFETY', value: safetyValue, tone: safetyTone, count: null, live: safety.status !== 'unknown', detail: safetyDetail },
   ];
 }
 

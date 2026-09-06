@@ -386,8 +386,8 @@ export const demoModels = [
       failureRate: '0.0%',
     },
     usageEvents: [
-      { time: 'Today · 10:02', agentId: 'wd-photo', agentName: 'Photo Moderation Agent', site: 'Wedora', runId: 'RUN-3E66A', task: 'Moderate photo upload', result: 'success', duration: '32s', estimatedCost: '£0.02' },
-      { time: 'Yesterday · 22:10', agentId: 'wd-photo', agentName: 'Photo Moderation Agent', site: 'Wedora', runId: 'RUN-3E66A', task: 'Analyse shared media', result: 'success', duration: '30s', estimatedCost: '£0.02' },
+      { time: 'Today · 10:02', agentId: 'wd-photo', agentName: 'Photo Moderation Agent', site: 'Vowora', runId: 'RUN-3E66A', task: 'Moderate photo upload', result: 'success', duration: '32s', estimatedCost: '£0.02' },
+      { time: 'Yesterday · 22:10', agentId: 'wd-photo', agentName: 'Photo Moderation Agent', site: 'Vowora', runId: 'RUN-3E66A', task: 'Analyse shared media', result: 'success', duration: '30s', estimatedCost: '£0.02' },
     ],
     healthMeta: { status: 'available', lastChecked: '1m ago', responseHealth: 'Normal', capacityState: 'available', recentFailures: 0, failureSummary: 'No recent failures.', recommendedAction: 'None — healthy.' },
     security: CLOUD_SECURITY,

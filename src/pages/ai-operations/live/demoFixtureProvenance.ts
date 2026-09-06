@@ -182,13 +182,13 @@ const DEMO_ALERTS: Record<string, DemoAlertFingerprint> = {
     first_seen_at: '2026-08-25 09:50', last_seen_at: '2026-08-25 10:15',
   },
   'ALR-5050': {
-    title: 'Wedora RSVP notification failure',
+    title: 'Vowora RSVP notification failure',
     summary: 'The RSVP agent failed to send guest notifications due to an email connection issue.',
     severity: 'high', status: 'investigating', occurrence_count: 1,
     first_seen_at: '2026-08-25 09:15', last_seen_at: '2026-08-25 10:05',
   },
   'ALR-5051': {
-    title: 'Wedora supplier quote chase failure',
+    title: 'Vowora supplier quote chase failure',
     summary: 'The supplier agent failed to chase an outstanding quote.',
     severity: 'medium', status: 'acknowledged', occurrence_count: 1,
     first_seen_at: '2026-08-25 08:05', last_seen_at: '2026-08-25 08:50',
@@ -218,7 +218,7 @@ const DEMO_ALERTS: Record<string, DemoAlertFingerprint> = {
     first_seen_at: '2026-08-24 16:20', last_seen_at: '2026-08-24 18:00',
   },
   'ALR-5091': {
-    title: 'Wedora seating validation resolved',
+    title: 'Vowora seating validation resolved',
     summary: 'A seating chart validation failure was fixed and re-verified.',
     severity: 'medium', status: 'resolved', occurrence_count: 1,
     first_seen_at: '2026-08-24 15:40', last_seen_at: '2026-08-24 17:30',
@@ -301,7 +301,7 @@ const DEMO_INCIDENTS: Record<string, DemoIncidentFingerprint> = {
     severity: 'high', status: 'investigating', started_at: '2026-08-25 09:50',
   },
   'INC-8150': {
-    title: 'Wedora RSVP notification failure',
+    title: 'Vowora RSVP notification failure',
     summary: 'The RSVP agent failed to send guest notifications due to an email connection issue.',
     severity: 'high', status: 'investigating', started_at: '2026-08-25 09:15',
   },

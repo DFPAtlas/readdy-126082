@@ -21,6 +21,7 @@ const STATE_TEXT: Record<DatabaseState, string> = {
   check_error: 'text-secondary-300',
   unknown: 'text-secondary-300',
   not_configured: 'text-secondary-300',
+  testing: 'text-amber-400',
 };
 
 const STATE_BADGE: Record<DatabaseState, string> = {
@@ -31,6 +32,7 @@ const STATE_BADGE: Record<DatabaseState, string> = {
   check_error: 'text-secondary-300 bg-secondary-500/10 border-secondary-500/25',
   unknown: 'text-secondary-300 bg-secondary-500/10 border-secondary-500/25',
   not_configured: 'text-secondary-300 bg-secondary-500/10 border-secondary-500/25',
+  testing: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
 };
 
 const SOURCE_BADGE: Record<'live' | 'partial' | 'unavailable', { label: string; cls: string }> = {
@@ -74,7 +76,7 @@ function ServiceDot({ service }: { service: CoreService }) {
   const tone =
     service.status === 'healthy'
       ? 'bg-emerald-400'
-      : service.status === 'degraded' || service.status === 'stale'
+      : service.status === 'degraded' || service.status === 'stale' || service.status === 'testing'
         ? 'bg-amber-400'
         : service.status === 'offline'
           ? 'bg-red-400'
@@ -153,7 +155,7 @@ function CoreServicePanel() {
                 className={`w-2 h-2 rounded-full ${
                   r.status === 'healthy'
                     ? 'bg-emerald-400'
-                    : r.status === 'degraded'
+                    : r.status === 'degraded' || r.status === 'stale' || r.status === 'testing'
                       ? 'bg-amber-400'
                       : r.status === 'offline'
                         ? 'bg-red-400'
@@ -326,11 +328,12 @@ export default function DatabasesView() {
       </div>
 
       {/* Summary strip — readable from across the room */}
-      <div className="shrink-0 grid grid-cols-3 md:grid-cols-6 gap-2.5 mb-3">
+      <div className="shrink-0 grid grid-cols-3 md:grid-cols-7 gap-2.5 mb-3">
         <SummaryStat label="Backends" value={summary.total} tone="text-foreground-100" icon="ri-database-2-line" />
         <SummaryStat label="Healthy" value={summary.healthy} tone="text-emerald-400" icon="ri-check-double-line" />
         <SummaryStat label="Degraded" value={summary.degraded} tone={summary.degraded > 0 ? 'text-amber-400' : 'text-foreground-200'} icon="ri-arrow-down-circle-line" />
         <SummaryStat label="Offline" value={summary.offline} tone={summary.offline > 0 ? 'text-red-400' : 'text-foreground-200'} icon="ri-close-circle-line" />
+        <SummaryStat label="Testing" value={summary.testing} tone={summary.testing > 0 ? 'text-amber-400' : 'text-foreground-200'} icon="ri-flask-line" />
         <SummaryStat label="Unknown" value={summary.unknown} tone="text-secondary-300" icon="ri-question-line" />
         <SummaryStat label="Not Configured" value={summary.notConfigured} tone="text-secondary-300" icon="ri-forbid-2-line" />
       </div>

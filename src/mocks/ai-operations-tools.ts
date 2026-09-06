@@ -62,7 +62,7 @@ export const demoConnections = [
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'Guard and shift data', status: 'connected', critical: true },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Care and welfare data', status: 'degraded', critical: true },
       { siteId: 'lethub', siteName: 'LetHub', environment: 'production', purpose: 'Tenancy data', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Wedding data', status: 'connected', critical: true },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Wedding data', status: 'connected', critical: true },
       { siteId: 'the-forge', siteName: 'The Forge', environment: 'production', purpose: 'Build metadata', status: 'connected', critical: true },
     ],
     operationGroups: [
@@ -115,7 +115,7 @@ export const demoConnections = [
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'Shift automation', status: 'connected', critical: true },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Care automation', status: 'connected', critical: true },
       { siteId: 'lethub', siteName: 'LetHub', environment: 'production', purpose: 'Tenancy automation', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Wedding automation', status: 'connected', critical: true },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Wedding automation', status: 'connected', critical: true },
       { siteId: 'the-forge', siteName: 'The Forge', environment: 'production', purpose: 'Build pipeline', status: 'degraded', critical: true },
     ],
     operationGroups: [
@@ -165,7 +165,7 @@ export const demoConnections = [
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'Guard payments', status: 'connected', critical: true },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Care billing', status: 'connected', critical: true },
       { siteId: 'lethub', siteName: 'LetHub', environment: 'production', purpose: 'Rent payments', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Wedding billing', status: 'connected', critical: true },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Wedding billing', status: 'connected', critical: true },
       { siteId: 'the-forge', siteName: 'The Forge', environment: 'production', purpose: 'Studio billing', status: 'connected', critical: false },
     ],
     operationGroups: [
@@ -207,7 +207,7 @@ export const demoConnections = [
     createdAt: '2025-01-14', updatedAt: '2026-08-25',
     agentAccess: [
       { agentId: 'core-comms', agentName: 'Communications Agent', site: 'Group-wide', accessMode: 'write', allowedOperations: ['Send approved template'], restrictedOperations: ['Send unsolicited outreach'], risk: 'low', approvalRequired: false, status: 'connected' },
-      { agentId: 'wd-comms', agentName: 'Wedding Communications Agent', site: 'Wedora', accessMode: 'write', allowedOperations: ['Send guest update'], restrictedOperations: ['—'], risk: 'low', approvalRequired: false, status: 'connected' },
+      { agentId: 'wd-comms', agentName: 'Wedding Communications Agent', site: 'Vowora', accessMode: 'write', allowedOperations: ['Send guest update'], restrictedOperations: ['—'], risk: 'low', approvalRequired: false, status: 'connected' },
       { agentId: 'lh-comms', agentName: 'Communications Agent', site: 'LetHub', accessMode: 'write', allowedOperations: ['Send tenancy notice'], restrictedOperations: ['—'], risk: 'low', approvalRequired: false, status: 'connected' },
     ],
     siteUsage: [
@@ -215,7 +215,7 @@ export const demoConnections = [
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'Guard notifications', status: 'connected', critical: true },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Care notifications', status: 'degraded', critical: true },
       { siteId: 'lethub', siteName: 'LetHub', environment: 'production', purpose: 'Tenancy notices', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Wedding comms', status: 'connected', critical: true },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Wedding comms', status: 'connected', critical: true },
       { siteId: 'the-forge', siteName: 'The Forge', environment: 'production', purpose: 'Build alerts', status: 'connected', critical: false },
     ],
     operationGroups: [
@@ -232,7 +232,7 @@ export const demoConnections = [
     dependencies: [],
     usageEvents: [
       { time: 'Today · 10:31', agentId: 'core-comms', agentName: 'Communications Agent', site: 'Group-wide', operation: 'Queue notification batch', runId: 'RUN-5E11B', result: 'success', duration: '18s' },
-      { time: 'Today · 09:22', agentId: 'wd-comms', agentName: 'Wedding Communications Agent', site: 'Wedora', operation: 'Send guest update', runId: 'RUN-2A55C', result: 'success', duration: '21s' },
+      { time: 'Today · 09:22', agentId: 'wd-comms', agentName: 'Wedding Communications Agent', site: 'Vowora', operation: 'Send guest update', runId: 'RUN-2A55C', result: 'success', duration: '21s' },
       { time: 'Today · 09:02', agentId: 'lh-comms', agentName: 'Communications Agent', site: 'LetHub', operation: 'Send tenancy notice', runId: 'RUN-3E66A', result: 'success', duration: '22s' },
     ],
     security: SECURITY_STANDARD,
@@ -262,7 +262,7 @@ export const demoConnections = [
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'App repo', status: 'connected', critical: true },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Core repo', status: 'connected', critical: true },
       { siteId: 'lethub', siteName: 'LetHub', environment: 'production', purpose: 'App repo', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'App repo', status: 'connected', critical: true },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'App repo', status: 'connected', critical: true },
       { siteId: 'the-forge', siteName: 'The Forge', environment: 'production', purpose: 'Studio repo', status: 'connected', critical: true },
     ],
     operationGroups: [
@@ -396,7 +396,7 @@ export const demoConnections = [
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'Shift telemetry', status: 'connected', critical: true },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Welfare telemetry', status: 'connected', critical: true },
       { siteId: 'lethub', siteName: 'LetHub', environment: 'production', purpose: 'Tenancy telemetry', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Event telemetry', status: 'connected', critical: true },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Event telemetry', status: 'connected', critical: true },
       { siteId: 'the-forge', siteName: 'The Forge', environment: 'production', purpose: 'Build telemetry', status: 'connected', critical: true },
     ],
     operationGroups: [
@@ -439,7 +439,7 @@ export const demoConnections = [
       { siteId: 'digital-footprint', siteName: 'Digital Footprint', environment: 'production', purpose: 'Client notifications', status: 'connected', critical: true },
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'Guard notifications', status: 'connected', critical: true },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Care notifications', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Guest notifications', status: 'connected', critical: false },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Guest notifications', status: 'connected', critical: false },
     ],
     operationGroups: [
       { riskClass: 'green', operations: ['Send approved notification', 'Read delivery status'] },
@@ -482,7 +482,7 @@ export const demoConnections = [
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'Guard auth', status: 'connected', critical: true },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Care auth', status: 'connected', critical: true },
       { siteId: 'lethub', siteName: 'LetHub', environment: 'production', purpose: 'Tenant auth', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Guest auth', status: 'connected', critical: true },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Guest auth', status: 'connected', critical: true },
       { siteId: 'the-forge', siteName: 'The Forge', environment: 'production', purpose: 'Studio auth', status: 'connected', critical: true },
     ],
     operationGroups: [
@@ -530,7 +530,7 @@ export const demoConnections = [
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'Guard KB', status: 'connected', critical: false },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Care KB', status: 'connected', critical: false },
       { siteId: 'lethub', siteName: 'LetHub', environment: 'production', purpose: 'Tenancy KB', status: 'connected', critical: false },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Wedding KB', status: 'connected', critical: false },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Wedding KB', status: 'connected', critical: false },
     ],
     operationGroups: [
       { riskClass: 'green', operations: ['Retrieve articles', 'Recommend article'] },
@@ -574,7 +574,7 @@ export const demoConnections = [
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'Shift API', status: 'connected', critical: true },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Care API', status: 'connected', critical: true },
       { siteId: 'lethub', siteName: 'LetHub', environment: 'production', purpose: 'Tenancy API', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Wedding API', status: 'connected', critical: true },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Wedding API', status: 'connected', critical: true },
       { siteId: 'the-forge', siteName: 'The Forge', environment: 'production', purpose: 'Build API', status: 'connected', critical: true },
     ],
     operationGroups: [
@@ -613,12 +613,12 @@ export const demoConnections = [
     notes: 'Uploads constrained to safe buckets; no public secret storage.',
     createdAt: '2025-03-10', updatedAt: '2026-08-25',
     agentAccess: [
-      { agentId: 'wd-photo', agentName: 'Photo Moderation Agent', site: 'Wedora', accessMode: 'read_write', allowedOperations: ['Read uploaded media'], restrictedOperations: ['—'], risk: 'medium', approvalRequired: false, status: 'connected' },
+      { agentId: 'wd-photo', agentName: 'Photo Moderation Agent', site: 'Vowora', accessMode: 'read_write', allowedOperations: ['Read uploaded media'], restrictedOperations: ['—'], risk: 'medium', approvalRequired: false, status: 'connected' },
       { agentId: 'tf-asset', agentName: 'Asset Agent', site: 'The Forge', accessMode: 'read_write', allowedOperations: ['Store generated asset'], restrictedOperations: ['—'], risk: 'low', approvalRequired: false, status: 'connected' },
     ],
     siteUsage: [
       { siteId: 'digital-footprint', siteName: 'Digital Footprint', environment: 'production', purpose: 'Client files', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Wedding media', status: 'connected', critical: true },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Wedding media', status: 'connected', critical: true },
       { siteId: 'the-forge', siteName: 'The Forge', environment: 'production', purpose: 'Generated assets', status: 'connected', critical: false },
     ],
     operationGroups: [
@@ -636,7 +636,7 @@ export const demoConnections = [
       { name: 'Supabase', connectionId: 'CON-SUPABASE', relationship: 'depends_on', status: 'operational', note: 'Storage backed by Supabase' },
     ],
     usageEvents: [
-      { time: 'Today · 10:02', agentId: 'wd-photo', agentName: 'Photo Moderation Agent', site: 'Wedora', operation: 'Read uploaded media', runId: 'RUN-3E66A', result: 'success', duration: '32s' },
+      { time: 'Today · 10:02', agentId: 'wd-photo', agentName: 'Photo Moderation Agent', site: 'Vowora', operation: 'Read uploaded media', runId: 'RUN-3E66A', result: 'success', duration: '32s' },
       { time: 'Today · 09:40', agentId: 'tf-asset', agentName: 'Asset Agent', site: 'The Forge', operation: 'Store generated asset', runId: 'RUN-3B66D', result: 'success', duration: '48s' },
     ],
     security: SECURITY_STANDARD,
@@ -705,7 +705,7 @@ export const demoConnections = [
     siteUsage: [
       { siteId: 'digital-footprint', siteName: 'Digital Footprint', environment: 'production', purpose: 'Platform analytics', status: 'connected', critical: false },
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'Shift analytics', status: 'connected', critical: false },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'Event analytics', status: 'connected', critical: false },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'Event analytics', status: 'connected', critical: false },
     ],
     operationGroups: [
       { riskClass: 'green', operations: ['Read analytics', 'Generate reports'] },
@@ -747,7 +747,7 @@ export const demoConnections = [
       { siteId: 'quickguard', siteName: 'QuickGuard', environment: 'production', purpose: 'App hosting', status: 'connected', critical: true },
       { siteId: 'guardianhub', siteName: 'GuardianHub', environment: 'production', purpose: 'Core hosting', status: 'connected', critical: true },
       { siteId: 'lethub', siteName: 'LetHub', environment: 'production', purpose: 'App hosting', status: 'connected', critical: true },
-      { siteId: 'wedora', siteName: 'Wedora', environment: 'production', purpose: 'App hosting', status: 'connected', critical: true },
+      { siteId: 'wedora', siteName: 'Vowora', environment: 'production', purpose: 'App hosting', status: 'connected', critical: true },
       { siteId: 'the-forge', siteName: 'The Forge', environment: 'production', purpose: 'Studio hosting', status: 'connected', critical: true },
     ],
     operationGroups: [

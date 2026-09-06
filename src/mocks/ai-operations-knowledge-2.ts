@@ -8,7 +8,7 @@
 //     customer data is exposed — only safe source identifiers and metadata
 //     that link back to the existing Site, Agent, Run and Model registries.
 //
-//     GuardianHub, LetHub, Wedora, The Forge, incident-memory and archived
+//     GuardianHub, LetHub, Vowora, The Forge, incident-memory and archived
 //     sources. Group / Digital Footprint / QuickGuard live in
 //     ai-operations-knowledge.ts.
 // ============================================================================
@@ -104,9 +104,9 @@ const ACCESS_LH = [
 ];
 
 const ACCESS_WD = [
-  { agentId: 'wd-planner', agentName: 'Wedding Planner Agent', site: 'Wedora', accessState: 'allowed', purpose: 'Planning workflow', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
-  { agentId: 'wd-rsvp', agentName: 'RSVP Agent', site: 'Wedora', accessState: 'allowed', purpose: 'RSVP rules', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
-  { agentId: 'wd-supplier', agentName: 'Supplier Agent', site: 'Wedora', accessState: 'allowed', purpose: 'Supplier guidance', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
+  { agentId: 'wd-planner', agentName: 'Wedding Planner Agent', site: 'Vowora', accessState: 'allowed', purpose: 'Planning workflow', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
+  { agentId: 'wd-rsvp', agentName: 'RSVP Agent', site: 'Vowora', accessState: 'allowed', purpose: 'RSVP rules', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
+  { agentId: 'wd-supplier', agentName: 'Supplier Agent', site: 'Vowora', accessState: 'allowed', purpose: 'Supplier guidance', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
 ];
 
 const ACCESS_TF = [
@@ -129,9 +129,9 @@ const USAGE_LH = [
 ];
 
 const USAGE_WD = [
-  { time: 'Today · 10:18', agentId: 'wd-planner', agentName: 'Wedding Planner Agent', site: 'Wedora', runId: 'RUN-3B66D', purpose: 'Planning workflow', result: 'success', reference: 'v2 §1' },
-  { time: 'Today · 09:33', agentId: 'wd-rsvp', agentName: 'RSVP Agent', site: 'Wedora', runId: 'RUN-5D88F', purpose: 'RSVP rule check', result: 'success', reference: 'v2 §2' },
-  { time: 'Yesterday · 17:25', agentId: 'wd-supplier', agentName: 'Supplier Agent', site: 'Wedora', runId: 'RUN-7F11B', purpose: 'Supplier guidance', result: 'success', reference: 'v2 §3' },
+  { time: 'Today · 10:18', agentId: 'wd-planner', agentName: 'Wedding Planner Agent', site: 'Vowora', runId: 'RUN-3B66D', purpose: 'Planning workflow', result: 'success', reference: 'v2 §1' },
+  { time: 'Today · 09:33', agentId: 'wd-rsvp', agentName: 'RSVP Agent', site: 'Vowora', runId: 'RUN-5D88F', purpose: 'RSVP rule check', result: 'success', reference: 'v2 §2' },
+  { time: 'Yesterday · 17:25', agentId: 'wd-supplier', agentName: 'Supplier Agent', site: 'Vowora', runId: 'RUN-7F11B', purpose: 'Supplier guidance', result: 'success', reference: 'v2 §3' },
 ];
 
 const USAGE_TF = [
@@ -479,9 +479,9 @@ export const demoKnowledgeSourcesB = [
     type: 'sop',
     scope: 'site',
     siteId: 'wedora',
-    siteName: 'Wedora',
+    siteName: 'Vowora',
     assignedAgentIds: ['wd-planner', 'wd-timeline'],
-    ownerTeam: 'Wedora Ops',
+    ownerTeam: 'Vowora Ops',
     status: 'active',
     classification: 'internal',
     sensitivity: 'Medium',
@@ -506,7 +506,7 @@ export const demoKnowledgeSourcesB = [
     topics: ['Planning', 'Weddings'],
     permissions: PERMISSIONS_STANDARD,
     agentAccess: ACCESS_WD,
-    governance: { ...GOV_BASE, owner: 'Wedora Ops', lastReviewer: 'Wedora Ops', expiryDate: '2026-11-11' },
+    governance: { ...GOV_BASE, owner: 'Vowora Ops', lastReviewer: 'Vowora Ops', expiryDate: '2026-11-11' },
     aiUsageRules: AI_RULES_INTERNAL,
     relationships: [
       { relationType: 'Related business rules', title: 'RSVP Rules', sourceId: 'KNOW-WD-RSVP' },
@@ -525,9 +525,9 @@ export const demoKnowledgeSourcesB = [
     type: 'business_rules',
     scope: 'site',
     siteId: 'wedora',
-    siteName: 'Wedora',
+    siteName: 'Vowora',
     assignedAgentIds: ['wd-rsvp', 'wd-guest'],
-    ownerTeam: 'Wedora Ops',
+    ownerTeam: 'Vowora Ops',
     status: 'active',
     classification: 'internal',
     sensitivity: 'Medium',
@@ -552,11 +552,11 @@ export const demoKnowledgeSourcesB = [
     topics: ['Guests', 'RSVP'],
     permissions: PERMISSIONS_STANDARD,
     agentAccess: ACCESS_WD,
-    governance: { ...GOV_BASE, owner: 'Wedora Ops', lastReviewer: 'Wedora Ops', expiryDate: '2026-11-14' },
+    governance: { ...GOV_BASE, owner: 'Vowora Ops', lastReviewer: 'Vowora Ops', expiryDate: '2026-11-14' },
     aiUsageRules: AI_RULES_INTERNAL,
     relationships: [
       { relationType: 'Related SOP', title: 'Wedding Planning Workflow', sourceId: 'KNOW-WD-PLAN' },
-      { relationType: 'Related site', title: 'Wedora', sourceId: null },
+      { relationType: 'Related site', title: 'Vowora', sourceId: null },
     ],
     usageEvents: USAGE_WD,
     reviewHistory: REVIEW_HISTORY,
@@ -571,9 +571,9 @@ export const demoKnowledgeSourcesB = [
     type: 'documentation',
     scope: 'site',
     siteId: 'wedora',
-    siteName: 'Wedora',
+    siteName: 'Vowora',
     assignedAgentIds: ['wd-supplier'],
-    ownerTeam: 'Wedora Ops',
+    ownerTeam: 'Vowora Ops',
     status: 'active',
     classification: 'internal',
     sensitivity: 'Medium',
@@ -598,11 +598,11 @@ export const demoKnowledgeSourcesB = [
     topics: ['Suppliers', 'Operations'],
     permissions: PERMISSIONS_STANDARD,
     agentAccess: ACCESS_WD,
-    governance: { ...GOV_BASE, owner: 'Wedora Ops', lastReviewer: 'Wedora Ops', expiryDate: '2026-11-09' },
+    governance: { ...GOV_BASE, owner: 'Vowora Ops', lastReviewer: 'Vowora Ops', expiryDate: '2026-11-09' },
     aiUsageRules: AI_RULES_INTERNAL,
     relationships: [
       { relationType: 'Related SOP', title: 'Wedding Planning Workflow', sourceId: 'KNOW-WD-PLAN' },
-      { relationType: 'Related site', title: 'Wedora', sourceId: null },
+      { relationType: 'Related site', title: 'Vowora', sourceId: null },
     ],
     usageEvents: USAGE_WD,
     reviewHistory: REVIEW_HISTORY,

@@ -4,7 +4,7 @@
 -- Creates a central support-ticket system for the Digital Footprint Command
 -- Centre: one database that receives and manages support tickets from every
 -- Digital Footprint website (Digital-Footprint.uk, The Forge, LetHub.uk,
--- QuickGuard.uk, Wedora, and future sites).
+-- QuickGuard.uk, Vowora, and future sites).
 --
 -- Scope is strictly ADDITIVE. This migration only creates new objects:
 --   * 6 new tables (internal_support_sites, internal_support_tickets,

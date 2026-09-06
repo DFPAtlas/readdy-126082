@@ -36,7 +36,8 @@ export type DatabaseState =
   | 'stale'
   | 'check_error'
   | 'unknown'
-  | 'not_configured';
+  | 'not_configured'
+  | 'testing';
 
 export const DATABASE_STATE_META: Record<
   DatabaseState,
@@ -49,6 +50,7 @@ export const DATABASE_STATE_META: Record<
   check_error: { label: 'CHECK ERROR', tone: 'secondary' },
   unknown: { label: 'UNKNOWN', tone: 'secondary' },
   not_configured: { label: 'NOT CONFIGURED', tone: 'secondary' },
+  testing: { label: 'TESTING', tone: 'amber' },
 };
 
 /** Normalise a single monitor service status onto the wallboard levels. */
@@ -65,6 +67,8 @@ function normalizeServiceStatus(status: string | null | undefined): DatabaseStat
       return 'offline';
     case 'stale':
       return 'stale';
+    case 'testing':
+      return 'testing';
     case 'check_error':
       return 'check_error';
     case 'unknown':
@@ -169,6 +173,7 @@ function overallState(services: CoreService[]): DatabaseState {
   const allUnknown = services.every((s) => s.status === 'unknown');
 
   if (database === 'offline') return 'offline';
+  if (database === 'testing') return 'testing';
   if (hasOffline || hasDegraded || hasStale || hasCheckError) return 'degraded';
   if (allHealthy) return 'healthy';
   if (allUnknown) return 'unknown';
@@ -323,6 +328,7 @@ export interface DatabaseSummary {
   degraded: number;
   offline: number;
   unknown: number;
+  testing: number;
   notConfigured: number;
   sourceState: 'live' | 'partial' | 'unavailable';
   label: string;
@@ -335,7 +341,7 @@ export function getDatabaseSummary(): DatabaseSummary {
   const cards = getDatabaseCards();
   const unconfigured = getUnconfiguredDatabases().length;
 
-  const counts = { healthy: 0, degraded: 0, offline: 0, unknown: 0 };
+  const counts = { healthy: 0, degraded: 0, offline: 0, unknown: 0, testing: 0 };
   for (const c of cards) counts[c.state] += 1;
 
   const available = data.monitorsAvailability && !data.loading;
@@ -376,6 +382,7 @@ export function getDatabaseSummary(): DatabaseSummary {
     degraded: counts.degraded,
     offline: counts.offline,
     unknown: counts.unknown,
+    testing: counts.testing,
     notConfigured: unconfigured,
     sourceState,
     label,

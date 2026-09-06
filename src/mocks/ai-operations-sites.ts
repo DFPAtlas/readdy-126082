@@ -17,7 +17,7 @@ export const demoSites = [
     id: 'digital-footprint',
     name: 'Digital Footprint',
     productName: 'Digital Footprint Platform',
-    domain: 'digitalfootprint.ai',
+    domain: 'digital-footprint.uk',
     description:
       'The group flagship platform. Central command centre, client portal, support operations and cross-group automation hub.',
     businessType: 'platform',
@@ -98,7 +98,7 @@ export const demoSites = [
     id: 'quickguard',
     name: 'QuickGuard',
     productName: 'QuickGuard Security',
-    domain: 'quickguard.co.uk',
+    domain: 'quickguard.uk',
     description:
       'Security staffing platform for guard rota management, shift matching, compliance and welfare check-calls.',
     businessType: 'saas',
@@ -179,7 +179,7 @@ export const demoSites = [
     id: 'guardianhub',
     name: 'GuardianHub',
     productName: 'GuardianHub Care',
-    domain: 'guardianhub.io',
+    domain: 'guardian-hub.uk',
     description:
       'Care and welfare operations platform handling rotas, check-calls, welfare monitoring and incident management.',
     businessType: 'service',
@@ -260,7 +260,7 @@ export const demoSites = [
     id: 'lethub',
     name: 'LetHub',
     productName: 'LetHub Lettings',
-    domain: 'lethub.co.uk',
+    domain: 'lethub.uk',
     description:
       'Lettings management platform covering tenancy workflows, maintenance coordination, compliance and rent tracking.',
     businessType: 'saas',
@@ -339,9 +339,9 @@ export const demoSites = [
   // ============================================================ WEDORA
   {
     id: 'wedora',
-    name: 'Wedora',
-    productName: 'Wedora Weddings',
-    domain: 'wedora.com',
+    name: 'Vowora',
+    productName: 'Vowora Weddings',
+    domain: 'vowora.uk',
     description:
       'Wedding planning platform coordinating guests, RSVPs, suppliers, seating plans and day-of logistics.',
     businessType: 'platform',
@@ -349,7 +349,7 @@ export const demoSites = [
     operationalStatus: 'healthy',
     aiStatus: 'active',
     criticality: 'high',
-    ownerTeam: 'Wedora Ops',
+    ownerTeam: 'Vowora Ops',
     repository: 'wedora/app',
     readdyProject: 'RDDY-WD-011',
     supabaseProject: 'supabase-wd-prod',
@@ -402,10 +402,10 @@ export const demoSites = [
       { name: 'Readdy', type: 'Platform', status: 'operational', critical: false, lastChecked: '5m ago' },
     ],
     ownership: {
-      businessOwner: 'Wedora Director',
-      technicalOwner: 'Wedora Ops',
-      supportTeam: 'Wedora Support',
-      escalationTeam: 'Wedora Escalations',
+      businessOwner: 'Vowora Director',
+      technicalOwner: 'Vowora Ops',
+      supportTeam: 'Vowora Support',
+      escalationTeam: 'Vowora Escalations',
       defaultSeverity: 'Medium',
       supportQueue: 'wedora',
     },
@@ -422,7 +422,7 @@ export const demoSites = [
     id: 'the-forge',
     name: 'The Forge',
     productName: 'The Forge Studio',
-    domain: 'theforge.dev',
+    domain: 'theforges.org',
     description:
       'Internal build studio and prompt engineering workbench powering code generation, testing and release validation across the group.',
     businessType: 'product',

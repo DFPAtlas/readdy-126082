@@ -26,7 +26,7 @@ const SITES = [
   { id: 'quickguard', label: 'QuickGuard' },
   { id: 'guardianhub', label: 'GuardianHub' },
   { id: 'lethub', label: 'LetHub' },
-  { id: 'wedora', label: 'Wedora' },
+  { id: 'wedora', label: 'Vowora' },
   { id: 'the-forge', label: 'The Forge' },
 ];
 

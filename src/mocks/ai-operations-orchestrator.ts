@@ -406,11 +406,11 @@ export const demoOrchestrations = [
     events: EVENTS_STANDARD,
   },
 
-  // ============================================================ 07 — Wedora seating validation (completed)
+  // ============================================================ 07 — Vowora seating validation (completed)
   {
-    id: 'ORC-7007', correlationId: 'COR-1060', title: 'Wedora seating chart validation',
+    id: 'ORC-7007', correlationId: 'COR-1060', title: 'Vowora seating chart validation',
     description: 'Validate a wedding seating chart for conflicts.',
-    triggerSource: 'user', requestedBy: 'Wedora Ops', siteId: 'wedora', siteName: 'Wedora',
+    triggerSource: 'user', requestedBy: 'Vowora Ops', siteId: 'wedora', siteName: 'Vowora',
     detectedIntent: 'Seating validation', taskType: 'workflow', priority: 'normal', risk: 'medium', riskClass: 'amber',
     environment: 'production', status: 'completed', currentStage: 'complete',
     primaryAgentId: 'wd-seating', primaryAgentName: 'Seating Agent',
@@ -420,9 +420,9 @@ export const demoOrchestrations = [
     estimatedCost: '£0.06', resultSummary: 'Seating chart validated with 1 flagged duplicate invitation.', failureSummary: null,
     createdAt: 'Today · 09:20', updatedAt: 'Today · 09:22', startedAt: 'Today · 09:20', completedAt: 'Today · 09:22',
     stages: STAGES_DONE,
-    classification: { requestSummary: 'Validate seating chart for a wedding.', trigger: 'user', detectedIntent: 'Seating validation', detectedSite: 'Wedora', confidence: '94%', taskType: 'workflow', priority: 'normal', risk: 'medium', environment: 'production' },
-    siteResolution: { selectedSite: 'Wedora', confidence: '94%', alternatives: [], operationalStatus: 'healthy', aiStatus: 'active', capabilityMatch: 'Planning capability present' },
-    agentSelection: { name: 'Seating Agent', scope: 'Wedora', category: 'planning', status: 'idle', health: 'healthy', autonomy: 'limited_automatic', workload: 'Available', queue: 0, capabilityMatch: '96%', permissionMatch: 'Full', tools: ['Supabase'], selectionScore: 93, selectionReason: 'Seating specialist for Wedora' },
+    classification: { requestSummary: 'Validate seating chart for a wedding.', trigger: 'user', detectedIntent: 'Seating validation', detectedSite: 'Vowora', confidence: '94%', taskType: 'workflow', priority: 'normal', risk: 'medium', environment: 'production' },
+    siteResolution: { selectedSite: 'Vowora', confidence: '94%', alternatives: [], operationalStatus: 'healthy', aiStatus: 'active', capabilityMatch: 'Planning capability present' },
+    agentSelection: { name: 'Seating Agent', scope: 'Vowora', category: 'planning', status: 'idle', health: 'healthy', autonomy: 'limited_automatic', workload: 'Available', queue: 0, capabilityMatch: '96%', permissionMatch: 'Full', tools: ['Supabase'], selectionScore: 93, selectionReason: 'Seating specialist for Vowora' },
     candidates: [
       { agentId: 'wd-seating', agentName: 'Seating Agent', eligibility: 'Eligible', score: 93, health: 'healthy', capacity: 'available', capabilityMatch: '96%', permissionMatch: 'Full', reason: 'best match', selected: true },
       { agentId: 'wd-planner', agentName: 'Wedding Planner Agent', eligibility: 'Eligible', score: 80, health: 'healthy', capacity: 'available', capabilityMatch: '82%', permissionMatch: 'Full', reason: 'secondary scope', selected: false },
@@ -864,11 +864,11 @@ export const demoOrchestrations = [
     events: EVENTS_STANDARD,
   },
 
-  // ============================================================ 18 — Wedora multi-agent wedding workflow (completed)
+  // ============================================================ 18 — Vowora multi-agent wedding workflow (completed)
   {
-    id: 'ORC-7018', correlationId: 'COR-1081', title: 'Wedora wedding planning timeline',
+    id: 'ORC-7018', correlationId: 'COR-1081', title: 'Vowora wedding planning timeline',
     description: 'Coordinate multi-agent wedding planning from timeline through RSVP and supplier coordination.',
-    triggerSource: 'user', requestedBy: 'Wedora Ops', siteId: 'wedora', siteName: 'Wedora',
+    triggerSource: 'user', requestedBy: 'Vowora Ops', siteId: 'wedora', siteName: 'Vowora',
     detectedIntent: 'Wedding planning', taskType: 'workflow', priority: 'normal', risk: 'low', riskClass: 'green',
     environment: 'production', status: 'completed', currentStage: 'complete',
     primaryAgentId: 'wd-planner', primaryAgentName: 'Wedding Planner Agent',
@@ -878,9 +878,9 @@ export const demoOrchestrations = [
     estimatedCost: '£0.14', resultSummary: 'Wedding timeline, RSVP and supplier coordination completed.', failureSummary: null,
     createdAt: 'Today · 06:30', updatedAt: 'Today · 06:40', startedAt: 'Today · 06:31', completedAt: 'Today · 06:40',
     stages: STAGES_DONE,
-    classification: { requestSummary: 'Build a wedding planning timeline.', trigger: 'user', detectedIntent: 'Wedding planning', detectedSite: 'Wedora', confidence: '96%', taskType: 'workflow', priority: 'normal', risk: 'low', environment: 'production' },
-    siteResolution: { selectedSite: 'Wedora', confidence: '96%', alternatives: [], operationalStatus: 'healthy', aiStatus: 'active', capabilityMatch: 'Planning capability present' },
-    agentSelection: { name: 'Wedding Planner Agent', scope: 'Wedora', category: 'planning', status: 'active', health: 'healthy', autonomy: 'limited_automatic', workload: 'Available', queue: 1, capabilityMatch: '96%', permissionMatch: 'Full', tools: ['Supabase'], selectionScore: 94, selectionReason: 'Wedding planning specialist' },
+    classification: { requestSummary: 'Build a wedding planning timeline.', trigger: 'user', detectedIntent: 'Wedding planning', detectedSite: 'Vowora', confidence: '96%', taskType: 'workflow', priority: 'normal', risk: 'low', environment: 'production' },
+    siteResolution: { selectedSite: 'Vowora', confidence: '96%', alternatives: [], operationalStatus: 'healthy', aiStatus: 'active', capabilityMatch: 'Planning capability present' },
+    agentSelection: { name: 'Wedding Planner Agent', scope: 'Vowora', category: 'planning', status: 'active', health: 'healthy', autonomy: 'limited_automatic', workload: 'Available', queue: 1, capabilityMatch: '96%', permissionMatch: 'Full', tools: ['Supabase'], selectionScore: 94, selectionReason: 'Wedding planning specialist' },
     candidates: [
       { agentId: 'wd-planner', agentName: 'Wedding Planner Agent', eligibility: 'Eligible', score: 94, health: 'healthy', capacity: 'available', capabilityMatch: '96%', permissionMatch: 'Full', reason: 'best match', selected: true },
       { agentId: 'wd-rsvp', agentName: 'RSVP Agent', eligibility: 'Eligible', score: 86, health: 'healthy', capacity: 'available', capabilityMatch: '90%', permissionMatch: 'Full', reason: 'supporting role', selected: false },

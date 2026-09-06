@@ -2,39 +2,12 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Client } from "https://deno.land/x/postgres@v0.17.0/mod.ts";
 
-// ============================================================================
-// quickguard-db-heartbeat — server-side QuickGuard database heartbeat.
-//
-// Performs a very small, safe health query equivalent to `SELECT 1` against the
-// canonical QuickGuard Supabase project and records the result on the EXISTING
-// `internal_supabase_monitors` record (joined by the canonical site_key
-// `quickguard`, never by the project display-name spelling).
-//
-// Security:
-//   * The database connection string lives ONLY in the trusted Edge Function
-//     secret store (`QUICKGUARD_DB_URL`); it is read server-side and never
-//     returned to the caller, logged, or exposed to the browser.
-//   * The function is token-gated (x-dfp-scheduler-token) and fails closed.
-//   * No raw rows, table data, URLs, or stack traces are returned.
-//
-// State written to `database_status`:
-//   healthy     — `SELECT 1` completed within the healthy latency window.
-//   degraded    — database reachable but response time exceeded the threshold.
-//   offline     — confirmed connection/query failure against the database.
-//   check_error — the monitoring process itself failed (missing config,
-//                 timeout, or unexpected probe error); database availability
-//                 could not be determined.
-// `stale` is intentionally NOT written here — it is derived by the wallboard
-// reader from heartbeat freshness (an old success must never read as healthy).
-// ============================================================================
-
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type, x-dfp-scheduler-token",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const SITE_KEY = "quickguard";
 const HEALTHY_LATENCY_MS = 1000;
 const QUERY_TIMEOUT_MS = 10_000;
 
@@ -45,11 +18,31 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function runSelectOne(connectionString: string): Promise<{
+function safeDiagnostic(err: unknown): string {
+  const raw =
+    (err as { message?: unknown })?.message ??
+    (err as { name?: unknown })?.name ??
+    "unknown";
+  const text = String(raw);
+  return text
+    .replace(/postgres(ql)?:\/\/[^\s"']+/gi, "postgresql://[redacted]")
+    .replace(/password[=:]\S+/gi, "password=[redacted]")
+    .replace(/([?&]password=)[^&\s]+/gi, "$1[redacted]")
+    .slice(0, 300);
+}
+
+function secretNameFor(siteKey: string): string {
+  return `${siteKey.toUpperCase().replace(/-/g, "_")}_DB_URL`;
+}
+
+type ProbeResult = {
   ok: boolean;
   latency_ms: number;
   error_code: string | null;
-}> {
+  diagnostic: string | null;
+};
+
+async function runExternalSelectOne(connectionString: string): Promise<ProbeResult> {
   const started = Date.now();
 
   const attempt = (async () => {
@@ -57,7 +50,12 @@ async function runSelectOne(connectionString: string): Promise<{
     try {
       await client.connect();
       await client.queryArray("SELECT 1");
-      return { ok: true as const, latency_ms: Date.now() - started, error_code: null };
+      return {
+        ok: true as const,
+        latency_ms: Date.now() - started,
+        error_code: null,
+        diagnostic: null,
+      };
     } finally {
       try {
         await client.end();
@@ -67,16 +65,60 @@ async function runSelectOne(connectionString: string): Promise<{
     }
   })();
 
-  const timeout = new Promise<{ ok: boolean; latency_ms: number; error_code: string }>(
-    (resolve) =>
-      setTimeout(
-        () => resolve({ ok: false, latency_ms: Date.now() - started, error_code: "TIMEOUT" }),
-        QUERY_TIMEOUT_MS,
-      ),
+  const timeout = new Promise<ProbeResult>((resolve) =>
+    setTimeout(
+      () =>
+        resolve({
+          ok: false,
+          latency_ms: Date.now() - started,
+          error_code: "TIMEOUT",
+          diagnostic: "Heartbeat query timed out.",
+        }),
+      QUERY_TIMEOUT_MS,
+    ),
   );
 
   return await Promise.race([attempt, timeout]);
 }
+
+async function runSelfSelectOne(
+  admin: ReturnType<typeof createClient>,
+): Promise<ProbeResult> {
+  const started = Date.now();
+  try {
+    const { error } = await admin
+      .from("internal_supabase_monitors")
+      .select("id")
+      .limit(1);
+    if (error) {
+      return {
+        ok: false,
+        latency_ms: Date.now() - started,
+        error_code: error.code ?? "QUERY_ERROR",
+        diagnostic: error.message,
+      };
+    }
+    return {
+      ok: true,
+      latency_ms: Date.now() - started,
+      error_code: null,
+      diagnostic: null,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      latency_ms: Date.now() - started,
+      error_code: (e as { name?: string })?.name ?? "PROBE_ERROR",
+      diagnostic: safeDiagnostic(e),
+    };
+  }
+}
+
+type Monitor = {
+  id: number;
+  site_key: string | null;
+  supabase_url: string | null;
+};
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -104,81 +146,111 @@ serve(async (req: Request) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  const { data: monitor, error: monErr } = await admin
+  const { data: monitors, error: monErr } = await admin
     .from("internal_supabase_monitors")
-    .select("id, site_key")
-    .eq("site_key", SITE_KEY)
-    .maybeSingle();
+    .select("id, site_key, supabase_url")
+    .not("site_key", "is", null)
+    .neq("database_status", "testing");
 
-  if (monErr || !monitor) {
-    return json({ error: "QuickGuard monitor record not found" }, 404);
+  if (monErr || !monitors || monitors.length === 0) {
+    return json({ error: "No database monitors configured" }, 404);
   }
 
-  const checkedAt = new Date().toISOString();
-  const connectionString = Deno.env.get("QUICKGUARD_DB_URL");
+  const selfUrl = supabaseUrl.replace(/\/+$/, "").toLowerCase();
+  const results: Record<string, unknown>[] = [];
 
-  let status: "healthy" | "degraded" | "offline" | "check_error";
-  let latencyMs: number | null = null;
-  let errorCode: string | null = null;
-  let errorReason: string | null = null;
-  let lastHeartbeatAt: string | null = null;
+  for (const monitor of monitors) {
+    const isSelf =
+      (monitor.supabase_url ?? "").replace(/\/+$/, "").toLowerCase() === selfUrl;
 
-  if (!connectionString || connectionString.trim().length === 0) {
-    status = "check_error";
-    errorCode = "CONFIG_MISSING";
-    errorReason = "Database heartbeat credential is not configured.";
-  } else {
-    let result: { ok: boolean; latency_ms: number; error_code: string | null };
-    try {
-      result = await runSelectOne(connectionString);
-    } catch (e) {
-      result = {
-        ok: false,
-        latency_ms: 0,
-        error_code: (e as { name?: string })?.name ?? "PROBE_ERROR",
-      };
-    }
+    const checkedAt = new Date().toISOString();
 
-    latencyMs = result.latency_ms;
+    let status: "healthy" | "degraded" | "offline" | "check_error";
+    let latencyMs: number | null = null;
+    let errorCode: string | null = null;
+    let errorReason: string | null = null;
+    let lastHeartbeatAt: string | null = null;
 
-    if (result.ok) {
-      if (result.latency_ms <= HEALTHY_LATENCY_MS) {
-        status = "healthy";
+    if (isSelf) {
+      const result = await runSelfSelectOne(admin);
+      latencyMs = result.latency_ms;
+      if (result.ok) {
+        if (result.latency_ms <= HEALTHY_LATENCY_MS) {
+          status = "healthy";
+        } else {
+          status = "degraded";
+          errorCode = "SLOW_RESPONSE";
+          errorReason = `Database responded in ${result.latency_ms}ms (threshold ${HEALTHY_LATENCY_MS}ms).`;
+        }
+        lastHeartbeatAt = checkedAt;
       } else {
-        status = "degraded";
-        errorCode = "SLOW_RESPONSE";
-        errorReason = `Database responded in ${result.latency_ms}ms (threshold ${HEALTHY_LATENCY_MS}ms).`;
+        status = "offline";
+        errorCode = result.error_code;
+        errorReason = result.diagnostic ?? "Database connection or query failed.";
       }
-      lastHeartbeatAt = checkedAt;
-    } else if (result.error_code === "TIMEOUT") {
-      status = "check_error";
-      errorCode = "PROBE_TIMEOUT";
-      errorReason = "Heartbeat query timed out; database availability undetermined.";
     } else {
-      status = "offline";
-      errorCode = result.error_code;
-      errorReason = "Database connection or query failed.";
+      const connectionString = Deno.env.get(secretNameFor(monitor.site_key ?? ""));
+      if (!connectionString || connectionString.trim().length === 0) {
+        status = "check_error";
+        errorCode = "CONFIG_MISSING";
+        errorReason = "Database heartbeat credential is not configured.";
+      } else {
+        let result: ProbeResult;
+        try {
+          result = await runExternalSelectOne(connectionString);
+        } catch (e) {
+          result = {
+            ok: false,
+            latency_ms: 0,
+            error_code: (e as { name?: string })?.name ?? "PROBE_ERROR",
+            diagnostic: safeDiagnostic(e),
+          };
+        }
+
+        latencyMs = result.latency_ms;
+
+        if (result.ok) {
+          if (result.latency_ms <= HEALTHY_LATENCY_MS) {
+            status = "healthy";
+          } else {
+            status = "degraded";
+            errorCode = "SLOW_RESPONSE";
+            errorReason = `Database responded in ${result.latency_ms}ms (threshold ${HEALTHY_LATENCY_MS}ms).`;
+          }
+          lastHeartbeatAt = checkedAt;
+        } else if (result.error_code === "TIMEOUT") {
+          status = "check_error";
+          errorCode = "PROBE_TIMEOUT";
+          errorReason = "Heartbeat query timed out; database availability undetermined.";
+        } else {
+          status = "offline";
+          errorCode = result.error_code;
+          errorReason = result.diagnostic ?? "Database connection or query failed.";
+        }
+      }
     }
+
+    await admin
+      .from("internal_supabase_monitors")
+      .update({
+        database_status: status,
+        database_latency_ms: latencyMs,
+        database_last_heartbeat_at: lastHeartbeatAt,
+        database_error_code: errorCode,
+        database_error_reason: errorReason,
+        last_checked_at: checkedAt,
+      })
+      .eq("id", monitor.id);
+
+    results.push({
+      site_key: monitor.site_key,
+      status,
+      latency_ms: latencyMs,
+      checked_at: checkedAt,
+      error_code: errorCode,
+      error_reason: errorReason,
+    });
   }
 
-  await admin
-    .from("internal_supabase_monitors")
-    .update({
-      database_status: status,
-      database_latency_ms: latencyMs,
-      database_last_heartbeat_at: lastHeartbeatAt,
-      database_error_code: errorCode,
-      database_error_reason: errorReason,
-      last_checked_at: checkedAt,
-    })
-    .eq("id", monitor.id);
-
-  return json({
-    site_key: SITE_KEY,
-    status,
-    latency_ms: latencyMs,
-    checked_at: checkedAt,
-    error_code: errorCode,
-    error_reason: errorReason,
-  });
+  return json({ monitors: results });
 });

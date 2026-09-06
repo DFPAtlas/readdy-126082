@@ -313,6 +313,15 @@ function AiSystemStatusRow({ row, icon, alertIcon }: { row: AiSystemRow; icon: s
   const iconName = safetyAlert && alertIcon ? alertIcon : icon;
   const dotClass = row.tone === 'green' ? 'ow-pulse' : safetyAlert ? 'ow-safety-pulse' : '';
 
+  const valueCell = (
+    <span className="flex items-center gap-1.5">
+      <span className="font-mono text-[10px] font-semibold whitespace-nowrap" style={{ color: tone }}>
+        {row.value}
+      </span>
+      <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={{ background: tone }} />
+    </span>
+  );
+
   return (
     <div className={`flex items-center justify-between py-[5px] border-b border-cyan-400/8 last:border-b-0 ${safetyAlert ? 'ow-safety-alert' : ''}`}>
       <span className="flex items-center gap-1.5 min-w-0">
@@ -321,12 +330,14 @@ function AiSystemStatusRow({ row, icon, alertIcon }: { row: AiSystemRow; icon: s
         </span>
         <span className="text-[8.5px] font-label tracking-[0.14em] text-slate-500 whitespace-nowrap">{row.label}</span>
       </span>
-      <span className="flex items-center gap-1.5">
-        <span className="font-mono text-[10px] font-semibold whitespace-nowrap" style={{ color: tone }}>
-          {row.value}
+      {row.detail ? (
+        <span className="ow-safety-tip" tabIndex={0} aria-label={`${row.value} — ${row.detail}`}>
+          {valueCell}
+          <span className="ow-safety-tip-bubble" role="tooltip">{row.detail}</span>
         </span>
-        <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} style={{ background: tone }} />
-      </span>
+      ) : (
+        valueCell
+      )}
     </div>
   );
 }

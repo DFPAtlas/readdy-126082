@@ -77,7 +77,7 @@ export const siteAgentRuntime: AgentRuntimeItem[] = [
     checks: { identity: true, modelAssigned: false, toolsAssigned: false, knowledgeAssigned: false, permissionsDefined: false, policiesApplied: false, approvalDefined: false, runtimeConfigured: false, testingComplete: false },
   },
   {
-    id: 'rt-site-wedora', agent: 'Wedora Site Agent', category: 'Site Agent', siteId: 'wedora', siteName: 'Wedora',
+    id: 'rt-site-wedora', agent: 'Vowora Site Agent', category: 'Site Agent', siteId: 'wedora', siteName: 'Vowora',
     model: 'Not assigned (demo)', tools: 'Not connected', knowledge: 'Not ingested', permissions: 'Demo only', approvalPolicy: 'Demo only', failurePolicy: 'Demo only',
     checks: { identity: true, modelAssigned: false, toolsAssigned: false, knowledgeAssigned: false, permissionsDefined: false, policiesApplied: false, approvalDefined: false, runtimeConfigured: false, testingComplete: false },
   },
@@ -196,7 +196,7 @@ export const siteActivation: SiteActivationReadiness[] = [
   { siteId: 'quickguard', name: 'QuickGuard', registryReady: true, databaseConnected: false, siteApiConnected: false, agentsConfigured: false, toolsConfigured: false, knowledgeConfigured: false, monitoringConnected: false, uatComplete: false, securityReview: false, productionStatus: 'not_started' },
   { siteId: 'guardianhub', name: 'GuardianHub', registryReady: true, databaseConnected: false, siteApiConnected: false, agentsConfigured: false, toolsConfigured: false, knowledgeConfigured: false, monitoringConnected: false, uatComplete: false, securityReview: false, productionStatus: 'not_started' },
   { siteId: 'lethub', name: 'LetHub', registryReady: true, databaseConnected: false, siteApiConnected: false, agentsConfigured: false, toolsConfigured: false, knowledgeConfigured: false, monitoringConnected: false, uatComplete: false, securityReview: false, productionStatus: 'not_started' },
-  { siteId: 'wedora', name: 'Wedora', registryReady: true, databaseConnected: false, siteApiConnected: false, agentsConfigured: false, toolsConfigured: false, knowledgeConfigured: false, monitoringConnected: false, uatComplete: false, securityReview: false, productionStatus: 'not_started' },
+  { siteId: 'wedora', name: 'Vowora', registryReady: true, databaseConnected: false, siteApiConnected: false, agentsConfigured: false, toolsConfigured: false, knowledgeConfigured: false, monitoringConnected: false, uatComplete: false, securityReview: false, productionStatus: 'not_started' },
   { siteId: 'the-forge', name: 'The Forge', registryReady: true, databaseConnected: false, siteApiConnected: false, agentsConfigured: false, toolsConfigured: false, knowledgeConfigured: false, monitoringConnected: false, uatComplete: false, securityReview: false, productionStatus: 'not_started' },
 ];
 

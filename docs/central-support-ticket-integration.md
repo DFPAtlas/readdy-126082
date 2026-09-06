@@ -1,7 +1,7 @@
 # Central Support Ticket — Secure Ingestion API
 
 This document explains how an approved Digital Footprint website
-(Digital-Footprint.uk, The Forge, LetHub.uk, QuickGuard.uk, Wedora, and future
+(Digital-Footprint.uk, The Forge, LetHub.uk, QuickGuard.uk, Vowora, and future
 sites) submits customer support tickets into the central FootprintCC ticket
 database.
 

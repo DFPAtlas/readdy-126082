@@ -14,7 +14,7 @@
 --   5. Preserves existing data (no DROP/TRUNCATE of tables or rows).
 --
 -- Scope is strictly limited to public.internal_* tables. No unrelated
--- DFP / Wedora / GarageFlow / Both-Sides / UAT objects are touched.
+-- DFP / Vowora / GarageFlow / Both-Sides / UAT objects are touched.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------

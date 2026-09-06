@@ -185,7 +185,7 @@ from (values
   ('BUD-0003','QuickGuard AI','site','quickguard',100.00,70,90,86.00,104.30,'critical','QuickGuard Operations','Forecast to exceed monthly limit; review before month end.'),
   ('BUD-0004','GuardianHub AI','site','guardianhub',80.00,70,90,74.00,89.80,'critical','GuardianHub Welfare','Elevated retry spend from check-call batch.'),
   ('BUD-0005','LetHub AI','site','lethub',55.00,70,90,42.00,51.00,'healthy','LetHub Operations',''),
-  ('BUD-0006','Wedora AI','site','wedora',75.00,70,90,66.00,80.10,'warning','Wedora Planning',''),
+  ('BUD-0006','Vowora AI','site','wedora',75.00,70,90,66.00,80.10,'warning','Vowora Planning',''),
   ('BUD-0007','The Forge AI','site','the-forge',70.00,70,90,64.00,77.70,'critical','The Forge Engineering','Code generation spend trending above forecast.'),
   ('BUD-0008','Claude Sonnet usage','model','MOD-CLAUDE-SONNET',220.00,70,90,204.00,247.60,'warning','Group AI Operations',''),
   ('BUD-0009','GPT-4o usage','model','MOD-GPT4O',150.00,70,90,136.40,165.60,'warning','The Forge Engineering',''),

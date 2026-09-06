@@ -12,7 +12,7 @@
 | **`readdy-484bac`**   | **QuickGuard.uk**                            | Security guard marketplace: clients, guards, jobs, held payments, Stripe, admin               | 🟢 **Latest populated QuickGuard repo**  |
 | `readdy-0677ef`       | QuickGuard.uk                                | Earlier QuickGuard codebase                                                                   | 🟠 Legacy QuickGuard                     |
 | **`readdy-7a0cf7`**   | **LetHub.uk**                                | UK property/lettings platform with multi-role dashboards and Supabase                         | 🟢 Main LetHub repo                      |
-| **`readdy-1a84b8`**   | **Wedora**                                   | Wedding-planning SaaS, couples, guests, RSVPs, seating, budget, travel and wedding sites      | 🟢 Main Wedora repo                      |
+| **`readdy-1a84b8`**   | **Vowora**                                   | Wedding-planning SaaS, couples, guests, RSVPs, seating, budget, travel and wedding sites      | 🟢 Main Vowora repo                      |
 | **`readdy-5650b0`**   | **GarageFlow**                               | AI operating system for independent UK garages                                                | 🟢 Main GarageFlow repo                  |
 | **`readdy-cdd678`**   | **Forge**                                    | Local-first AI website development workspace/sandbox                                          | 🟢 Main Forge repo                       |
 | **`readdy-15db91`**   | **SiteLedger**                               | UK contractor/construction operating system                                                   | 🟢 Main SiteLedger repo                  |
@@ -99,17 +99,17 @@ So:
 
 **`DFPAtlas/readdy-7a0cf7` = LetHub.uk**
 
-### Wedora
+### Vowora
 
 `readdy-1a84b8` explicitly identifies itself as:
 
-**Wedora — Wedding Planning SaaS Platform**
+**Vowora — Wedding Planning SaaS Platform**
 
 It contains wedding sites, couples, guests, invitations, RSVP, budget, seating, travel concierge and demo mode.
 
 So:
 
-**`DFPAtlas/readdy-1a84b8` = Wedora**
+**`DFPAtlas/readdy-1a84b8` = Vowora**
 
 ### GarageFlow
 
@@ -205,7 +205,7 @@ For day-to-day work I would currently use:
 | **DFP Command Centre**        | **`DFPAtlas/readdy-126082`**        |
 | **QuickGuard**                | **`DFPAtlas/readdy-484bac`**        |
 | **LetHub**                    | **`DFPAtlas/readdy-7a0cf7`**        |
-| **Wedora**                    | **`DFPAtlas/readdy-1a84b8`**        |
+| **Vowora**                    | **`DFPAtlas/readdy-1a84b8`**        |
 | **GarageFlow**                | **`DFPAtlas/readdy-5650b0`**        |
 | **Forge**                     | **`DFPAtlas/readdy-cdd678`**        |
 | **SiteLedger**                | **`DFPAtlas/readdy-15db91`**        |

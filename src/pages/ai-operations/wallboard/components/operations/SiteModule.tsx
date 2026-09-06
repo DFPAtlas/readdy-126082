@@ -204,7 +204,7 @@ function assessSite(site: SiteModuleData): SiteAssessment {
         issues.push({ tone: 'red', text: 'Database check error' });
         break;
       case 'stale':
-        issues.push({ tone: 'amber', text: 'Database heartbeat overdue' });
+        issues.push({ tone: 'muted', text: 'Database heartbeat stale' });
         break;
       case 'degraded':
         issues.push({ tone: 'amber', text: 'Database degraded' });
@@ -273,11 +273,12 @@ function LiveSiteModule({ site, accent }: { site: SiteModuleData; accent: { colo
           : dbStatus === 'stale' ? 'STALE'
             : dbStatus === 'check_error' ? 'CHECK ERROR'
               : dbStatus === 'not_configured' ? 'NOT CONFIGURED'
-                : 'UNKNOWN';
+                : dbStatus === 'testing' ? 'TESTING'
+                  : 'UNKNOWN';
   const dbTone: Tone =
     dbStatus === 'healthy' ? 'green'
       : dbStatus === 'offline' ? 'red'
-        : dbStatus === 'stale' || dbStatus === 'degraded' || dbStatus === 'check_error' ? 'amber'
+        : dbStatus === 'stale' || dbStatus === 'degraded' || dbStatus === 'check_error' || dbStatus === 'testing' ? 'amber'
           : 'muted';
   const dbAge = ageLabel(db?.lastHeartbeatAt);
 
