@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-webhook-secret",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-webhook-secret, x-dfp-scheduler-token",
 };
 
 const json = (body: unknown, status: number) =>
@@ -15,15 +15,37 @@ const json = (body: unknown, status: number) =>
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+async function secretsMatch(expected: string, provided: string): Promise<boolean> {
+  if (!expected || !provided) return false;
+  const encoder = new TextEncoder();
+  const [expectedHash, providedHash] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+    crypto.subtle.digest("SHA-256", encoder.encode(provided)),
+  ]);
+  const a = new Uint8Array(expectedHash);
+  const b = new Uint8Array(providedHash);
+  let difference = 0;
+  for (let i = 0; i < a.length; i++) difference |= a[i] ^ b[i];
+  return difference === 0;
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  // Shared-secret gate so only our database trigger can invoke this endpoint.
-  const expected = Deno.env.get("TICKET_WEBHOOK_SECRET") ?? "";
-  const provided = req.headers.get("x-webhook-secret") ?? "";
-  if (!expected || provided !== expected) {
+  // Vault-backed scheduler token is used by the database trigger. Retain the
+  // legacy ticket secret only for a controlled migration window.
+  const schedulerExpected = (
+    Deno.env.get("DFP_SCHEDULER_SECRET") ?? Deno.env.get("dfp_scheduler_secret") ?? ""
+  ).trim();
+  const schedulerProvided = (req.headers.get("x-dfp-scheduler-token") ?? "").trim();
+  const legacyExpected = (Deno.env.get("TICKET_WEBHOOK_SECRET") ?? "").trim();
+  const legacyProvided = (req.headers.get("x-webhook-secret") ?? "").trim();
+  const authorised =
+    await secretsMatch(schedulerExpected, schedulerProvided) ||
+    await secretsMatch(legacyExpected, legacyProvided);
+  if (!authorised) {
     return json({ error: "Unauthorized" }, 401);
   }
 
