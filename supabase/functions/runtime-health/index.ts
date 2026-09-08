@@ -303,6 +303,7 @@ async function checkResend(r: HealthResult): Promise<HealthResult> {
   if (!key) {
     return notConfigured(r, "Email (Resend) is not configured (no API key).");
   }
+  const senderDomain = (Deno.env.get("RESEND_FROM_DOMAIN") ?? "digital-footprint.uk").trim().toLowerCase();
   const started = Date.now();
   try {
     const res = await fetchWithTimeout("https://api.resend.com/domains", {
@@ -311,7 +312,15 @@ async function checkResend(r: HealthResult): Promise<HealthResult> {
     }, TIMEOUT_MS);
     const latencyMs = Date.now() - started;
     if (res.ok) {
-      return healthy(r, "Email API reachable — account/domain check succeeded (no email sent).", latencyMs, true);
+      const payload = await res.json().catch(() => null) as { data?: Array<{ name?: string; status?: string }> } | null;
+      const domain = payload?.data?.find((d) => (d.name ?? "").toLowerCase() === senderDomain);
+      if (!domain) {
+        return degraded(r, `Configured sender domain ${senderDomain} is not present in Resend.`, "sender_domain_missing", latencyMs);
+      }
+      if ((domain.status ?? "").toLowerCase() !== "verified") {
+        return degraded(r, `Configured sender domain ${senderDomain} is ${domain.status || "not verified"}.`, "sender_domain_unverified", latencyMs);
+      }
+      return healthy(r, `Email API reachable — sender domain ${senderDomain} is verified (no email sent).`, latencyMs, true);
     }
     if (res.status === 401) return authFailed(r);
     return unavailable(r, `Email API responded with status ${res.status}.`, "unavailable", latencyMs);
