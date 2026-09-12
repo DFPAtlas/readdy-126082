@@ -9,7 +9,14 @@ import { GroupLiveDataProvider } from '@/pages/ai-operations/live/groupLiveDataS
 import CommandPalette from '@/pages/ai-operations/search/components/CommandPalette';
 import SearchTrigger from '@/pages/ai-operations/search/components/SearchTrigger';
 
-const navItems = [
+interface NavItem {
+  to: string;
+  icon: string;
+  label: string;
+  ownerAdminOnly?: boolean;
+}
+
+const navItems: NavItem[] = [
   { to: '/dashboard', icon: 'ri-dashboard-3-line', label: 'Dashboard' },
   { to: '/projects', icon: 'ri-folder-3-line', label: 'Projects' },
   { to: '/ideas', icon: 'ri-lightbulb-line', label: 'Ideas' },
@@ -23,6 +30,8 @@ const navItems = [
   { to: '/project-budget', icon: 'ri-money-pound-circle-line', label: 'Project Budget' },
   { to: '/system-status', icon: 'ri-pulse-line', label: 'System Status' },
   { to: '/ai-operations/wallboard', icon: 'ri-radar-line', label: 'Operations Wall' },
+  { to: '/ai-operations/wall-widgets', icon: 'ri-layout-grid-line', label: 'Wall Widgets', ownerAdminOnly: true },
+  { to: '/ai-operations/agent-deployment', icon: 'ri-rocket-2-line', label: 'Agent Deployment', ownerAdminOnly: true },
   { to: '/activity-log', icon: 'ri-history-line', label: 'Activity' },
   { to: '/github', icon: 'ri-github-fill', label: 'GitHub' },
   { to: '/ai-operations', icon: 'ri-robot-2-line', label: 'AI Operations' },
@@ -109,7 +118,9 @@ export default function AppLayout() {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
-          {navItems.map((item) => (
+          {navItems.map((item) => {
+            if (item.ownerAdminOnly && auth.role !== 'owner' && auth.role !== 'admin') return null;
+            return (
             <NavLink
               key={item.to}
               to={item.to}
@@ -126,7 +137,8 @@ export default function AppLayout() {
               <i className={`${item.icon} text-base w-4 h-4 flex items-center justify-center shrink-0`}></i>
               <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
             </NavLink>
-          ))}
+            );
+          })}
 
           {/* Security */}
           <NavLink

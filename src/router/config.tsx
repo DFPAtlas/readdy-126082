@@ -92,6 +92,8 @@ import SchedulesPage from "@/pages/ai-operations/schedules/page";
 import ScheduleDetailPage from "@/pages/ai-operations/schedules/detail/page";
 import SearchPage from "@/pages/ai-operations/search/page";
 import WallboardPage from "@/pages/ai-operations/wallboard/page";
+import WallWidgetsPage from "@/pages/ai-operations/wall-widgets/page";
+import AgentDeploymentPage from "@/pages/ai-operations/agent-deployment/page";
 import ReadinessPage from "@/pages/ai-operations/readiness/page";
 import RuntimeHealthPage from "@/pages/ai-operations/runtime-health/page";
 import RuntimeControlsPage from "@/pages/ai-operations/runtime-controls/page";
@@ -207,6 +209,8 @@ const routes: RouteObject[] = [
         ],
       },
       { path: "ai-operations/live", element: <LiveOperationsPage /> },
+      { path: "ai-operations/wall-widgets", element: <WallWidgetsPage /> },
+      { path: "ai-operations/agent-deployment", element: <AgentDeploymentPage /> },
       {
         path: "ai-operations/orchestrator",
         element: <OrchestratorLayout />,

@@ -60,6 +60,16 @@ export interface AiAgentRow {
   queue_count: number;
   success_rate: number | null;
   notes: string | null;
+  parent_agent_id: string | null;
+  workflow_id: string | null;
+  runtime_reference: string | null;
+  responsibility: string | null;
+  setup_stage: string | null;
+  last_validated_at: string | null;
+  last_validation_result: string | null;
+  deployment_status: string;
+  approval_required: boolean;
+  data_scope: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

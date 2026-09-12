@@ -1,6 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useGroupLiveData, refreshGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
+import { refreshHistory } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
+import { refreshWidgetConfigData } from '@/pages/ai-operations/wallboard/widgetConfigStore';
+import { refreshN8nData } from '@/pages/ai-operations/wallboard/n8nStore';
+import { refreshSiteManagerReports } from '@/pages/ai-operations/network/siteManagerReportsStore';
+import { refreshControls } from '@/pages/ai-operations/runtime-controls/runtimeControlsStore';
 import {
   getOverviewKpis,
   getOverviewSiteStatus,
@@ -10,6 +15,7 @@ import {
   getOverviewOrchestrator,
   getReadinessSummary,
 } from '@/pages/ai-operations/live/liveDataSelectors';
+import GroupAgentNetwork from '@/pages/ai-operations/network/GroupAgentNetwork';
 import KpiCards from '@/pages/ai-operations/components/KpiCards';
 import MasterOrchestrator from '@/pages/ai-operations/components/MasterOrchestrator';
 import GroupSiteStatus from '@/pages/ai-operations/components/GroupSiteStatus';
@@ -17,15 +23,32 @@ import LiveActivity from '@/pages/ai-operations/components/LiveActivity';
 import PendingApprovals from '@/pages/ai-operations/components/PendingApprovals';
 import PlatformHealth from '@/pages/ai-operations/components/PlatformHealth';
 import QuickActions from '@/pages/ai-operations/components/QuickActions';
+import './network/network.css';
 
 export default function AiOperationsPage() {
   const data = useGroupLiveData();
   const [refreshing, setRefreshing] = useState(false);
 
+  // The network centre needs runtime-health (HAL/TRON bridge) + saved widget
+  // config (initials/colour) — load them once alongside the group snapshot.
+  // n8n workflows are loaded first so site-manager report mappings resolve;
+  // runtime controls load for the agent-detail gate state.
+  useEffect(() => {
+    void refreshHistory();
+    void refreshWidgetConfigData();
+    void refreshN8nData().then(() => refreshSiteManagerReports());
+    void refreshControls();
+  }, []);
+
   const handleRefresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
     await refreshGroupLiveData();
+    void refreshHistory();
+    void refreshWidgetConfigData();
+    await refreshN8nData();
+    await refreshSiteManagerReports();
+    void refreshControls();
     setRefreshing(false);
   };
 
@@ -91,6 +114,13 @@ export default function AiOperationsPage() {
             <span className="text-foreground-200 whitespace-nowrap">Source:</span>
             <span className="text-amber-400 font-medium whitespace-nowrap">Partial Live</span>
           </div>
+          <Link
+            to="/ai-operations/agent-deployment"
+            className="inline-flex items-center gap-2 text-xs font-label bg-accent-500 hover:bg-accent-400 text-background-950 rounded-md px-3 py-2 transition-colors duration-150 cursor-pointer whitespace-nowrap"
+          >
+            <i className="ri-rocket-2-line text-sm w-4 h-4 flex items-center justify-center"></i>
+            Deploy Agent
+          </Link>
           <button
             onClick={handleRefresh}
             disabled={refreshing}
@@ -108,11 +138,14 @@ export default function AiOperationsPage() {
         Last updated {data.lastRefreshed.toLocaleTimeString('en-US', { hour12: false })}
       </p>
 
-      {/* Master orchestrator (prominent, near top) */}
-      <MasterOrchestrator orchestrator={orchestrator} />
+      {/* Group Agent Network — the main visual control centre */}
+      <GroupAgentNetwork />
 
       {/* KPI cards */}
       <KpiCards metrics={kpis} />
+
+      {/* Master orchestrator (prominent, near top) */}
+      <MasterOrchestrator orchestrator={orchestrator} />
 
       {/* Group site status + live activity */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

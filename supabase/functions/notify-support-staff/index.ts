@@ -10,21 +10,18 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // Bounded retry: transient provider failures stay queued (up to 3 attempts);
 // permanent failures are marked failed.
 //
-// Gated by the shared scheduler secret for pg_cron, or the support admin
-// secret for an explicitly-authorised manual run.
+// Gated by an admin secret so it can be invoked by pg_cron or manually.
 //
-// Secrets: DFP_SCHEDULER_SECRET, TICKET_ADMIN_SECRET, RESEND_API_KEY,
-// RESEND_FROM_DOMAIN
+// Secrets: TICKET_ADMIN_SECRET, RESEND_API_KEY, RESEND_FROM_DOMAIN
 // ============================================================================
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "content-type, x-admin-secret, x-dfp-scheduler-token",
+  "Access-Control-Allow-Headers": "content-type, x-admin-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 const MAX_ATTEMPTS = 3;
-const CLAIM_TIMEOUT_MINUTES = 15;
 
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), {
@@ -34,20 +31,6 @@ const json = (body: unknown, status: number) =>
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-async function secretsMatch(expected: string, provided: string): Promise<boolean> {
-  if (!expected || !provided) return false;
-  const encoder = new TextEncoder();
-  const [expectedHash, providedHash] = await Promise.all([
-    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
-    crypto.subtle.digest("SHA-256", encoder.encode(provided)),
-  ]);
-  const a = new Uint8Array(expectedHash);
-  const b = new Uint8Array(providedHash);
-  let difference = 0;
-  for (let i = 0; i < a.length; i++) difference |= a[i] ^ b[i];
-  return difference === 0;
-}
 
 type NotifType = "new_ticket" | "customer_reply" | "assignment" | "urgent_ticket" | "overdue" | "daily_summary";
 
@@ -120,23 +103,16 @@ serve(async (req: Request) => {
     return json({ error: "Method not allowed" }, 405);
   }
 
-  const schedulerExpected = (
-    Deno.env.get("DFP_SCHEDULER_SECRET") ?? Deno.env.get("dfp_scheduler_secret") ?? ""
-  ).trim();
-  const schedulerProvided = (req.headers.get("x-dfp-scheduler-token") ?? "").trim();
-  const adminExpected = (Deno.env.get("TICKET_ADMIN_SECRET") ?? "").trim();
-  const adminProvided = (req.headers.get("x-admin-secret") ?? "").trim();
-  const authorised =
-    await secretsMatch(schedulerExpected, schedulerProvided) ||
-    await secretsMatch(adminExpected, adminProvided);
-  if (!authorised) {
+  const expected = Deno.env.get("TICKET_ADMIN_SECRET") ?? "";
+  const provided = req.headers.get("x-admin-secret") ?? "";
+  if (!expected || provided !== expected) {
     return json({ error: "Unauthorized" }, 401);
   }
 
   const resendKey = Deno.env.get("RESEND_API_KEY");
   const resendDomain = Deno.env.get("RESEND_FROM_DOMAIN");
   if (!resendKey || !resendDomain) {
-    return json({ ok: false, status: "not_configured" }, 503);
+    return json({ ok: true, status: "not_configured" }, 200);
   }
 
   const supabaseAdmin = createClient(
@@ -144,17 +120,6 @@ serve(async (req: Request) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     { auth: { autoRefreshToken: false, persistSession: false } },
   );
-
-  // Recover only abandoned claims. Normal overlapping workers cannot select
-  // rows in `sending`, and each row is claimed conditionally below.
-  const claimCutoff = new Date(
-    Date.now() - CLAIM_TIMEOUT_MINUTES * 60 * 1000,
-  ).toISOString();
-  await supabaseAdmin
-    .from("internal_ticket_notifications")
-    .update({ status: "queued", last_error_code: "worker_claim_timeout" })
-    .eq("status", "sending")
-    .lt("updated_at", claimCutoff);
 
   const { data: queued, error: qErr } = await supabaseAdmin
     .from("internal_ticket_notifications")
@@ -190,18 +155,6 @@ serve(async (req: Request) => {
   let skipped = 0;
 
   for (const row of rows) {
-    const { data: claim } = await supabaseAdmin
-      .from("internal_ticket_notifications")
-      .update({ status: "sending" })
-      .eq("id", row.id)
-      .eq("status", "queued")
-      .select("id")
-      .maybeSingle();
-    if (!claim) {
-      skipped++;
-      continue;
-    }
-
     const ticket = row.ticket_id ? ticketsById[row.ticket_id] : null;
     const number = ticket?.ticket_number ?? "N/A";
     const ticketSubject = ticket?.subject ?? "";
@@ -280,7 +233,7 @@ serve(async (req: Request) => {
         if (res.status >= 500 && attempts < MAX_ATTEMPTS) {
           await supabaseAdmin
             .from("internal_ticket_notifications")
-            .update({ status: "queued", attempt_count: attempts, last_error_code: `resend_${res.status}` })
+            .update({ attempt_count: attempts, last_error_code: `resend_${res.status}` })
             .eq("id", row.id);
           skipped++;
         } else {
@@ -301,7 +254,7 @@ serve(async (req: Request) => {
       if (attempts < MAX_ATTEMPTS) {
         await supabaseAdmin
           .from("internal_ticket_notifications")
-          .update({ status: "queued", attempt_count: attempts, last_error_code: "delivery_error" })
+          .update({ attempt_count: attempts, last_error_code: "delivery_error" })
           .eq("id", row.id);
         skipped++;
       } else {

@@ -94,3 +94,22 @@ A centralized dashboard where users can monitor, analyze, and manage their digit
 - **Tab 7 - Approval Queue**: Approve/reject/send-back workflow, deployment readiness score cards per website
 - **Sidebar**: New "Website UAT & Changes" section with 7 nav items
 - **Seeded**: 5 websites, 12 changes, 8 page reviews with items, 15 links, 5 image changes, 5 UAT test runs with items, 6 approval queue items, 5 deployment readiness records
+
+## 8. AI Operations — Group Agent Network (Prompt 01) ✅ COMPLETED
+- **Route**: `/ai-operations` overview — redesigned as a visual control centre for all Digital Footprint sites.
+- **Centre**: DFP Group Oversight / Atlas Tron (group orchestrator) + TRON oversight + HAL execution-host status (runtime connectivity kept separate from confirmed oversight activity).
+- **First ring**: one manager position per site in the Group Site Registry (site-scoped orchestration agents); missing/duplicate managers surfaced honestly (never silently collapsed).
+- **Second ring**: clicking a site fans its sub-agents outward (site membership, not a verified execution dependency); shared/group agents stay in a separate expandable inner group.
+- **Data**: reuses the shared group live-data store, saved wall-widget config (name/initials/colour), and runtime-health store — no new registry, no per-card polling. The Forge uses `the-forge` / `TF`; no hard-coded site list.
+- **Controls**: site/host/status filters, agent search, Diagram/List toggle, expand/collapse all, zoom/pan/fit/reset; agent-selection details panel links into existing agent/site detail pages.
+- **Honesty**: edges animate only on fresh `working` run evidence; missing data never becomes a green state or fabricated zero; respects prefers-reduced-motion.
+- **Files**: `src/pages/ai-operations/network/*` (selectors, diagram, list, detail panel, styles) + `src/pages/ai-operations/page.tsx`.
+
+## 9. AI Operations — Agent Deployment Subpage (Prompt 03) ✅ COMPLETED
+- **Route**: `/ai-operations/agent-deployment` — group-wide agent setup + deployment-readiness workflow (sidebar nav + overview "Deploy Agent" button).
+- **List**: every registered agent as a saved setup — role (site manager / sub-agent / shared), site, parent manager, runtime + workflow mapping, setup stage, last validation result, with Continue setup / View agent actions.
+- **Wizard (6 steps)**: Identity & site (template picker incl. LetHub-only templates) → Manager assignment (same-site, cycle/self/cross-site blocked, duplicate managers flagged) → Runtime & workflow (registered runtime node + approved n8n workflow) → Permissions & schedule (read-only supervision default) → Validate (connection validation vs dispatch preview vs test execution kept distinct) → Review & finish.
+- **Templates**: Blank for any site; 12 optional LetHub draft templates (definitions only — never auto-created).
+- **Persistence**: minimal extension to `ai_operations_agents` (parent_agent_id, workflow_id, runtime_reference, responsibility, setup_stage, last_validated_at/result, deployment_status, approval_required, data_scope) + self-parent CHECK + cycle/cross-site BEFORE trigger; reuses existing owner/admin RLS. Drafts persist to Supabase (never localStorage) and reopen after refresh.
+- **Honesty**: there is NO "deployed" status — activation is not connected ("Ready for deployment — activation not connected"); saving never starts a workflow or alters a runtime gate.
+- **Files**: `src/pages/ai-operations/agent-deployment/*`, `supabase/migrations/202609240000_ai_agent_deployment.sql`.
