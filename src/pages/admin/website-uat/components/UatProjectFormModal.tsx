@@ -38,9 +38,19 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
+  /** Pre-fill the project name (used when creating a UAT project from a DFP project). */
+  defaultName?: string;
+  /** Pre-link the created UAT project to a DFP project (internal_projects.id). */
+  defaultInternalProjectId?: number | null;
 }
 
-export default function UatProjectFormModal({ open, onClose, onCreated }: Props) {
+export default function UatProjectFormModal({
+  open,
+  onClose,
+  onCreated,
+  defaultName,
+  defaultInternalProjectId,
+}: Props) {
   const [form, setForm] = useState<FormData>(INITIAL);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -48,11 +58,11 @@ export default function UatProjectFormModal({ open, onClose, onCreated }: Props)
 
   useEffect(() => {
     if (open) {
-      setForm(INITIAL);
+      setForm({ ...INITIAL, name: defaultName || '' });
       setError('');
       setTimeout(() => nameInputRef.current?.focus(), 100);
     }
-  }, [open]);
+  }, [open, defaultName]);
 
   const update = <K extends keyof FormData>(key: K, value: FormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -79,6 +89,7 @@ export default function UatProjectFormModal({ open, onClose, onCreated }: Props)
       completion_date: form.completion_date || null,
       required_testers: form.required_testers ? Number(form.required_testers) : 0,
       coverage_target: form.coverage_target.trim() || null,
+      internal_project_id: defaultInternalProjectId ?? null,
     };
 
     const { error: insertErr } = await supabase.from('uat_projects').insert(payload);

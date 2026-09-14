@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import type { Role } from '@/lib/permissions';
 
-type MfaStatus = 'setup' | 'verify' | 'satisfied';
+type MfaStatus = 'setup' | 'verify' | 'satisfied' | 'unavailable';
 
 interface AuthState {
   loading: boolean;
@@ -38,7 +38,10 @@ async function checkMfaStatus(): Promise<MfaStatus> {
     if (aalRes.data?.nextLevel === 'aal2') return 'verify';
     return 'setup';
   } catch {
-    return 'satisfied';
+    // Fail closed — if MFA state cannot be verified, never grant access by
+    // default. Return an explicit 'unavailable' state so the caller blocks
+    // access until verification succeeds (no silent allow).
+    return 'unavailable';
   }
 }
 
@@ -67,8 +70,9 @@ export default function AuthGuard({ children }: { children: ReactNode }) {
           .eq('user_id', userId)
           .maybeSingle();
 
-        // Disabled staff accounts are denied access (status !== 'active').
-        if (roleData?.role && roleData?.status !== 'disabled') {
+        // Explicit allow-list: only 'active' staff accounts may hold a role.
+        // Any other status (disabled / pending / suspended / missing) is denied.
+        if (roleData?.role && roleData?.status === 'active') {
           return roleData.role as AuthState['role'];
         }
 
@@ -240,6 +244,39 @@ export default function AuthGuard({ children }: { children: ReactNode }) {
           >
             Sign out
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // MFA verification unavailable — fail closed. Block privileged access until
+  // MFA state can be confirmed. No redirect loop: the user can retry or sign out.
+  if (auth.user && auth.mfaStatus === 'unavailable') {
+    return (
+      <div className="min-h-screen bg-background-50 flex items-center justify-center px-4">
+        <div className="w-full max-w-[420px] text-center">
+          <div className="w-16 h-16 bg-background-200/60 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <i className="ri-shield-keyhole-line text-foreground-400 text-3xl w-8 h-8 flex items-center justify-center"></i>
+          </div>
+          <h1 className="font-heading text-2xl font-bold text-foreground-50 mb-3">Unable to verify security</h1>
+          <p className="text-sm text-foreground-400 mb-8 leading-relaxed">
+            Your multi-factor authentication status could not be verified. For your
+            security, access is blocked until it can be confirmed.
+          </p>
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={refreshMfa}
+              className="w-full bg-accent-500 hover:bg-accent-400 text-background-950 font-semibold text-sm px-6 py-3 rounded-full transition-all duration-200 whitespace-nowrap cursor-pointer"
+            >
+              Retry
+            </button>
+            <button
+              onClick={handleSignOut}
+              className="w-full bg-background-100 hover:bg-background-200/70 text-foreground-600 font-medium text-sm px-6 py-3 rounded-full transition-all duration-200 whitespace-nowrap cursor-pointer"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </div>
     );

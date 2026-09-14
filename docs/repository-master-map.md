@@ -1,4 +1,61 @@
-# DFPAtlas Repository → Project Master Map
+# DFP Command — Repository Master Map
+
+This document has two parts:
+
+1. **DFP Command codebase module map** — the major modules/routes of this
+   repository (the DFP Command internal operating system).
+2. **External repository register** — the mapping of Digital Footprint's
+   external GitHub repositories to managed projects/sites.
+
+---
+
+## DFP Command codebase module map
+
+The canonical architectural centre is the Digital Footprint project portfolio,
+keyed by `internal_projects.id`. Global module pages are fleet-wide; the Project
+Command Centre (`/projects/:slug`) is the filtered project view of the same
+data.
+
+| Area | Route(s) | Notes |
+| --- | --- | --- |
+| Executive Dashboard | `/` · `/dashboard` | Fleet-wide operating view (15B). |
+| Projects Portfolio | `/projects` | Canonical portfolio aggregation (`usePortfolio`). |
+| Project Command Centre | `/projects/:slug` | Per-project sections: Overview, Build, GitHub, Infrastructure, AI Ops, UAT, Bugs, Changes, Budget, Support, Monitoring, Launch, Deployment, Operations, Activity, Files. |
+| Ideas | `/ideas` | Pre-project idea pipeline. |
+| Roadmap | `/roadmap` | Portfolio roadmap. |
+| Build Process | `/build-process` | Build runs, checklists, readiness. |
+| Bugs | `/bugs` | `internal_bugs`. |
+| Change Requests | `/change-requests` | `internal_change_requests`. |
+| Project Budget | `/project-budget` | Portfolio + project finance. |
+| AI Operations | `/ai-operations/*` | Sites, Agents, Runs, Approvals, Orchestrator, Tools, Models, Knowledge, Security, Alerts, Audit, Costs, Notifications, Schedules, Live, Wallboard, Readiness, Runtime Health, Runtime Controls, Agent Deployment. |
+| UAT (admin) | `/admin/website-uat` | Website UAT, test runs, approval queue. |
+| UAT (tester) | `/account/uat` · `/uat` | Tester marketplace + runner. |
+| Support | `/support-tickets/*` · `/customers` · `/support-teams` · `/support-routing` · `/support-knowledge` · `/support-repairs` | Central support + customer 360 + routing + knowledge. |
+| Monitoring | `/system-status` | Website / Supabase / Edge Function / Agent / Webhook monitoring. |
+| Activity | `/activity-log` | `internal_activity_log` timeline. |
+| Team / Security | `/team` · `/security` | Access and policy administration. |
+| GitHub | `/github` | External GitHub repository browsing. |
+| Files & Links | `/files-links` | Shared files/links. |
+
+Key subsystems and their canonical records:
+
+- **Integrations:** `internal_project_integrations` (one primary record per
+  project; GitHub, Readdy, Supabase, Hosting, DNS, Runtime, Monitoring).
+- **Deployments:** `internal_project_deployments`.
+- **Operations:** `internal_project_maintenance` + `internal_project_reviews`.
+- **AI:** `ai_sites` + `ai_operations_*` registry tables (fleet-wide), with a
+  filtered project view inside the Command Centre.
+- **Runtime:** private runtime bridge (`runtime-bridge/`) relays telemetry for
+  nodes such as HAL (`atlas-hal-runtime-01`) and TRON
+  (`atlas-tron-runtime-01`); health is telemetry-derived, never assumed from the
+  registry.
+
+See `project_plan.md` (Product Charter) for the full architectural definition,
+lifecycle, status model, provenance rules, and source-of-truth table.
+
+---
+
+## External repository register
 
 | Repository            | Project / Website                            | Purpose                                                                                       | My classification                        |
 | --------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------- |

@@ -10,9 +10,10 @@ interface Props {
   run: BuildRun | null;
   projects: Project[];
   templates: BuildTemplate[];
+  defaultProjectId?: number;
 }
 
-export default function BuildProcessRunModal({ open, onClose, onSaved, run, projects, templates }: Props) {
+export default function BuildProcessRunModal({ open, onClose, onSaved, run, projects, templates, defaultProjectId }: Props) {
   const [runName, setRunName] = useState('');
   const [projectId, setProjectId] = useState('');
   const [templateId, setTemplateId] = useState('');
@@ -34,14 +35,14 @@ export default function BuildProcessRunModal({ open, onClose, onSaved, run, proj
       setNotes(run.notes || '');
     } else {
       setRunName('');
-      setProjectId('');
+      setProjectId(defaultProjectId ? String(defaultProjectId) : '');
       setTemplateId(templates.length > 0 ? String(templates[0].id) : '');
       setAppType('full_saas');
       setOwner('');
       setNotes('');
     }
     setError('');
-  }, [run, open, templates]);
+  }, [run, open, templates, defaultProjectId]);
 
   const handleSave = async () => {
     if (!runName.trim()) { setError('Run name is required.'); return; }

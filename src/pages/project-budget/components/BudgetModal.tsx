@@ -9,9 +9,10 @@ interface Props {
   onSaved: () => void;
   budget: ProjectBudget | null;
   projects: Project[];
+  defaultProjectId?: number | null;
 }
 
-export default function BudgetModal({ open, onClose, onSaved, budget, projects }: Props) {
+export default function BudgetModal({ open, onClose, onSaved, budget, projects, defaultProjectId }: Props) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     project_id: '',
@@ -44,7 +45,7 @@ export default function BudgetModal({ open, onClose, onSaved, budget, projects }
       });
     } else {
       setForm({
-        project_id: '',
+        project_id: defaultProjectId ? String(defaultProjectId) : '',
         budget_name: '',
         budget_status: 'active',
         budget_type: 'internal_project',
@@ -57,7 +58,7 @@ export default function BudgetModal({ open, onClose, onSaved, budget, projects }
         notes: '',
       });
     }
-  }, [budget, open]);
+  }, [budget, open, defaultProjectId]);
 
   if (!open) return null;
 

@@ -68,6 +68,8 @@ export interface UatFeedback {
   support_ticket_id?: string | null;
   test_case_result_id?: string | null;
   duplicate_of?: string | null;
+  // ── Project workstream traceability (DFP Command 07) ──
+  internal_bug_id?: number | null;
 }
 
 export interface UatSession {
