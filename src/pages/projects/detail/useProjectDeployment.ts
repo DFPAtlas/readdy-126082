@@ -1,20 +1,20 @@
 // ============================================================================
-// DFP COMMAND 13A/13B/13C/18F — PROJECT DEPLOYMENT CONTROL — DATA HOOK
+// DFP COMMAND 13A/13B/13C — PROJECT DEPLOYMENT CONTROL — DATA HOOK
 // ============================================================================
-// Reads internal_project_deployments and drives the deployment lifecycle.
+// Reads/writes internal_project_deployments for the selected project and
+// records significant deployment events into internal_activity_log.
 //
-// Command 18F: all lifecycle mutations now flow through protected SECURITY
-// DEFINER RPCs (deployment_start / _complete / _fail / _start_verification /
-// _complete_verification / _accept / _start_rollback / _enter_rollback_sha /
-// _complete_rollback). The server enforces the state machine, the authoritative
-// SHA, acceptance and the atomic live transition — this hook only presents
-// confirmations and surfaces the server's decision. It never performs direct
-// INSERT/UPDATE on the deployment ledger (those are neutralised at RLS).
+// Safety: this hook ONLY creates and tracks deployment records through a
+// manual, audited flow. It never deploys, never pushes, never touches DNS,
+// and never marks a deployment VERIFIED without an explicit operator action.
+// Command 13C adds: production acceptance (which may flip an un-launched
+// project to Live) and a safe rollback flow (redeploy of a known-good SHA —
+// never a Git history rewrite, never overwriting the failed record).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Project } from './types';
 import type { ProjectDeployment } from './deploymentTypes';
-import { isActiveDeploymentStatus } from './deploymentTypes';
+import { isActiveDeploymentStatus, blocksNewDeployment } from './deploymentTypes';
 import type { VerificationSnapshot } from './verificationTypes';
 
 const SELECT =
@@ -22,9 +22,6 @@ const SELECT =
 
 export interface StartDeploymentInput {
   launchApprovalId: string;
-  // Current authoritative repository SHA. The server fails closed when this is
-  // null/unavailable and rejects drift when it differs from the approved SHA.
-  headSha: string | null;
   lastKnownGoodSha: string | null;
   productionUrl: string | null;
   deploymentMethod: string;
@@ -32,10 +29,14 @@ export interface StartDeploymentInput {
 }
 
 export interface StartRollbackInput {
-  // The failed deployment being rolled back. The rollback target SHA is derived
-  // server-side from trusted history — never supplied by the client.
   ofDeploymentId: string;
+  launchApprovalId: string;
+  rollbackSha: string;
+  failedSha: string | null;
   reason: string;
+  productionUrl: string | null;
+  deploymentMethod: string;
+  lastKnownGoodSha: string | null;
 }
 
 export interface ProjectDeploymentData {
@@ -55,7 +56,7 @@ export interface ProjectDeploymentData {
   ) => Promise<string | null>;
   markFailed: (deploymentId: string, reason: string, activityAction?: string) => Promise<string | null>;
   startVerification: (deploymentId: string) => Promise<string | null>;
-  markVerified: (deploymentId: string, snapshot: VerificationSnapshot) => Promise<string | null>;
+  markVerified: (deploymentId: string) => Promise<string | null>;
   acceptProduction: (deploymentId: string, notes: string) => Promise<string | null>;
   startRollback: (input: StartRollbackInput) => Promise<string | null>;
   enterRollbackDeployedSha: (deploymentId: string, sha: string) => Promise<string | null>;
@@ -64,8 +65,8 @@ export interface ProjectDeploymentData {
 
 export function useProjectDeployment(
   projectId: number | undefined,
-  _projectName: string | null | undefined,
-  _project: Project | null | undefined,
+  projectName: string | null | undefined,
+  project: Project | null | undefined,
   onProjectChanged?: () => void,
 ): ProjectDeploymentData {
   const [deployments, setDeployments] = useState<ProjectDeployment[]>([]);
@@ -77,6 +78,23 @@ export function useProjectDeployment(
 
   const configured = Boolean(
     import.meta.env.VITE_PUBLIC_SUPABASE_URL && import.meta.env.VITE_PUBLIC_SUPABASE_ANON_KEY,
+  );
+
+  const logActivity = useCallback(
+    async (action: string) => {
+      if (!projectId) return;
+      try {
+        await supabase.from('internal_activity_log').insert({
+          entity_type: 'project',
+          entity_id: projectId,
+          action,
+          description: `${action}: ${projectName ?? 'project'}`,
+        });
+      } catch {
+        // non-critical
+      }
+    },
+    [projectId, projectName],
   );
 
   const load = useCallback(async () => {
@@ -118,41 +136,37 @@ export function useProjectDeployment(
 
   const refresh = useCallback(() => setReloadKey((k) => k + 1), []);
 
-  // Invoke a protected deployment RPC and surface the server's deterministic
-  // error code (e.g. SHA_DRIFT, DEPLOYMENT_ALREADY_ACTIVE, VERIFICATION_FAILED).
-  const callRpc = useCallback(
-    async (fn: string, args: Record<string, unknown>): Promise<string | null> => {
-      const { error: rpcError } = await supabase.rpc(fn, args);
-      if (rpcError) return rpcError.message;
-      return null;
-    },
-    [],
-  );
-
   const startDeployment = useCallback(
     async (input: StartDeploymentInput): Promise<string | null> => {
       if (!projectId) return 'Project is not available.';
       setSaving(true);
       try {
-        const err = await callRpc('deployment_start', {
-          p_project_id: projectId,
-          p_launch_approval_id: input.launchApprovalId,
-          p_head_sha: input.headSha,
-          p_last_known_good_sha: input.lastKnownGoodSha,
-          p_production_url: input.productionUrl,
-          p_deployment_method: input.deploymentMethod,
-          p_provider: input.provider,
+        // The current GitHub HEAD is resolved server-side by the deployment-start
+        // Edge Function — the browser sends intent only, never a SHA claim.
+        const { data, error: fnErr } = await supabase.functions.invoke('deployment-start', {
+          body: {
+            projectId,
+            launchApprovalId: input.launchApprovalId,
+            lastKnownGoodSha: input.lastKnownGoodSha,
+            productionUrl: input.productionUrl,
+            deploymentMethod: input.deploymentMethod,
+            provider: input.provider,
+          },
         });
-        if (err) return err;
+        if (fnErr) return fnErr.message || 'Failed to start deployment.';
+        const code = data?.code;
+        if (code && code !== 'OK') return data?.message || code;
+
+        await logActivity('Deployment workflow started');
         await load();
         return null;
-      } catch (e: unknown) {
-        return e instanceof Error ? e.message : 'Failed to start deployment.';
+      } catch (err: unknown) {
+        return err instanceof Error ? err.message : 'Failed to start deployment.';
       } finally {
         setSaving(false);
       }
     },
-    [projectId, callRpc, load],
+    [projectId, load, logActivity],
   );
 
   const markCompleted = useCallback(
@@ -164,164 +178,293 @@ export function useProjectDeployment(
     ): Promise<string | null> => {
       setSaving(true);
       try {
-        const err = await callRpc('deployment_complete', {
-          p_deployment_id: deploymentId,
-          p_deployed_sha: deployedSha.trim(),
-          p_notes: notes || null,
-          p_provider: providerRef?.trim() || null,
-        });
-        if (err) return err;
+        const { data, error: fetchErr } = await supabase
+          .from('internal_project_deployments')
+          .select('github_sha')
+          .eq('id', deploymentId)
+          .maybeSingle();
+        if (fetchErr) throw fetchErr;
+        if (!data) return 'Deployment record not found.';
+        if ((data.github_sha as string) !== deployedSha.trim()) {
+          return 'Deployed SHA does not match the approved SHA.';
+        }
+
+        const { error: e } = await supabase
+          .from('internal_project_deployments')
+          .update({
+            status: 'DEPLOYED',
+            deployed_sha: deployedSha.trim(),
+            completed_at: new Date().toISOString(),
+            notes: notes || null,
+            provider: providerRef?.trim() || null,
+          })
+          .eq('id', deploymentId);
+        if (e) throw e;
+
+        await logActivity('Deployment marked completed');
         await load();
         return null;
-      } catch (e: unknown) {
-        return e instanceof Error ? e.message : 'Failed to mark deployment completed.';
+      } catch (err: unknown) {
+        return err instanceof Error ? err.message : 'Failed to mark deployment completed.';
       } finally {
         setSaving(false);
       }
     },
-    [callRpc, load],
+    [load, logActivity],
   );
 
   const markFailed = useCallback(
-    async (deploymentId: string, reason: string, _activityAction = 'Deployment failed'): Promise<string | null> => {
+    async (deploymentId: string, reason: string, activityAction = 'Deployment failed'): Promise<string | null> => {
       setSaving(true);
       try {
-        const err = await callRpc('deployment_fail', {
-          p_deployment_id: deploymentId,
-          p_reason: reason || null,
-        });
-        if (err) return err;
+        const { error: e } = await supabase
+          .from('internal_project_deployments')
+          .update({
+            status: 'FAILED',
+            failed_at: new Date().toISOString(),
+            failure_reason: reason || null,
+          })
+          .eq('id', deploymentId);
+        if (e) throw e;
+
+        await logActivity(activityAction);
         await load();
         return null;
-      } catch (e: unknown) {
-        return e instanceof Error ? e.message : 'Failed to mark deployment as failed.';
+      } catch (err: unknown) {
+        return err instanceof Error ? err.message : 'Failed to mark deployment as failed.';
       } finally {
         setSaving(false);
       }
     },
-    [callRpc, load],
+    [load, logActivity],
   );
 
   const startVerification = useCallback(
     async (deploymentId: string): Promise<string | null> => {
       setSaving(true);
       try {
-        const err = await callRpc('deployment_start_verification', { p_deployment_id: deploymentId });
-        if (err) return err;
+        const { data, error: fetchErr } = await supabase
+          .from('internal_project_deployments')
+          .select('status')
+          .eq('id', deploymentId)
+          .maybeSingle();
+        if (fetchErr) throw fetchErr;
+        if (!data) return 'Deployment record not found.';
+        if (data.status !== 'DEPLOYED') return 'Verification can only start from a Deployed deployment.';
+
+        const { error: e } = await supabase
+          .from('internal_project_deployments')
+          .update({ status: 'VERIFYING', verifying_at: new Date().toISOString() })
+          .eq('id', deploymentId);
+        if (e) throw e;
+
+        await logActivity('Production verification started');
         await load();
         return null;
-      } catch (e: unknown) {
-        return e instanceof Error ? e.message : 'Failed to start verification.';
+      } catch (err: unknown) {
+        return err instanceof Error ? err.message : 'Failed to start verification.';
       } finally {
         setSaving(false);
       }
     },
-    [callRpc, load],
+    [load, logActivity],
   );
 
   const markVerified = useCallback(
-    async (deploymentId: string, snapshot: VerificationSnapshot): Promise<string | null> => {
+    async (deploymentId: string): Promise<string | null> => {
       setSaving(true);
       try {
-        const err = await callRpc('deployment_complete_verification', {
-          p_deployment_id: deploymentId,
-          p_snapshot: snapshot as unknown as Record<string, unknown>,
+        // Production verification is performed server-side by the deployment-verify
+        // Edge Function — the client never submits a PASS snapshot. The engine
+        // independently resolves all mandatory checks from authoritative telemetry.
+        const { data, error: fnErr } = await supabase.functions.invoke('deployment-verify', {
+          body: { deploymentId },
         });
-        if (err) return err;
+        if (fnErr) return fnErr.message || 'Failed to verify deployment.';
+        const code = data?.code;
+        if (code && code !== 'OK') return data?.message || code;
+
+        await logActivity('Deployment verified');
         await load();
         return null;
-      } catch (e: unknown) {
-        return e instanceof Error ? e.message : 'Failed to verify deployment.';
+      } catch (err: unknown) {
+        return err instanceof Error ? err.message : 'Failed to verify deployment.';
       } finally {
         setSaving(false);
       }
     },
-    [callRpc, load],
+    [load, logActivity],
   );
 
-  // ── Command 13C/18F: Production acceptance (atomic live transition) ──────
+  // ── Command 13C: Production acceptance ──────────────────────────────────
   const acceptProduction = useCallback(
     async (deploymentId: string, notes: string): Promise<string | null> => {
       setSaving(true);
       try {
-        const err = await callRpc('deployment_accept', {
+        // Acceptance is a deliberate owner/admin action gated by the deployment_accept
+        // RPC, which requires an authoritative server-generated verification snapshot.
+        const { error } = await supabase.rpc('deployment_accept', {
           p_deployment_id: deploymentId,
           p_notes: notes || null,
         });
-        if (err) return err;
-        // The server atomically flips an un-launched project to live. Refresh the
-        // parent project so its status reflects the server-side transition.
+        if (error) {
+          const msg = String(error?.message ?? '');
+          if (msg.includes('VERIFICATION_REQUIRED')) {
+            return 'Authoritative server verification is required before acceptance.';
+          }
+          if (msg.includes('ACCEPTANCE_NOT_ALLOWED')) {
+            return 'Acceptance requires a verified, unaccepted deployment with a matching SHA.';
+          }
+          return msg || 'Failed to accept production deployment.';
+        }
+
+        await logActivity('Production release accepted');
         onProjectChanged?.();
         await load();
         return null;
-      } catch (e: unknown) {
-        return e instanceof Error ? e.message : 'Failed to accept production deployment.';
+      } catch (err: unknown) {
+        return err instanceof Error ? err.message : 'Failed to accept production deployment.';
       } finally {
         setSaving(false);
       }
     },
-    [callRpc, load, onProjectChanged],
+    [load, logActivity, onProjectChanged],
   );
 
-  // ── Command 13C/18F: Rollback (target derived server-side) ───────────────
+  // ── Command 13C: Rollback ───────────────────────────────────────────────
   const startRollback = useCallback(
     async (input: StartRollbackInput): Promise<string | null> => {
+      if (!projectId) return 'Project is not available.';
       setSaving(true);
       try {
-        const err = await callRpc('deployment_start_rollback', {
-          p_failed_deployment_id: input.ofDeploymentId,
-          p_reason: input.reason,
+        const { data: existing } = await supabase
+          .from('internal_project_deployments')
+          .select('status')
+          .eq('project_id', projectId)
+          .eq('environment', 'production');
+        const hasActive = (existing ?? []).some((d) =>
+          blocksNewDeployment(d.status as ProjectDeployment['status']),
+        );
+        if (hasActive) return 'A production deployment or rollback is already in progress.';
+
+        let operator: string | null = null;
+        try {
+          const { data: u } = await supabase.auth.getUser();
+          operator = u.user?.id ?? null;
+        } catch {
+          operator = null;
+        }
+
+        const { error: e } = await supabase.from('internal_project_deployments').insert({
+          project_id: projectId,
+          launch_approval_id: input.launchApprovalId,
+          environment: 'production',
+          status: 'ROLLING_BACK',
+          github_sha: input.rollbackSha,
+          previous_production_sha: input.failedSha,
+          last_known_good_sha: input.lastKnownGoodSha,
+          deployment_method: input.deploymentMethod,
+          production_url: input.productionUrl,
+          rollback_of_deployment_id: input.ofDeploymentId,
+          rollback_sha: input.rollbackSha,
+          rollback_reason: input.reason,
+          started_at: new Date().toISOString(),
+          started_by: operator,
         });
-        if (err) return err;
+        if (e) throw e;
+
+        await logActivity('Rollback started');
         await load();
         return null;
-      } catch (e: unknown) {
-        return e instanceof Error ? e.message : 'Failed to start rollback.';
+      } catch (err: unknown) {
+        return err instanceof Error ? err.message : 'Failed to start rollback.';
       } finally {
         setSaving(false);
       }
     },
-    [callRpc, load],
+    [projectId, load, logActivity],
   );
 
   const enterRollbackDeployedSha = useCallback(
     async (deploymentId: string, sha: string): Promise<string | null> => {
       setSaving(true);
       try {
-        const err = await callRpc('deployment_enter_rollback_sha', {
-          p_deployment_id: deploymentId,
-          p_deployed_sha: sha.trim(),
-        });
-        if (err) return err;
+        const { data, error: fetchErr } = await supabase
+          .from('internal_project_deployments')
+          .select('status, rollback_sha')
+          .eq('id', deploymentId)
+          .maybeSingle();
+        if (fetchErr) throw fetchErr;
+        if (!data) return 'Rollback record not found.';
+        if (data.status !== 'ROLLING_BACK') return 'Rollback is not in progress.';
+        const target = data.rollback_sha as string | null;
+        if (!target) return 'No rollback target SHA recorded.';
+        if (sha.trim() !== target) return 'Deployed SHA does not match the rollback target SHA.';
+
+        const { error: e } = await supabase
+          .from('internal_project_deployments')
+          .update({ deployed_sha: sha.trim() })
+          .eq('id', deploymentId);
+        if (e) throw e;
+
+        await logActivity('Rollback deployed');
         await load();
         return null;
-      } catch (e: unknown) {
-        return e instanceof Error ? e.message : 'Failed to record rollback SHA.';
+      } catch (err: unknown) {
+        return err instanceof Error ? err.message : 'Failed to record rollback SHA.';
       } finally {
         setSaving(false);
       }
     },
-    [callRpc, load],
+    [load, logActivity],
   );
 
   const markRolledBack = useCallback(
     async (deploymentId: string, snapshot: VerificationSnapshot): Promise<string | null> => {
       setSaving(true);
       try {
-        const err = await callRpc('deployment_complete_rollback', {
-          p_deployment_id: deploymentId,
-          p_snapshot: snapshot as unknown as Record<string, unknown>,
-        });
-        if (err) return err;
+        const { data, error: fetchErr } = await supabase
+          .from('internal_project_deployments')
+          .select('status, rollback_sha, deployed_sha')
+          .eq('id', deploymentId)
+          .maybeSingle();
+        if (fetchErr) throw fetchErr;
+        if (!data) return 'Rollback record not found.';
+        if (data.status !== 'ROLLING_BACK') return 'Rollback is not in progress.';
+        if (!data.deployed_sha || !data.rollback_sha || data.deployed_sha !== data.rollback_sha) {
+          return 'Rollback can only complete when the deployed SHA matches the rollback target.';
+        }
+
+        let operator: string | null = null;
+        try {
+          const { data: u } = await supabase.auth.getUser();
+          operator = u.user?.id ?? null;
+        } catch {
+          operator = null;
+        }
+
+        const { error: e } = await supabase
+          .from('internal_project_deployments')
+          .update({
+            status: 'ROLLED_BACK',
+            rolled_back_at: new Date().toISOString(),
+            verified_at: new Date().toISOString(),
+            verified_by: operator,
+            verification_snapshot: snapshot,
+          })
+          .eq('id', deploymentId);
+        if (e) throw e;
+
+        await logActivity('Rollback completed');
         await load();
         return null;
-      } catch (e: unknown) {
-        return e instanceof Error ? e.message : 'Failed to complete rollback.';
+      } catch (err: unknown) {
+        return err instanceof Error ? err.message : 'Failed to complete rollback.';
       } finally {
         setSaving(false);
       }
     },
-    [callRpc, load],
+    [load, logActivity],
   );
 
   const active = deployments.find((d) => isActiveDeploymentStatus(d.status)) ?? null;

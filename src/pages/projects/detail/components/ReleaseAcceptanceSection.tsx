@@ -132,7 +132,13 @@ export default function ReleaseAcceptanceSection({
     setActionBusy(true);
     const err = await deployment.startRollback({
       ofDeploymentId: failedLatest.id,
+      launchApprovalId: failedLatest.launch_approval_id,
+      rollbackSha: rollbackTarget.sha,
+      failedSha: failedLatest.deployed_sha ?? failedLatest.github_sha,
       reason: rollbackReason,
+      productionUrl: failedLatest.production_url ?? evaluation.productionUrl,
+      deploymentMethod: failedLatest.deployment_method ?? evaluation.deploymentMethod,
+      lastKnownGoodSha: failedLatest.last_known_good_sha,
     });
     if (err) setActionError(err);
     else {

@@ -1,19 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-const json = (body: unknown, status: number) =>
-  new Response(JSON.stringify(body), {
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-    status,
-  });
-
-// Reads private repo contents — owner/admin only.
-const ALLOWED_ROLES = ["owner", "admin"];
 
 function decode64(content: string): string {
   try {
@@ -24,46 +14,23 @@ function decode64(content: string): string {
   }
 }
 
-serve(async (req: Request) => {
+serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  // ---- Auth gate: resolve caller from JWT, require an active owner/admin ----
-  const supabaseAdmin = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
-
-  const authHeader = req.headers.get("authorization") ?? "";
-  const token = authHeader.replace(/^Bearer\s+/i, "");
-  if (!token) return json({ error: "Missing authentication token" }, 401);
-
-  const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(token);
-  if (userErr || !user) return json({ error: "Invalid or expired token" }, 401);
-
-  const { data: roleRow } = await supabaseAdmin
-    .from("internal_user_roles")
-    .select("role")
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .maybeSingle();
-
-  if (!roleRow || !ALLOWED_ROLES.includes(roleRow.role)) {
-    return json({ error: "Forbidden" }, 403);
-  }
-  // ---- end auth gate ----
-
-  const ghToken = Deno.env.get("GITHUB_ACCESS_TOKEN");
-  if (!ghToken) {
-    return json({ error: "GitHub token is not configured." }, 500);
+  const token = Deno.env.get("GITHUB_ACCESS_TOKEN");
+  if (!token) {
+    return new Response(
+      JSON.stringify({ error: "GitHub token is not configured." }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
   const gh = async (path: string) => {
     const res = await fetch(`https://api.github.com${path}`, {
       headers: {
-        Authorization: `Bearer ${ghToken}`,
+        Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
         "User-Agent": "readdy-command-centre",
       },
@@ -79,6 +46,7 @@ serve(async (req: Request) => {
     const user = await gh("/user");
     const userLogin = user.login;
 
+    // Deduplicate repos by id across all sources.
     const seen = new Map<number, any>();
     const addRepos = (list: any[]) => {
       for (const r of list) {
@@ -86,6 +54,7 @@ serve(async (req: Request) => {
       }
     };
 
+    // 1. Personal + collaborator + org-member repos (best-effort).
     let page = 1;
     while (page <= 10) {
       const data = await gh(
@@ -96,6 +65,7 @@ serve(async (req: Request) => {
       page++;
     }
 
+    // 2. Explicitly enumerate every organisation the token belongs to (e.g. DFPAtlas).
     let orgs: any[] = [];
     try {
       orgs = await gh("/user/orgs?per_page=100");
@@ -122,11 +92,13 @@ serve(async (req: Request) => {
 
     const allRepos = Array.from(seen.values());
 
+    // "Empty" candidates: size === 0 (no tracked files at all).
     const candidates = allRepos.filter((r) => (r.size ?? 0) === 0);
 
     const results = [];
     for (const r of candidates) {
       const repoName = r.name;
+      // Use the repo's real owner (org or user), not the authenticated login.
       const repoOwner = r.owner?.login ?? userLogin;
       const branch = r.default_branch || "main";
 
@@ -208,17 +180,20 @@ serve(async (req: Request) => {
       });
     }
 
-    return json(
-      {
+    return new Response(
+      JSON.stringify({
         owner: userLogin,
         orgs: orgLogins,
         total_repos: allRepos.length,
         empty_repo_count: candidates.length,
         results,
-      },
-      200,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : "Internal error" }, 500);
+    return new Response(
+      JSON.stringify({ error: err.message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 });

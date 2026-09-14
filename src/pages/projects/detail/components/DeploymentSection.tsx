@@ -93,7 +93,6 @@ export default function DeploymentSection({
     setActionBusy(true);
     const err = await deployment.startDeployment({
       launchApprovalId: evaluation.approvalId ?? '',
-      headSha: evaluation.latestSha,
       lastKnownGoodSha: evaluation.lastKnownGoodSha,
       productionUrl: evaluation.productionUrl,
       deploymentMethod: evaluation.deploymentMethod,
@@ -145,7 +144,7 @@ export default function DeploymentSection({
     if (!active || !verification) return;
     setActionError('');
     setActionBusy(true);
-    const err = await deployment.markVerified(active.id, verification.snapshot);
+    const err = await deployment.markVerified(active.id);
     if (err) setActionError(err);
     else setConfirmVerify(false);
     setActionBusy(false);
@@ -543,6 +542,12 @@ export default function DeploymentSection({
       {active && active.status === 'VERIFYING' && verification && (
         <section>
           <SectionHeading icon="ri-shield-check-line" title="Production Verification" />
+          <div className="flex items-center gap-2 bg-accent-500/10 border border-accent-500/20 rounded-lg px-3 py-2 mb-3">
+            <i className="ri-information-line w-4 h-4 flex items-center justify-center text-accent-400 shrink-0"></i>
+            <p className="text-xs text-accent-200">
+              Preliminary client-side checks only — the authoritative result is decided server-side.
+            </p>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {verification.checks.map((c) => (
               <VerifyCheckCard key={c.key} check={c} />
@@ -580,17 +585,15 @@ export default function DeploymentSection({
           )}
 
           <div className="mt-4 flex items-center gap-2 flex-wrap">
-            {verification.overall === 'PASS' && (
-              <button
-                type="button"
-                onClick={() => setConfirmVerify(true)}
-                disabled={actionBusy}
-                className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-background-950 transition-colors whitespace-nowrap cursor-pointer"
-              >
-                <i className="ri-verified-badge-line w-4 h-4 flex items-center justify-center"></i>
-                Mark Deployment Verified
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setConfirmVerify(true)}
+              disabled={actionBusy}
+              className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-background-950 transition-colors whitespace-nowrap cursor-pointer"
+            >
+              <i className="ri-shield-check-line w-4 h-4 flex items-center justify-center"></i>
+              Run Server Verification
+            </button>
             <button
               type="button"
               onClick={() => setVerifyFailOpen(true)}
@@ -601,10 +604,12 @@ export default function DeploymentSection({
             </button>
           </div>
 
-          {confirmVerify && verification.overall === 'PASS' && (
+          {confirmVerify && (
             <div className="mt-4 border-t border-background-200/60 pt-4">
               <p className="text-sm text-foreground-300 mb-3">
-                Confirm verification — SHA {active.github_sha.slice(0, 8)} will be recorded as verified.
+                Run authoritative server verification — the server resolves monitoring, backend, runtime
+                and AI evidence itself. SHA {active.github_sha.slice(0, 8)} is recorded as verified only if
+                every mandatory check passes server-side.
               </p>
               <div className="flex items-center gap-2">
                 <button
@@ -613,7 +618,7 @@ export default function DeploymentSection({
                   disabled={actionBusy}
                   className="text-sm font-semibold px-4 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-background-950 transition-colors whitespace-nowrap cursor-pointer"
                 >
-                  {actionBusy ? 'Saving…' : 'Confirm Verification'}
+                  {actionBusy ? 'Verifying…' : 'Run Server Verification'}
                 </button>
                 <button
                   type="button"

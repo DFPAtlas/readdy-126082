@@ -1,288 +1,115 @@
-# DFP Command — Product Charter
-
-> **Document:** DFP Command Product Charter
-> **Status:** Canonical
-> **Last Updated:** 2026-09-14
-> **Build Baseline:** DFP-COMMAND-17A
-
----
-
-## 1. What DFP Command is
-
-**DFP Command is Digital Footprint's internal operating system for managing its
-entire project portfolio** — from initial idea through planning, development, AI
-operations, testing, deployment, monitoring, support, commercial operation and
-continuous improvement.
-
-DFP Command is **not**:
-
-- a public consumer application;
-- a security-guard management application;
-- a consumer "digital footprint" / privacy-scoring product.
-
-Individual sites such as **QuickGuard**, **GuardianHub**, **LetHub**,
-**BuildNerve**, **Vowora**, **GarageFlow**, **Forge**, **SiteLedger** and others
-are **managed projects inside DFP Command** — they are not the definition of DFP
-Command itself. The canonical architectural centre is the **Digital Footprint
-project portfolio**, not any single managed site.
-
----
-
-## 2. Canonical project entity
-
-`internal_projects` is the canonical root entity for a Digital Footprint
-project. Every project-aware module relates back to `internal_projects.id`
-(never by project name):
-
-Build · GitHub/Readdy · Infrastructure · AI Site · UAT · Bugs · Change
-Requests · Budget · Support · Monitoring · Launch · Deployment · Operations ·
-Activity.
-
-`internal_projects` is **platform-managed** (created outside the migration
-files) and is treated as the source of truth for project identity. Project-name
-based relationships are discouraged.
-
----
-
-## 3. Project lifecycle
-
-Intended lifecycle:
-
-```
-Idea → Project Created → Planning → Build → AI / Integrations → Development
-→ UAT → Bugs / Changes → Launch Readiness → Launch Approval → Deployment
-→ Production Verification → Live → Operations → Maintenance → Continuous Improvement
-```
-
-Each subsystem (Build, UAT, Bugs, Budget, Monitoring, Launch, Deployment, AI
-Operations) remains its **own source of truth**; DFP Command **aggregates** them
-around the canonical project. DFP Command does not duplicate or overwrite
-subsystem records.
-
----
-
-## 4. Core product areas
-
-**PORTFOLIO** — Projects, Roadmap, Ideas, Executive Dashboard.
-
-**BUILD** — Build Process, Bugs, Change Requests, UAT, Launch Control,
-Deployment.
-
-**AI OPERATIONS** — Sites, Agents, Runs, Approvals, Orchestrator, Tools, Models,
-Knowledge, Security, Alerts, Runtime Health.
-
-**OPERATIONS** — Monitoring, Infrastructure, Support, Incidents, Wallboard,
-Operations, Maintenance.
-
-**BUSINESS** — Budgets, Costs, Revenue, Commercial Position, Team, Reports.
-
----
-
-## 5. Project Command Centre
-
-`/projects/:slug` is the central project operating workspace. Its implemented
-sections are:
-
-Overview · Build · GitHub · Infrastructure · AI Ops · UAT · Bugs · Changes ·
-Budget · Support · Monitoring · Launch · Deployment · Operations · Activity ·
-Files.
-
----
-
-## 6. Global vs project views
-
-Architectural rule:
-
-- **Global module pages remain portfolio/fleet-wide.**
-- **Project Command Centre pages are filtered project views.**
-
-Examples:
-
-| Global view | Project view |
-| --- | --- |
-| Global AI Operations — all sites / agents / runtimes | Project AI Ops — selected project's AI state |
-| Global Budget — portfolio finance | Project Budget — selected project's finance |
-| Global Support — all tickets | Project Support — selected project's support |
-
-Do not rebuild duplicate subsystem engines inside Project Detail; the Command
-Centre consumes the same canonical data scoped to one project.
-
----
-
-## 7. Project integration model
-
-`internal_project_integrations` is the canonical integration/configuration
-record (one primary record per project, related via `project_id →
-internal_projects.id`). It holds identifiers/configuration for:
-
-GitHub · Readdy · Supabase · Hosting · DNS · Runtime · Monitoring.
-
-Important distinctions:
-
-- **configuration ≠ connection**
-- **configuration ≠ verification**
-- **configuration ≠ health**
-
-AI site ownership remains canonical through the AI Operations relationship (an
-AI site record carries its `internal_project_id`); it is not duplicated into the
-integration record.
-
----
-
-## 8. Status model
-
-Shared status semantics (introduced in 16B):
-
-| Status | Meaning |
-| --- | --- |
-| `CONFIGURED` | Configuration fields are populated. Says nothing about connectivity or health. |
-| `CONNECTED` | A genuine connection/verification exists. |
-| `VERIFIED` | Connection has been actively confirmed. |
-| `HEALTHY` | Live telemetry reports a healthy state. |
-| `DEGRADED` | Live telemetry reports degraded but functional. |
-| `CRITICAL` | Live telemetry reports a critical condition. |
-| `OFFLINE` | A configured/runtime target is not reachable. |
-| `STALE` | Cached/last-known telemetry has exceeded its freshness threshold. |
-| `UNAVAILABLE` | The required source could not be loaded. |
-| `UNKNOWN` | No authoritative source exists to determine state. |
-| `NOT CONFIGURED` | No configuration has been provided. |
-| `NOT REQUIRED` | The subsystem is not applicable to this project. |
-
-Invariants:
-
-- No data must never default to `HEALTHY`.
-- A failed query must never become "zero alerts" — it is `UNAVAILABLE`.
-- `CONFIGURED` must never automatically mean `CONNECTED`.
-
----
-
-## 9. Data provenance
-
-DFP Command distinguishes four provenance classes:
-
-- **Live Data** — current authoritative source (e.g. runtime telemetry).
-- **Configured Data** — registry/planned/metadata (e.g. site registry).
-- **Demo / Supporting Metadata** — clearly labelled placeholder.
-- **Unknown** — no authoritative source exists.
-
-Demo/supporting metadata must never be presented as live telemetry. This is
-especially important in AI Operations (see
-`docs/operations-wall-data-provenance.md` for the full per-value provenance
-record of the Operations Wall).
-
----
-
-## 10. GitHub / Readdy safety
-
-These actions are **not equivalent sync operations**:
-
-- **Readdy → GitHub Push** may replace the contents of the repository main
-  branch. Before a significant push: confirm the repository, record the current
-  SHA, preserve a rollback point, and confirm no external work will be lost.
-- **GitHub → Readdy Pull** creates a new Readdy version snapshot.
-
----
-
-## 11. Launch safety
-
-Intended launch control chain:
-
-```
-Build Ready → UAT Approved → Critical Bugs Clear → Commercial Blockers Clear
-→ Infrastructure Ready → Monitoring Ready → Launch Approval → Approved SHA Locked
-→ Deployment → Production Verification → Production Acceptance → Live
-```
-
-Distinct steps that must not be conflated:
-
-- **Launch Approval is not Deployment.**
-- **Deployment is not Verification.**
-- **Verification is not Production Acceptance.**
-
----
-
-## 12. Deployment safety
-
-- Deployment must use the approved SHA.
-- Code changes after approval require re-evaluation.
-- Failed deployments remain in history.
-- Rollback redeploys known-good code; it must **never** rewrite Git history.
-- A project becomes `Live` only after production verification and acceptance.
-
----
-
-## 13. Runtime architecture
-
-DFP Command is the **control/visibility layer** over runtime nodes. Runtime
-nodes may include **HAL** (`atlas-hal-runtime-01`), **TRON**
-(`atlas-tron-runtime-01`), and other future runtimes.
-
-- Runtime health comes from **real telemetry** (heartbeats), never from registry
-  presence alone.
-- A node that exists in a registry but has no telemetry is `Not Registered` /
-  `Unknown`, not `Online`.
-- Destructive runtime controls are documented only where actually implemented
-  and protected.
-
----
-
-## 14. AI Operations architecture
-
-```
-Project → AI Site → Master Agent → Sub-agents → Runs → Approvals → Runtime → Alerts
-```
-
-- **Global AI Operations** remains fleet-wide (all sites / agents / runtimes).
-- **Project AI Operations** is the filtered project view of that state.
-
----
-
-## 15. Security principles
-
-- RLS remains enforced on project/integration/workstream tables.
-- Privileged actions stay server-side (Edge Functions).
-- Secrets must not be stored in integration records (identifiers/configuration
-  only).
-- No service-role keys in the browser.
-- No API tokens in activity logs.
-- Destructive actions require authorization and audit.
-- Read-only operational views must not bypass source permissions.
-
----
-
-## 16. Source of truth table
-
-| Concern | Canonical table |
-| --- | --- |
-| Project identity | `internal_projects` (platform-managed) |
-| Project integrations | `internal_project_integrations` |
-| Build | `internal_build_process_runs` / `internal_build_process_run_items` |
-| Bugs | `internal_bugs` |
-| Changes | `internal_change_requests` |
-| Budget | `internal_project_budgets` (+ cost / recurring-cost tables) |
-| Activity | `internal_activity_log` |
-| UAT | `uat_*` tables |
-| AI | `ai_sites` + `ai_operations_*` registry tables |
-| Deployments | `internal_project_deployments` |
-| Maintenance | `internal_project_maintenance` |
-| Reviews | `internal_project_reviews` |
-| Monitoring | `internal_monitored_websites` (+ monitoring tables) |
-| Support | `internal_support_tickets` (+ `support_*` tables) |
-
----
-
-## 17. Documentation truth rule
-
-Documentation describes **implemented reality**. If a feature is planned but not
-built, label it **Planned**. Do not write planned features as if they already
-exist.
-
----
-
-## 18. AI / coding agent guidance
-
-Never redesign DFP Command around a single managed site. QuickGuard,
-GuardianHub, LetHub, BuildNerve, Vowora, GarageFlow and other products are
-**managed projects**, not the definition of DFP Command. The canonical
-architectural centre is the **Digital Footprint project portfolio**, keyed by
-`internal_projects.id`.
+# Digital Footprint Command Centre
+
+## 1. Project Description
+A centralized dashboard where users can monitor, analyze, and manage their digital footprint across various online platforms. Users log in to see an overview of their online presence, privacy scores, data exposure, and platform-specific insights. Think of it as a mission control for your digital life.
+
+- **Target users**: Privacy-conscious individuals, professionals managing their online reputation
+- **Core value**: One unified view of where your data lives online, with actionable insights to take control
+
+## 2. Page Structure
+- `/` - Public landing page (product overview, value proposition, CTA to sign up)
+- `/login` - Login page
+- `/signup` - Registration page
+- `/dashboard` - Main dashboard (protected, requires auth)
+- `/dashboard/platform/:id` - Platform detail view (deep dive into a specific platform's footprint)
+- `/dashboard/privacy-scan` - Privacy scan & recommendations
+- `/dashboard/settings` - User settings & preferences
+
+## 3. Core Features
+- [x] User authentication UI (login / signup pages) — real auth pending Supabase connection
+- [x] Public landing page with product value proposition
+- [ ] Main dashboard with digital footprint overview
+- [ ] Privacy score visualization and metrics
+- [ ] Platform-by-platform footprint breakdown
+- [ ] Privacy scan with actionable recommendations
+- [ ] User settings and profile management
+
+## 4. Data Model Design
+(Supabase database needed)
+
+### Table: profiles
+| Field | Type | Description |
+|-------|------|-------------|
+| id | uuid | Primary key, linked to auth.users |
+| full_name | text | User's display name |
+| avatar_url | text | Profile avatar URL |
+| privacy_score | integer | Overall privacy score (0-100) |
+| connected_platforms | integer | Number of monitored platforms |
+| created_at | timestamptz | Account creation time |
+| updated_at | timestamptz | Last update time |
+
+### Table: platforms
+| Field | Type | Description |
+|-------|------|-------------|
+| id | uuid | Primary key |
+| user_id | uuid | FK to profiles |
+| platform_name | text | e.g. Google, Facebook, Instagram |
+| platform_icon | text | Icon identifier |
+| risk_level | text | low / medium / high |
+| data_points | integer | Number of data points tracked |
+| last_scan | timestamptz | Last scan timestamp |
+| status | text | active / warning / critical |
+
+### Table: privacy_scans
+| Field | Type | Description |
+|-------|------|-------------|
+| id | uuid | Primary key |
+| user_id | uuid | FK to profiles |
+| scan_date | timestamptz | When scan ran |
+| overall_score | integer | Overall privacy score |
+| vulnerabilities | integer | Issues found |
+| recommendations | jsonb | List of recommendations |
+
+## 5. Backend / Third-party Integration Plan
+- **Supabase**: Required for user authentication, database, and edge functions
+
+## 6. Development Phase Plan
+
+### Phase 1: Public Landing Page + Auth Pages ✅ COMPLETED
+- Goal: Set up the public-facing landing page and login/signup UI
+- Deliverable: Beautiful dark-themed landing page with 7 sections (Hero, About, Features, Platforms, Testimonials, CTA, Footer), login page, signup page with mock auth flow
+
+### Phase 2: Main Dashboard Overview
+- Goal: Build the post-login dashboard with key metrics and footprint overview
+- Deliverable: Full dashboard with privacy score, platform cards, charts, and navigation
+- Requires: Supabase connection for real auth + data
+
+### Phase 3: Platform Detail & Privacy Scan
+- Goal: Deep-dive platform views and privacy scan feature
+- Deliverable: Platform detail page, privacy scan page with recommendations
+
+### Phase 4: User Settings & Polish
+- Goal: Settings page, profile management, final polish
+- Deliverable: Settings page, animations, final refinements
+
+## 7. Website UAT & Change Control ✅ COMPLETED
+- **Main page**: `/admin/website-uat` — Dashboard with summary cards and 7 tabs
+- **Database**: 10 new tables (internal_websites, internal_website_changes, internal_page_reviews, internal_page_review_items, internal_links, internal_image_changes, internal_uat_test_runs, internal_uat_test_items, internal_approval_queue, internal_deployment_readiness)
+- **Tab 1 - Website Register**: Add/manage websites with live/staging URLs, status, owner, project linking
+- **Tab 2 - Website Changes**: Full CRUD change request system with before/after fields, copy-to-Readdy-prompt, filters
+- **Tab 3 - Page Review**: 21-item checklist per page review with pass/fail/NA/needs_review
+- **Tab 4 - Link Checker**: Manual link tracking with broken-to-top sorting, one-click mark working/broken
+- **Tab 5 - Image Manager**: Side-by-side current/new image display, alt text, copy prompt button
+- **Tab 6 - UAT Test Runs**: Test runs with items, pass/fail/severity, copy fix prompt for failures
+- **Tab 7 - Approval Queue**: Approve/reject/send-back workflow, deployment readiness score cards per website
+- **Sidebar**: New "Website UAT & Changes" section with 7 nav items
+- **Seeded**: 5 websites, 12 changes, 8 page reviews with items, 15 links, 5 image changes, 5 UAT test runs with items, 6 approval queue items, 5 deployment readiness records
+
+## 8. AI Operations — Group Agent Network (Prompt 01) ✅ COMPLETED
+- **Route**: `/ai-operations` overview — redesigned as a visual control centre for all Digital Footprint sites.
+- **Centre**: DFP Group Oversight / Atlas Tron (group orchestrator) + TRON oversight + HAL execution-host status (runtime connectivity kept separate from confirmed oversight activity).
+- **First ring**: one manager position per site in the Group Site Registry (site-scoped orchestration agents); missing/duplicate managers surfaced honestly (never silently collapsed).
+- **Second ring**: clicking a site fans its sub-agents outward (site membership, not a verified execution dependency); shared/group agents stay in a separate expandable inner group.
+- **Data**: reuses the shared group live-data store, saved wall-widget config (name/initials/colour), and runtime-health store — no new registry, no per-card polling. The Forge uses `the-forge` / `TF`; no hard-coded site list.
+- **Controls**: site/host/status filters, agent search, Diagram/List toggle, expand/collapse all, zoom/pan/fit/reset; agent-selection details panel links into existing agent/site detail pages.
+- **Honesty**: edges animate only on fresh `working` run evidence; missing data never becomes a green state or fabricated zero; respects prefers-reduced-motion.
+- **Files**: `src/pages/ai-operations/network/*` (selectors, diagram, list, detail panel, styles) + `src/pages/ai-operations/page.tsx`.
+
+## 9. AI Operations — Agent Deployment Subpage (Prompt 03) ✅ COMPLETED
+- **Route**: `/ai-operations/agent-deployment` — group-wide agent setup + deployment-readiness workflow (sidebar nav + overview "Deploy Agent" button).
+- **List**: every registered agent as a saved setup — role (site manager / sub-agent / shared), site, parent manager, runtime + workflow mapping, setup stage, last validation result, with Continue setup / View agent actions.
+- **Wizard (6 steps)**: Identity & site (template picker incl. LetHub-only templates) → Manager assignment (same-site, cycle/self/cross-site blocked, duplicate managers flagged) → Runtime & workflow (registered runtime node + approved n8n workflow) → Permissions & schedule (read-only supervision default) → Validate (connection validation vs dispatch preview vs test execution kept distinct) → Review & finish.
+- **Templates**: Blank for any site; 12 optional LetHub draft templates (definitions only — never auto-created).
+- **Persistence**: minimal extension to `ai_operations_agents` (parent_agent_id, workflow_id, runtime_reference, responsibility, setup_stage, last_validated_at/result, deployment_status, approval_required, data_scope) + self-parent CHECK + cycle/cross-site BEFORE trigger; reuses existing owner/admin RLS. Drafts persist to Supabase (never localStorage) and reopen after refresh.
+- **Honesty**: there is NO "deployed" status — activation is not connected ("Ready for deployment — activation not connected"); saving never starts a workflow or alters a runtime gate.
+- **Files**: `src/pages/ai-operations/agent-deployment/*`, `supabase/migrations/202609240000_ai_agent_deployment.sql`.
