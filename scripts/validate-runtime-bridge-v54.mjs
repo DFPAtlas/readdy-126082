@@ -8,6 +8,7 @@ const envExample = read("runtime-bridge/.env.example");
 const service = read("runtime-bridge/deploy/systemd/dfp-runtime-bridge@.service");
 const watchdog = read("runtime-bridge/deploy/systemd/watchdog.sh");
 const watchdogService = read("runtime-bridge/deploy/systemd/dfp-runtime-bridge-watchdog@.service");
+const watchdogTimer = read("runtime-bridge/deploy/systemd/dfp-runtime-bridge-watchdog@.timer");
 const config = read("supabase/config.toml");
 const migration = read("supabase/migrations/20260921100000_runtime_bridge_v54_identities.sql");
 const activation = read("ops/runtime-bridge-v54/activate.sql");
@@ -76,12 +77,17 @@ for (let index = 0; index < clientLines.length; index += 1) {
 assert.match(envExample, /^DFP_BRIDGE_IDENTITY=$/m);
 assert.doesNotMatch(envExample, /DFP_BRIDGE_SIGNING_SECRET=\S+/);
 assert.match(service, /Restart=on-failure/);
+assert.match(service, /RestartSec=1/);
+assert.match(service, /TimeoutStopSec=2/);
 assert.match(service, /--allow-write=\/run\/dfp-runtime-bridge\/%i\.alive/);
 assert.match(watchdog, /date \+%s/);
 assert.match(watchdog, /stat -c %Y/);
 assert.match(watchdog, /systemctl try-restart/);
 assert.doesNotMatch(watchdog, /nanosecond|%N/i);
-assert.match(watchdogService, /DFP_BRIDGE_WATCHDOG_MAX_AGE_SECONDS=30/);
+assert.match(envExample, /DFP_BRIDGE_LIVENESS_INTERVAL_SECONDS=1/);
+assert.match(watchdogService, /DFP_BRIDGE_WATCHDOG_MAX_AGE_SECONDS=3/);
+assert.match(watchdogTimer, /OnUnitActiveSec=1s/);
+assert.match(watchdogTimer, /AccuracySec=100ms/);
 
 assert.match(config, /\[functions\.runtime-bridge\][\s\S]*verify_jwt\s*=\s*false/);
 assert.match(migration, /'dfp-runtime-hal'[\s\S]*'blocked'[\s\S]*false/);

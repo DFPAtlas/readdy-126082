@@ -2,9 +2,9 @@
 Description=Schedule DFP runtime bridge liveness checks (%i)
 
 [Timer]
-OnBootSec=45s
-OnUnitActiveSec=15s
-AccuracySec=1s
+OnBootSec=5s
+OnUnitActiveSec=1s
+AccuracySec=100ms
 Unit=dfp-runtime-bridge-watchdog@%i.service
 Persistent=false
 

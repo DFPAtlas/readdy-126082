@@ -5,6 +5,6 @@ After=dfp-runtime-bridge@%i.service
 [Service]
 Type=oneshot
 Environment=DFP_BRIDGE_LIVENESS_FILE=/run/dfp-runtime-bridge/%i.alive
-Environment=DFP_BRIDGE_WATCHDOG_MAX_AGE_SECONDS=30
+Environment=DFP_BRIDGE_WATCHDOG_MAX_AGE_SECONDS=3
 EnvironmentFile=-/etc/dfp/runtime-bridge/%i.env
 ExecStart=/bin/sh /opt/dfp/runtime-bridge/deploy/systemd/watchdog.sh dfp-runtime-bridge@%i.service

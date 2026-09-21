@@ -18,8 +18,8 @@ RuntimeDirectoryMode=0750
 CacheDirectory=dfp-runtime-bridge
 ExecStart=/usr/local/bin/deno run --allow-env --allow-net --allow-sys=cpus,systemMemoryInfo --allow-write=/run/dfp-runtime-bridge/%i.alive /opt/dfp/runtime-bridge/src/main.ts
 Restart=on-failure
-RestartSec=5
-TimeoutStopSec=20
+RestartSec=1
+TimeoutStopSec=2
 KillSignal=SIGTERM
 
 NoNewPrivileges=true
