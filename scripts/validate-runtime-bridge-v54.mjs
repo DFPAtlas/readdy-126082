@@ -11,6 +11,7 @@ const watchdogService = read("runtime-bridge/deploy/systemd/dfp-runtime-bridge-w
 const config = read("supabase/config.toml");
 const migration = read("supabase/migrations/20260921100000_runtime_bridge_v54_identities.sql");
 const activation = read("ops/runtime-bridge-v54/activate.sql");
+const resilienceRls = read("supabase/migrations/20260921113000_runtime_resilience_rls_hardening.sql");
 
 const requiredSource = [
   'idRow.status === "active"',
@@ -90,6 +91,10 @@ assert.match(migration, /execution_enabled = false/);
 assert.match(activation, /service_identity_id = target_identity_id/);
 assert.match(activation, /execution_enabled = false/);
 assert.match(activation, /status = 'active'/);
+assert.match(resilienceRls, /internal_role_aal2\(\) is not null/i);
+assert.match(resilienceRls, /revoke insert, update, delete on public\.runtime_resilience_nodes from authenticated/i);
+assert.match(resilienceRls, /revoke insert, update, delete on public\.runtime_recovery_events from authenticated/i);
+assert.doesNotMatch(resilienceRls, /for (insert|update|delete)[\s\S]*to authenticated/i);
 
 for (const forbiddenSql of [
   /execution_enabled\s*=\s*true/i,
