@@ -1,15 +1,5 @@
-// runtime-bridge v54 hardening candidate.
-// Snapshot source: deployed v53 retrieved 2026-09-21.
-// Gateway JWT verification is intentionally disabled in supabase/config.toml because
-// HAL/TRON authenticate with HMAC service identities. This handler MUST remain
-// fail-closed on identity status, expiry, operation allowlist, and node binding.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-// Generated database types are not present in this Readdy repository. Keep the
-// helper boundary structural so current supabase-js releases do not infer every
-// table row as never. Query/result validation remains explicit in the handler.
-type AdminClient = { from(table: string): any };
 
 // ============================================================================
 // runtime-bridge — secure OUTBOUND-FIRST private-runtime bridge API for DFP AI
@@ -23,8 +13,9 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+const SIGNING_SECRET_NAME = "DFP_RUNTIME_BRIDGE_SIGNING_KEY";
+const IDENTITY_KEY = "dfp-local-runtime-bridge";
 const IDENTITY_TYPE = "internal_runtime";
-const ACTOR_REFERENCE = "runtime_bridge_service";
 const SOURCE_SYSTEM = "dfp_runtime_bridge";
 const SIGNATURE_VERSION = "v1";
 const TIMESTAMP_WINDOW_MS = 5 * 60_000; // ±5 minutes
@@ -267,7 +258,7 @@ function mapRuntimeFailureCategory(cat: string | null): string {
 }
 
 async function auditEvent(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
   eventType: string,
   outcome: string,
   severity: string,
@@ -282,7 +273,7 @@ async function auditEvent(
     outcome,
     severity,
     actor_type: "system",
-    actor_reference: ACTOR_REFERENCE,
+    actor_reference: IDENTITY_KEY,
     trigger_source: "machine",
     environment: "production",
     notes,
@@ -291,7 +282,7 @@ async function auditEvent(
 }
 
 async function resolveEmergencyFreeze(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
 ): Promise<boolean> {
   const { data } = await admin
     .from("ai_runtime_controls")
@@ -303,7 +294,7 @@ async function resolveEmergencyFreeze(
 }
 
 async function recordFreezeLateResultIfInflight(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
   origPayload: Record<string, unknown>,
   correlationId: string | null,
   probeKey: string,
@@ -344,7 +335,7 @@ function normaliseModelName(s: string): string {
 }
 
 async function compareCatalogueToRegistry(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
   models: Record<string, unknown>[],
 ): Promise<{ present: number; missing: number; unregistered: number }> {
   const { data: regRows } = await admin
@@ -393,7 +384,7 @@ async function compareCatalogueToRegistry(
 }
 
 async function validateDiagnosticAgentAndModel(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
 ): Promise<{ ok: boolean; detail: string | null }> {
   const { data: agentRows } = await admin
     .from("ai_operations_agents")
@@ -433,7 +424,7 @@ async function validateDiagnosticAgentAndModel(
 }
 
 async function validateReadonlyToolGrant(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
 ): Promise<{ ok: boolean; detail: string | null }> {
   const { data: agentRows } = await admin
     .from("ai_operations_agents")
@@ -472,7 +463,7 @@ async function validateReadonlyToolGrant(
 }
 
 async function validateApprovalGatedApproval(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
   runReference: string,
   approvalReference: string,
   taskReference: string,
@@ -540,7 +531,7 @@ async function validateApprovalGatedApproval(
 }
 
 async function appendLateResultIncidentTimeline(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
   correlationId: string | null,
   runKey: string,
 ): Promise<void> {
@@ -559,7 +550,7 @@ async function appendLateResultIncidentTimeline(
     event_type: "late_result_received",
     previous_status: str(incident.status),
     new_status: str(incident.status),
-    actor_reference: ACTOR_REFERENCE,
+    actor_reference: IDENTITY_KEY,
     actor_role: "system",
     summary: `A valid signed result arrived after timeout for run ${runKey}. Evidence recorded; run remains failed. Incident not auto-resolved.`,
     created_at: new Date().toISOString(),
@@ -567,7 +558,7 @@ async function appendLateResultIncidentTimeline(
 }
 
 async function handleTerminalResult(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
   run: Record<string, unknown>,
   corr: string | null,
   runKey: string,
@@ -598,7 +589,7 @@ async function handleTerminalResult(
 }
 
 async function ensureRuntimeFailureIncident(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
   e: {
     failureCategory: string;
     runKey: string;
@@ -687,7 +678,7 @@ async function ensureRuntimeFailureIncident(
     event_type: "runtime_dispatched",
     previous_status: null,
     new_status: "new",
-    actor_reference: ACTOR_REFERENCE,
+    actor_reference: IDENTITY_KEY,
     actor_role: "system",
     summary: `Runtime diagnostic failure incident opened for run ${e.runKey || "n/a"} (${e.failureCategory}).`,
     created_at: nowIso,
@@ -697,7 +688,7 @@ async function ensureRuntimeFailureIncident(
     event_type: "runtime_result_failed",
     previous_status: "new",
     new_status: "new",
-    actor_reference: ACTOR_REFERENCE,
+    actor_reference: IDENTITY_KEY,
     actor_role: "system",
     summary: `Failure category ${e.failureCategory} recorded for run ${e.runKey || "n/a"}. No retry, no duplicate execution.`,
     created_at: nowIso,
@@ -711,7 +702,7 @@ async function ensureRuntimeFailureIncident(
 }
 
 async function finalizeDiagnosticRun(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
   runKey: string,
   verified: boolean,
   result: {
@@ -815,7 +806,7 @@ async function finalizeDiagnosticRun(
 }
 
 async function finalizeApprovalGatedRun(
-  admin: AdminClient,
+  admin: ReturnType<typeof createClient>,
   runReference: string,
   approvalReference: string,
   verified: boolean,
@@ -930,7 +921,7 @@ async function finalizeApprovalGatedRun(
         previous_status: str(app.status),
         new_status: "completed",
         decision: null,
-        actor_reference: ACTOR_REFERENCE,
+        actor_reference: IDENTITY_KEY,
         actor_role: "system",
         reason: verified
           ? "Approval consumed after a verified signed result."
@@ -976,6 +967,11 @@ serve(async (req: Request) => {
   const sigVersion = (req.headers.get("x-dfp-signature-version") ?? "").trim();
   const signature = (req.headers.get("x-dfp-signature") ?? "").trim();
 
+  const signingSecret = (Deno.env.get(SIGNING_SECRET_NAME) ?? "").trim();
+  if (!signingSecret) {
+    return json({ error: "configuration_missing" }, 503);
+  }
+
   if (sigVersion !== SIGNATURE_VERSION) {
     return json({ error: "invalid_message", detail: "unknown_signature_version" }, 400);
   }
@@ -985,91 +981,39 @@ serve(async (req: Request) => {
     return json({ error: "stale_timestamp" }, 401);
   }
 
-  const admin = createClient(supabaseUrl, serviceKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-
-  const { data: idRows, error: identityLookupError } = await admin
-    .from("ai_runtime_service_identities")
-    .select("id, identity_key, identity_type, environment, credential_reference, status, is_active, allowed_request_types, expires_at")
-    .eq("identity_key", identity)
-    .limit(1);
-  const idRow = idRows && idRows.length > 0 ? idRows[0] : null;
-
-  if (identityLookupError || !idRow) {
-    return json({ error: "unknown_identity" }, 403);
-  }
-
-  const identityExpired =
-    typeof idRow.expires_at === "string" &&
-    Number.isFinite(new Date(idRow.expires_at).getTime()) &&
-    new Date(idRow.expires_at).getTime() <= Date.now();
-  const identityEnabled =
-    idRow.identity_type === IDENTITY_TYPE &&
-    idRow.status === "active" &&
-    idRow.is_active === true &&
-    !identityExpired;
-
-  if (!identityEnabled) {
-    await auditEvent(
-      admin,
-      "runtime_bridge_identity_blocked",
-      "blocked",
-      "high",
-      `Blocked runtime bridge authentication for disabled or expired identity ${identity}.`,
-    );
-    return json({ error: "identity_disabled" }, 403);
-  }
-
-  const signingSecretName =
-    typeof idRow.credential_reference === "string" ? idRow.credential_reference.trim() : "";
-  const signingSecret = signingSecretName
-    ? (Deno.env.get(signingSecretName) ?? "").trim()
-    : "";
-  if (!signingSecret) {
-    await auditEvent(
-      admin,
-      "runtime_bridge_identity_secret_missing",
-      "failed",
-      "high",
-      `Runtime bridge credential is unavailable for identity ${identity}.`,
-    );
-    return json({ error: "configuration_missing" }, 503);
-  }
-
   const payloadHash = await sha256Hex(rawBody);
   const method = "POST";
   const path = new URL(req.url).pathname;
   const canonical = `${identity}\n${timestamp}\n${nonce}\n${method}\n${path}\n${payloadHash}`;
   const expected = await hmacSha256Hex(signingSecret, canonical);
-  const signatureOk =
-    Boolean(identity && nonce && signature) &&
-    timingSafeEqual(expected.toLowerCase(), signature.toLowerCase());
+  const signatureOk = identity && nonce && timingSafeEqual(expected.toLowerCase(), signature.toLowerCase());
 
   if (!signatureOk) {
-    await auditEvent(
-      admin,
-      "runtime_bridge_signature_rejected",
-      "blocked",
-      "high",
-      `Rejected invalid runtime bridge signature for identity ${identity}.`,
-    );
     return json({ error: "invalid_signature" }, 401);
   }
 
+  const admin = createClient(supabaseUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+
+  const { data: idRows } = await admin
+    .from("ai_runtime_service_identities")
+    .select("id, identity_key, identity_type, environment, credential_reference")
+    .eq("identity_key", identity)
+    .limit(1);
+  const idRow = idRows && idRows.length > 0 ? idRows[0] : null;
+
+  const identityValid =
+    idRow &&
+    idRow.identity_key === IDENTITY_KEY &&
+    idRow.identity_type === IDENTITY_TYPE &&
+    idRow.credential_reference === SIGNING_SECRET_NAME;
+
+  if (!identityValid) {
+    return json({ error: "unknown_identity" }, 403);
+  }
+
   const operation = str(body.operation);
-  const identityOperations = Array.isArray(idRow.allowed_request_types)
-    ? idRow.allowed_request_types.filter((value: unknown): value is string => typeof value === "string")
-    : [];
-  if (!ALLOWED_OPERATIONS.has(operation) || !identityOperations.includes(operation)) {
-    await auditEvent(
-      admin,
-      "runtime_bridge_operation_blocked",
-      "blocked",
-      "high",
-      `Identity ${identity} is not authorised for runtime bridge operation ${operation || "missing"}.`,
-    );
-    return json({ error: "operation_not_allowed" }, 403);
+  if (!ALLOWED_OPERATIONS.has(operation)) {
+    return json({ error: "unknown_operation" }, 422);
   }
 
   const messageId = str(body.message_id);
@@ -1118,39 +1062,12 @@ serve(async (req: Request) => {
   if (nodeKey) {
     const { data: nodeRows } = await admin
       .from("ai_runtime_bridge_nodes")
-      .select("id, node_key, status, last_heartbeat_at, last_seen_at, service_identity_id")
+      .select("id, node_key, status, last_heartbeat_at, last_seen_at")
       .eq("node_key", nodeKey)
       .limit(1);
     nodeRow = nodeRows && nodeRows.length > 0 ? nodeRows[0] : null;
     nodeId = nodeRow ? (nodeRow.id as string) : null;
   }
-
-  if (!nodeKey || !nodeRow || !nodeId) {
-    await auditEvent(
-      admin,
-      "runtime_bridge_node_rejected",
-      "blocked",
-      "high",
-      `Identity ${identity} attempted to use an unknown runtime bridge node.`,
-    );
-    return json({ error: "unknown_node" }, 403);
-  }
-
-  if (nodeRow.service_identity_id !== idRow.id) {
-    await auditEvent(
-      admin,
-      "runtime_bridge_node_identity_mismatch",
-      "blocked",
-      "critical",
-      `Identity ${identity} is not bound to runtime bridge node ${nodeKey}.`,
-    );
-    return json({ error: "node_identity_mismatch" }, 403);
-  }
-
-  await admin
-    .from("ai_runtime_service_identities")
-    .update({ last_authenticated_at: new Date().toISOString() })
-    .eq("id", idRow.id);
 
   const insertMessage = async (type: string, payloadType: string | null, safePayload: unknown) => {
     await admin.from("ai_runtime_bridge_messages").insert({
@@ -1202,8 +1119,18 @@ serve(async (req: Request) => {
       notes: "Registered via authenticated outbound bridge handshake. Execution disabled (transport only).",
     };
 
-    await admin.from("ai_runtime_bridge_nodes").update(upsert).eq("id", nodeId);
-    const resolvedNodeId: string | null = nodeId;
+    let resolvedNodeId: string | null = null;
+    if (nodeRow) {
+      await admin.from("ai_runtime_bridge_nodes").update(upsert).eq("id", nodeRow.id);
+      resolvedNodeId = nodeRow.id as string;
+    } else {
+      const { data: ins } = await admin
+        .from("ai_runtime_bridge_nodes")
+        .insert(upsert)
+        .select("id")
+        .single();
+      resolvedNodeId = ins ? (ins.id as string) : null;
+    }
 
     if (resolvedNodeId) {
       await admin.from("ai_runtime_bridge_heartbeats").insert({

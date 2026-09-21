@@ -46,8 +46,8 @@ Required variables:
 | Variable | Purpose |
 |---|---|
 | `DFP_BRIDGE_ENDPOINT` | Full HTTPS URL of the `runtime-bridge` Edge Function |
-| `DFP_BRIDGE_IDENTITY` | Required per-node identity: `dfp-runtime-hal` or `dfp-runtime-tron` |
-| `DFP_BRIDGE_SIGNING_SECRET` | Per-node HMAC secret matching that identity's Supabase credential reference |
+| `DFP_BRIDGE_IDENTITY` | Bridge service identity (default `dfp-local-runtime-bridge`) |
+| `DFP_BRIDGE_SIGNING_SECRET` | HMAC signing secret (must equal `DFP_RUNTIME_BRIDGE_SIGNING_KEY` in Supabase Secrets) |
 | `DFP_BRIDGE_NODE_KEY` | Stable key for this node |
 | `N8N_LOCAL_URL` | Local n8n URL (optional) |
 | `N8N_SANDBOX_WEBHOOK_PATH` | Fixed local n8n webhook path for the dedicated `DFP Runtime Sandbox Ping` diagnostic (e.g. `/webhook/dfp-runtime-sandbox-ping`); probe fails closed when unset/invalid |
@@ -58,7 +58,7 @@ Required variables:
 
 ```bash
 # Deno (dev)
-deno run --allow-env --allow-net --allow-sys=cpus,systemMemoryInfo --allow-write=/tmp/dfp-runtime-bridge src/main.ts
+deno run --allow-env --allow-net src/main.ts
 
 # Docker
 docker compose up -d
@@ -77,25 +77,11 @@ docker compose up -d
   read-only `/health` + catalogue-presence check (no retrieval, no `/api/embed`).
 * **No secrets leave the host** — the cloud learns only `configured true/false` and
   sanitised status, never values/lengths/prefixes.
-* **Independent node credentials** — HAL and TRON use distinct identities and
-  signing secrets. The legacy shared identity is rejected.
-* **Bounded I/O** — every previously unbounded health or cloud request has a
-  timeout, so a stuck socket cannot suppress heartbeats indefinitely.
-* **Serialized schedules** — heartbeat, catalogue and control-message lanes never
-  overlap with a prior invocation of the same lane.
-* **Externally observable liveness** — the bridge can update a per-node marker
-  every five seconds. The versioned systemd watchdog checks the marker using
-  seconds on both sides and restarts only the affected service when it is stale.
 
 ## Current state
 
-The local source is now version-controlled and included in the v54 hardening
-candidate, but v54 is **not deployed or activated**. Until a genuine authenticated
-outbound handshake produces a valid node + fresh heartbeat, the control plane must
-report the bridge as stale/offline. Runtime execution remains **BLOCKED** (Master
-Kill Switch ON · Production Enabled 0 · Execution Dispatch Not Started).
-
-For production, use the templates in `deploy/systemd/` and a unique environment
-file per node. Set `DFP_BRIDGE_LIVENESS_FILE` to the matching
-`/run/dfp-runtime-bridge/<node>.alive` path and enable both the bridge and watchdog
-timer.
+The bridge software is **ready for local deployment** but is **not yet running or
+verified**. Until a genuine authenticated outbound handshake produces a valid node +
+heartbeat, the DFP control plane reports the bridge as **Not Verified**, and runtime
+execution remains **BLOCKED** (Master Kill Switch ON · Production Enabled 0 · Execution
+Dispatch Not Started).
