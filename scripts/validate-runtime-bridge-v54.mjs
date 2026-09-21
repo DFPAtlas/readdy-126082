@@ -11,7 +11,7 @@ const watchdogService = read("runtime-bridge/deploy/systemd/dfp-runtime-bridge-w
 const config = read("supabase/config.toml");
 const migration = read("supabase/migrations/20260921100000_runtime_bridge_v54_identities.sql");
 const activation = read("ops/runtime-bridge-v54/activate.sql");
-const resilienceRls = read("supabase/migrations/20260921113000_runtime_resilience_rls_hardening.sql");
+const resilienceRls = read("supabase/migrations/20261007120000_runtime_resilience_rls_hardening.sql");
 
 const requiredSource = [
   'idRow.status === "active"',
