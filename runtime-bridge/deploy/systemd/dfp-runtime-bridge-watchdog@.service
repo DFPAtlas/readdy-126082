@@ -1,6 +1,7 @@
 [Unit]
 Description=Check DFP runtime bridge liveness (%i)
 After=dfp-runtime-bridge@%i.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot

@@ -9,23 +9,32 @@ case "$max_age" in
   ''|*[!0-9]*) echo "invalid watchdog max age" >&2; exit 64 ;;
 esac
 
+restart_service() {
+  reason="$1"
+  logger -t dfp-runtime-bridge-watchdog "$reason; restarting $service_name"
+
+  if systemctl try-restart "$service_name"; then
+    logger -t dfp-runtime-bridge-watchdog "restart completed for $service_name"
+    exit 0
+  fi
+
+  logger -t dfp-runtime-bridge-watchdog "restart failed for $service_name"
+  exit 1
+}
+
 if ! systemctl is-active --quiet "$service_name"; then
   exit 0
 fi
 
 now_seconds="$(date +%s)"
 if [ ! -f "$marker" ]; then
-  logger -t dfp-runtime-bridge-watchdog "marker missing; restarting $service_name"
-  systemctl try-restart "$service_name"
-  exit 1
+  restart_service "marker missing"
 fi
 
 marker_seconds="$(stat -c %Y "$marker")"
 age_seconds="$((now_seconds - marker_seconds))"
 if [ "$age_seconds" -gt "$max_age" ]; then
-  logger -t dfp-runtime-bridge-watchdog "marker stale (${age_seconds}s > ${max_age}s); restarting $service_name"
-  systemctl try-restart "$service_name"
-  exit 1
+  restart_service "marker stale (${age_seconds}s > ${max_age}s)"
 fi
 
 exit 0
