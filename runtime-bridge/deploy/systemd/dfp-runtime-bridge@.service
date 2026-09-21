@@ -1,0 +1,38 @@
+[Unit]
+Description=DFP runtime bridge (%i)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=dfp-runtime-bridge
+Group=dfp-runtime-bridge
+WorkingDirectory=/opt/dfp/runtime-bridge
+Environment=DENO_DIR=/var/cache/dfp-runtime-bridge
+Environment=DFP_BRIDGE_LIVENESS_FILE=/run/dfp-runtime-bridge/%i.alive
+EnvironmentFile=/etc/dfp/runtime-bridge/%i.env
+RuntimeDirectory=dfp-runtime-bridge
+RuntimeDirectoryMode=0750
+CacheDirectory=dfp-runtime-bridge
+ExecStart=/usr/local/bin/deno run --allow-env --allow-net --allow-sys=cpus,systemMemoryInfo --allow-write=/run/dfp-runtime-bridge/%i.alive /opt/dfp/runtime-bridge/src/main.ts
+Restart=on-failure
+RestartSec=1
+TimeoutStopSec=2
+KillSignal=SIGTERM
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+ReadWritePaths=/run/dfp-runtime-bridge /var/cache/dfp-runtime-bridge
+
+[Install]
+WantedBy=multi-user.target

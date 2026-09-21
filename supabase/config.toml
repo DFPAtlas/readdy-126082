@@ -1,0 +1,8 @@
+# Canonical Edge Function settings for DFP runtime bridge.
+#
+# HAL and TRON are service-to-service callers. They do not possess Supabase user
+# JWTs; the function authenticates their requests with a timestamped HMAC,
+# one-time nonce, active service identity, operation allowlist, and node binding.
+# Never deploy this setting without the matching fail-closed handler.
+[functions.runtime-bridge]
+verify_jwt = false
