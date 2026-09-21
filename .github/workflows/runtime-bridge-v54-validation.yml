@@ -43,4 +43,4 @@ jobs:
       - name: Type-check Edge Function
         run: deno check supabase/functions/runtime-bridge/index.ts
       - name: Type-check local bridge
-        run: deno check runtime-bridge/src/main.ts
+        run: deno check --node-modules-dir=auto runtime-bridge/src/main.ts
