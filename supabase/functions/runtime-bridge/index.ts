@@ -4,26 +4,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // ============================================================================
 // runtime-bridge — secure OUTBOUND-FIRST private-runtime bridge API for DFP AI
 // Operations.
-//
-// Prompt 23A additions (scoped to the diagnostic runtime result handlers):
-//   * ATOMIC TERMINAL CLAIM — result finalisers transition the run conditionally
-//     (WHERE status IN non-terminal) so completed/failed states are immutable
-//     under a timeout/result race.
-//   * TERMINAL GUARD + LATE/DUPLICATE result handling + runtime_result_failed /
-//     runtime_result_invalid / runtime_late_result_received /
-//     runtime_duplicate_result_blocked audit evidence.
-//   * Runtime failure incident (idempotent by correlation_id) for failed results.
-// Prompt 23B: diagnostic task_reference is now PREFIX + unique 8-char suffix;
-// the result validator accepts any key matching that prefix instead of one
-// fixed exact string.
-// Prompt 23C: incident status = "new" (not "open"), priority = "normal" (not
-// "medium"), and the ai_incidents insert error is captured + audited
-// (runtime_failure_incident_create_failed) without affecting the run lifecycle.
-// Prompt 24B: fetch_control_messages now resolves the emergency freeze and
-// fails-closed for execution-bearing pending messages (permanently invalidating
-// them rather than merely hiding them); late signed results for runs failed by
-// an in-flight freeze are recorded as runtime_emergency_freeze_late_result
-// without resurrecting the run.
 // ============================================================================
 
 const CORS = {
@@ -126,11 +106,12 @@ const ALLOWED_CAPABILITIES = new Set([
   "n8n_metadata",
   "ollama_health",
   "ollama_models",
+  "rag_health",
   "signed_callbacks",
   "outbound_https",
 ]);
 
-const ALLOWED_LOCAL_SERVICES = new Set(["n8n", "ollama", "bridge"]);
+const ALLOWED_LOCAL_SERVICES = new Set(["n8n", "ollama", "rag", "bridge"]);
 
 const ALLOWED_STATUSES = new Set([
   "healthy", "degraded", "unavailable", "not_configured", "unknown",
@@ -162,8 +143,6 @@ const PROBE_CONTROL_TYPES = new Set([
   "approval_gated_diagnostic_probe",
 ]);
 
-// PROMPT 24B — execution-bearing sandbox diagnostic message types. These are the
-// ones the emergency freeze must contain (vs. pure monitoring/transport).
 const EXECUTION_BEARING_MESSAGE_TYPES = new Set([
   OLLAMA_PROBE_MESSAGE_TYPE,
   N8N_SANDBOX_PROBE_MESSAGE_TYPE,
@@ -253,10 +232,6 @@ function safeIpClass(v: unknown): string | null {
   return allowed.has(s) ? s : null;
 }
 
-// PROMPT 4 — optional host CPU/memory telemetry whitelist. Bridges may now send
-// local_services.host with five fixed fields. Only finite, in-range values are
-// accepted; arbitrary nested host properties are rejected. Bridges that do not
-// yet send host telemetry remain fully compatible.
 function sanitiseHostTelemetry(localServices: Record<string, unknown>): Record<string, unknown> | null {
   const host = localServices.host;
   if (!host || typeof host !== "object") return null;
@@ -306,7 +281,6 @@ async function auditEvent(
   });
 }
 
-// PROMPT 24B — resolve whether the emergency freeze is currently engaged.
 async function resolveEmergencyFreeze(
   admin: ReturnType<typeof createClient>,
 ): Promise<boolean> {
@@ -319,8 +293,6 @@ async function resolveEmergencyFreeze(
   return !!control && control.enabled === true && control.execution_allowed === false;
 }
 
-// PROMPT 24B — record safe late-result evidence for a non-run probe whose work
-// was delivered before/during an engaged freeze (marked via safe_payload).
 async function recordFreezeLateResultIfInflight(
   admin: ReturnType<typeof createClient>,
   origPayload: Record<string, unknown>,
@@ -557,10 +529,6 @@ async function validateApprovalGatedApproval(
 
   return { ok: true, detail: null };
 }
-
-// ===========================================================================
-// Prompt 23A — terminal-state result governance helpers.
-// ===========================================================================
 
 async function appendLateResultIncidentTimeline(
   admin: ReturnType<typeof createClient>,
@@ -1118,9 +1086,6 @@ serve(async (req: Request) => {
     });
   };
 
-  // ===========================================================================
-  // HANDSHAKE
-  // ===========================================================================
   if (operation === "handshake") {
     if (!nodeKey) return json({ error: "node_key is required." }, 400);
 
@@ -1206,9 +1171,6 @@ serve(async (req: Request) => {
     return json({ error: "Unknown bridge node — handshake required first." }, 404);
   }
 
-  // ===========================================================================
-  // HEARTBEAT
-  // ===========================================================================
   if (operation === "heartbeat") {
     const bridgeTimestamp = str(body.bridge_timestamp) || receivedAt;
     const status = ALLOWED_STATUSES.has(str(body.status)) ? str(body.status) : "unknown";
@@ -1284,9 +1246,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // REPORT_HEALTH
-  // ===========================================================================
   if (operation === "report_health") {
     const checks = Array.isArray(body.checks) ? body.checks : [];
     const rows: Record<string, unknown>[] = [];
@@ -1327,6 +1286,7 @@ serve(async (req: Request) => {
 
     const n8nRow = rows.find((r) => r.system_slug === "n8n");
     const ollamaRow = rows.find((r) => r.system_slug === "ollama");
+    const ragRow = rows.find((r) => r.system_slug === "rag");
 
     await admin.from("ai_runtime_bridge_nodes").update({
       last_seen_at: receivedAt,
@@ -1347,14 +1307,12 @@ serve(async (req: Request) => {
       recorded: rows.length,
       n8nStatus: n8nRow?.status ?? null,
       ollamaStatus: ollamaRow?.status ?? null,
+      ragStatus: ragRow?.status ?? null,
       executionEnabled: false,
       message: "Local health relayed (sanitised, no secrets). Runtime execution remains disabled.",
     });
   }
 
-  // ===========================================================================
-  // REPORT_CAPABILITIES
-  // ===========================================================================
   if (operation === "report_capabilities") {
     const capabilities = Array.isArray(body.capabilities)
       ? (body.capabilities as string[]).filter((c) => ALLOWED_CAPABILITIES.has(c))
@@ -1382,9 +1340,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // REPORT_OLLAMA_CATALOGUE
-  // ===========================================================================
   if (operation === "report_ollama_catalogue") {
     const rawModels = Array.isArray(body.models) ? (body.models as unknown[]) : [];
     const catalogueAt = str(body.catalogue_at) || receivedAt;
@@ -1437,13 +1392,7 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // FETCH_CONTROL_MESSAGES
-  // ===========================================================================
   if (operation === "fetch_control_messages") {
-    // PROMPT 24B — delivery gate: if the emergency freeze is engaged, execution-
-    // bearing pending messages are excluded AND permanently invalidated (never
-    // merely hidden). Pure monitoring/transport messages remain available.
     const freezeEngaged = await resolveEmergencyFreeze(admin);
 
     const { data: pending } = await admin
@@ -1527,9 +1476,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // REPORT_TRANSPORT_PROBE_ACK
-  // ===========================================================================
   if (operation === "report_transport_probe_ack") {
     const probeKey = str(body.probe_key);
     const originalMessageKey = str(body.original_message_key);
@@ -1650,9 +1596,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // REPORT_OLLAMA_INFERENCE_PROBE
-  // ===========================================================================
   if (operation === "report_ollama_inference_probe") {
     const probeKey = str(body.probe_key);
     const originalMessageKey = str(body.original_message_key);
@@ -1798,9 +1741,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // REPORT_N8N_SANDBOX_PROBE
-  // ===========================================================================
   if (operation === "report_n8n_sandbox_probe") {
     const probeKey = str(body.probe_key);
     const originalMessageKey = str(body.original_message_key);
@@ -1950,9 +1890,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // REPORT_RUNTIME_CHAIN_PROBE
-  // ===========================================================================
   if (operation === "report_runtime_chain_probe") {
     const probeKey = str(body.probe_key);
     const originalMessageKey = str(body.original_message_key);
@@ -2110,9 +2047,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // REPORT_AGENT_DRY_RUN_PROBE
-  // ===========================================================================
   if (operation === "report_agent_dry_run_probe") {
     const probeKey = str(body.probe_key);
     const originalMessageKey = str(body.original_message_key);
@@ -2279,9 +2213,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // REPORT_READONLY_TOOL_PROBE
-  // ===========================================================================
   if (operation === "report_readonly_tool_probe") {
     const probeKey = str(body.probe_key);
     const originalMessageKey = str(body.original_message_key);
@@ -2457,9 +2388,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // REPORT_DIAGNOSTIC_RUN_TOOL_PROBE
-  // ===========================================================================
   if (operation === "report_diagnostic_run_tool_probe") {
     const probeKey = str(body.probe_key);
     const originalMessageKey = str(body.original_message_key);
@@ -2535,7 +2463,6 @@ serve(async (req: Request) => {
         `Diagnostic run tool probe result rejected: unexpected tool_operation ${toolOperation}. No tool executed.`);
       return json({ error: "Unexpected tool_operation — probe result rejected." }, 422);
     }
-    // PROMPT 23B — accept any task_reference matching the fixed prefix + suffix.
     if (taskReference && !taskReference.startsWith(`${DIAGNOSTIC_RUN_TASK_KEY_PREFIX}-`)) {
       await auditEvent(admin, "diagnostic_run_rejected", "rejected", "high",
         `Diagnostic run tool probe result rejected: unexpected task_reference ${taskReference}. No tool executed.`);
@@ -2720,9 +2647,6 @@ serve(async (req: Request) => {
     });
   }
 
-  // ===========================================================================
-  // REPORT_APPROVAL_GATED_DIAGNOSTIC_PROBE
-  // ===========================================================================
   if (operation === "report_approval_gated_diagnostic_probe") {
     const probeKey = str(body.probe_key);
     const originalMessageKey = str(body.original_message_key);

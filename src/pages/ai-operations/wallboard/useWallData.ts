@@ -22,6 +22,7 @@ import { useOllamaCatalogue } from '@/pages/ai-operations/models/ollamaCatalogue
 import { useSiteMonitorData } from '@/pages/ai-operations/wallboard/siteStore';
 import { useManagerReportData } from '@/pages/ai-operations/wallboard/managerReportStore';
 import { useWidgetConfigData } from '@/pages/ai-operations/wallboard/widgetConfigStore';
+import { useRuntimeResilience } from '@/pages/ai-operations/wallboard/runtimeResilienceStore';
 
 /**
  * Subscribe to every source the wall depends on. Returns nothing — the
@@ -43,4 +44,5 @@ export function useWallData(): void {
   useSiteMonitorData();
   useManagerReportData();
   useWidgetConfigData();
+  useRuntimeResilience();
 }

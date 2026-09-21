@@ -1,5 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
+import { useRuntimeHealth } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
+import { useOperationsHealthData } from '@/pages/ai-operations/wallboard/operationsHealthStore';
 import {
   getGlobalSystemState,
   formatWallTime,
@@ -17,12 +19,18 @@ const STATE_COLOR: Record<string, string> = {
 /**
  * Command-level header — DFP COMMAND title, live clock, and global system
  * state. Owns the once-per-second clock so it stays isolated from the
- * operational-data refresh; subscribes to the group snapshot for the global
- * state colour.
+ * operational-data refresh.
+ *
+ * The global state is composed from the group snapshot AND the runtime-health
+ * and operations-health stores (core systems / bridges / database) — so the
+ * header re-derives whenever ANY of those authoritative signals change, never
+ * from the group snapshot alone.
  */
 export default function OperationsWallHeader() {
   const [now, setNow] = useState<Date>(() => new Date());
   const group = useGroupLiveData();
+  const runtimeHealth = useRuntimeHealth();
+  const operationsHealth = useOperationsHealthData();
 
   // Clock — updates once per second (independent of data refresh).
   useEffect(() => {
@@ -30,7 +38,10 @@ export default function OperationsWallHeader() {
     return () => clearInterval(id);
   }, []);
 
-  const global = useMemo(() => getGlobalSystemState(), [group]);
+  const global = useMemo(
+    () => getGlobalSystemState(),
+    [group, runtimeHealth, operationsHealth],
+  );
   const accent = STATE_COLOR[global.state] ?? '#64748b';
 
   return (

@@ -4,12 +4,28 @@ import {
   getAiSystemsStatus,
   toneHex,
   type Tone,
-  type ComputeNode,
   type ComputeGauge,
+  type ComputeNode,
   type TronDial,
   type TronDialTone,
   type AiSystemRow,
+  type ComputeStatusRow,
 } from '@/pages/ai-operations/wallboard/operationsWallSelectors';
+import { getRuntimeResilienceView } from '@/pages/ai-operations/wallboard/runtimeResilienceStore';
+import {
+  isWatchdogRunning,
+  isWatchdogFault,
+  RECOVERY_TARGET_MS,
+  type RuntimeResilienceNode,
+} from '@/lib/ai-operations/runtimeResilience';
+import {
+  HeartbeatECG,
+  WatchdogStatusIndicator,
+  RecoveryStatusIndicator,
+  type EcgState,
+  type WatchdogVisual,
+  type RecoveryVisual,
+} from '@/pages/ai-operations/wallboard/components/operations/resilienceIndicators';
 
 const DIAL_ACCENT: Record<'orange' | 'cyan', string> = {
   orange: '#fb923c',
@@ -54,64 +70,256 @@ function SimulatedBadge() {
   );
 }
 
-function NodeMetrics({ node, accentColor, single = false }: { node: ComputeNode; accentColor: string; single?: boolean }) {
-  if (single) {
-    return (
-      <div className="mt-1.5">
-        {node.metrics.map((m) => (
-          <div key={m.label} className="flex items-baseline justify-between border-b border-cyan-400/8 py-[2px] last:border-b-0">
-            <span className="text-[8px] font-label tracking-[0.16em] text-slate-500 whitespace-nowrap">{m.label}</span>
-            <span className="font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap" style={{ color: metricColor(m.value, accentColor) }}>
-              {m.value}
-            </span>
-          </div>
-        ))}
-      </div>
-    );
+/** Recovery SLA target label, derived from the single authoritative constant. */
+const TARGET_LABEL = `<${Math.round(RECOVERY_TARGET_MS / 1000)}s`;
+
+/** Find a runtime-resilience node by its stable bridge-key suffix (hal / tron). */
+function findResilienceNode(nodes: RuntimeResilienceNode[], key: 'hal' | 'tron'): RuntimeResilienceNode | null {
+  return nodes.find((n) => n.nodeKey.toLowerCase().includes(key)) ?? null;
+}
+
+/** Map a watchdog status string onto a compact display label + tone + visual state. */
+function watchdogDisplay(status: string | null): { label: string; color: string; state: WatchdogVisual } {
+  if (isWatchdogFault(status)) return { label: 'FAULT', color: '#ef4444', state: 'fault' };
+  if (isWatchdogRunning(status)) return { label: 'RUNNING', color: '#22c55e', state: 'running' };
+  if (status?.trim().toLowerCase() === 'recovering') return { label: 'RECOVERING', color: '#f59e0b', state: 'recovering' };
+  return { label: '—', color: '#64748b', state: 'none' };
+}
+
+function formatRecovery(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+/** Recovery display values — never renders PASS without real recovery data. */
+function recoveryDisplay(node: RuntimeResilienceNode | null): {
+  value: string;
+  result: string;
+  valueColor: string;
+  resultColor: string;
+  state: RecoveryVisual;
+} {
+  if (!node) {
+    return { value: '—', result: '—', valueColor: '#64748b', resultColor: '#64748b', state: 'none' };
   }
+  if (node.nodeStatus === 'RECOVERING') {
+    return { value: 'IN PROGRESS', result: '—', valueColor: '#f59e0b', resultColor: '#64748b', state: 'progress' };
+  }
+  if (node.lastRecoveryMs == null) {
+    return { value: '—', result: '—', valueColor: '#64748b', resultColor: '#64748b', state: 'none' };
+  }
+  const met = node.recoveryTargetMet;
+  const pass = met === true;
+  const result = met == null ? '—' : pass ? 'PASS' : 'FAIL';
+  const color = met == null ? '#64748b' : pass ? '#22c55e' : '#ef4444';
+  // A healthy success glow is only shown while the node is actually reachable
+  // (HEALTHY or DEGRADED). While OFFLINE or in WATCHDOG FAULT, the last-known
+  // recovery value stays readable but must not present a "currently healthy"
+  // success treatment.
+  const unreachable = node.nodeStatus === 'OFFLINE' || node.nodeStatus === 'WATCHDOG FAULT';
+  const state: RecoveryVisual = unreachable ? 'none' : met == null ? 'none' : pass ? 'pass' : 'fail';
+  return { value: formatRecovery(node.lastRecoveryMs), result, valueColor: color, resultColor: color, state };
+}
+
+// ---------------------------------------------------------------------------
+// DFP Relay — live cross-node status (HAL ⇄ DFP COMMAND ⇄ TRON).
+// Each side derives from its own node (ComputeNode) + resilience snapshot; the
+// centre derives from both. No new data model — everything reuses the existing
+// bridge/heartbeat/watchdog/recovery signals already composed for the cards.
+// ---------------------------------------------------------------------------
+
+type RelaySide = 'live' | 'degraded' | 'offline' | 'recovering';
+type RelayOverall = 'healthy' | 'degraded' | 'recovering' | 'offline' | 'partial';
+
+const RELAY_SIDE_LABEL: Record<RelaySide, string> = {
+  live: 'LIVE',
+  degraded: 'DEGRADED',
+  offline: 'OFFLINE',
+  recovering: 'RECOVERING',
+};
+
+const RELAY_SIDE_COLOR: Record<RelaySide, string> = {
+  live: '#22c55e',
+  degraded: '#f59e0b',
+  offline: '#ef4444',
+  recovering: '#f59e0b',
+};
+
+const RELAY_OVERALL_LABEL: Record<RelayOverall, string> = {
+  healthy: 'HEALTHY',
+  degraded: 'DEGRADED',
+  recovering: 'RECOVERING',
+  offline: 'OFFLINE',
+  partial: 'PARTIAL',
+};
+
+const RELAY_OVERALL_COLOR: Record<RelayOverall, string> = {
+  healthy: '#22c55e',
+  degraded: '#f59e0b',
+  recovering: '#f59e0b',
+  offline: '#ef4444',
+  partial: '#f59e0b',
+};
+
+/** Per-node relay side state — the node's own runtime signal, with active
+ *  recovery from its resilience snapshot taking precedence. */
+function relaySideState(node: ComputeNode, res: RuntimeResilienceNode | null): RelaySide {
+  if (res?.nodeStatus === 'RECOVERING') return 'recovering';
+  if (node.state === 'nominal') return 'live';
+  if (node.state === 'offline') return 'offline';
+  return 'degraded';
+}
+
+/** Centre state derived from the two sides (never a competing timer). */
+function relayOverallState(halSide: RelaySide, tronSide: RelaySide): RelayOverall {
+  if (halSide === 'recovering' || tronSide === 'recovering') return 'recovering';
+  if (halSide === 'live' && tronSide === 'live') return 'healthy';
+  if (halSide === 'offline' && tronSide === 'offline') return 'offline';
+  if (halSide === 'offline' || tronSide === 'offline') return 'partial';
+  return 'degraded';
+}
+
+/** Compact per-node state line (HAL LIVE / TRON OFFLINE …). */
+function RelaySideLabel({ node, side }: { node: 'HAL' | 'TRON'; side: RelaySide }) {
+  const color = RELAY_SIDE_COLOR[side];
   return (
-    <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-2">
-      {node.metrics.map((m) => (
-        <div key={m.label} className="flex items-baseline justify-between border-b border-cyan-400/8 py-[3px]">
-          <span className="text-[8px] font-label tracking-[0.16em] text-slate-500 whitespace-nowrap">{m.label}</span>
-          <span className="font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap" style={{ color: metricColor(m.value, accentColor) }}>
-            {m.value}
-          </span>
-        </div>
-      ))}
+    <div className="flex items-center justify-center gap-1.5">
+      <span className="text-[7.5px] font-label tracking-[0.16em] text-slate-500 whitespace-nowrap">{node}</span>
+      <span className="flex items-center gap-1">
+        <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: color }} />
+        <span className="font-mono text-[8px] font-semibold tracking-[0.06em] whitespace-nowrap" style={{ color }}>
+          {RELAY_SIDE_LABEL[side]}
+        </span>
+      </span>
     </div>
   );
 }
 
+/** Compact summary count row (BRIDGES 2/2 · HEARTBEATS 2/2 · …). */
+function RelaySummaryRow({ label, value, color, dot }: { label: string; value: string; color: string; dot: boolean }) {
+  return (
+    <div className="flex items-center justify-center gap-1">
+      {dot && <span className="ow-summary-dot" style={{ background: '#22c55e' }} aria-hidden="true" />}
+      <span className="text-[7px] font-label tracking-[0.12em] text-slate-500 whitespace-nowrap">{label}</span>
+      <span className="font-mono text-[7px] font-semibold tabular-nums tracking-[0.02em] whitespace-nowrap" style={{ color }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/** Icons for the role-specific system states (HAL: N8N / MASTER / BRIDGE,
+ *  TRON: RAG / OVERWATCH / BRIDGE). */
+const ROLE_ICONS: Record<string, string> = {
+  N8N: 'ri-git-branch-line',
+  MASTER: 'ri-cpu-line',
+  BRIDGE: 'ri-link-m',
+  RAG: 'ri-database-2-line',
+  OVERWATCH: 'ri-radar-line',
+};
+
+/** A single role-specific system state — a compact inline row (status icon +
+ *  label + status text) rather than a bordered table cell. The status dot
+ *  breathes gently only while healthy; muted states stay neutral.
+ *
+ *  AWAITING TELEMETRY rows (RAG / OVERWATCH with no authoritative source yet)
+ *  present a neutral muted status with a subtle identity-specific dormant
+ *  effect (RAG scan / OVERWATCH radar sweep) — the system is defined, never
+ *  "broken". */
+function RoleStatusTile({ row }: { row: ComputeStatusRow }) {
+  const tone = toneHex(row.tone);
+  const icon = ROLE_ICONS[row.label] ?? 'ri-shield-star-line';
+  const healthy = row.tone === 'green';
+  const isAwaiting = row.tone === 'muted' && row.value === 'AWAITING TELEMETRY';
+  const isRag = row.label === 'RAG';
+  const isOverwatch = row.label === 'OVERWATCH';
+
+  // Identity-specific icon treatment: a dormant scan/sweep while awaiting
+  // telemetry, or a subtle active glow/sweep once real live telemetry is wired
+  // (green tone).
+  const iconEffect = isAwaiting
+    ? isRag ? 'ow-role-dormant-rag' : isOverwatch ? 'ow-role-dormant-overwatch' : ''
+    : healthy && isRag ? 'ow-role-active-rag'
+      : healthy && isOverwatch ? 'ow-role-active-overwatch'
+        : '';
+
+  const valueCell = (
+    <span className="flex items-center gap-1.5">
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isAwaiting ? 'ow-standby-pulse' : healthy ? 'ow-pulse' : ''}`} style={{ background: tone }} />
+      <span className="font-mono text-[10.5px] font-semibold tabular-nums whitespace-nowrap" style={{ color: tone }}>{row.value}</span>
+    </span>
+  );
+
+  return (
+    <div className="py-[3px]">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className={`w-3.5 h-3.5 flex items-center justify-center flex-shrink-0 ${iconEffect}`} style={{ color: row.tone === 'muted' ? '#64748b' : tone }}>
+            <i className={`${icon} text-[10px]`}></i>
+          </span>
+          <span className="text-[8px] font-label tracking-[0.16em] text-slate-500 whitespace-nowrap">{row.label}</span>
+        </span>
+        {valueCell}
+      </div>
+      {row.detail ? (
+        <div className="flex items-center justify-end mt-[1px]">
+          <span className="text-[6.5px] font-label tracking-[0.12em] text-slate-600 whitespace-nowrap">{row.detail}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Map a heartbeat/bridge metric text onto the ECG visual state. */
+function ecgState(value: string): EcgState {
+  if (value === 'LIVE') return 'live';
+  if (value === 'STALE') return 'stale';
+  if (value === 'OFFLINE') return 'offline';
+  return 'none';
+}
+
 /**
- * HUD-style circular telemetry dial for HAL's live CPU / memory percentages.
- * Truthful: the conic fill maps directly from the raw percentage; missing
- * telemetry renders muted with an em-dash centre and never a fabricated zero.
+ * HUD-style circular telemetry dial for HAL's CPU / memory percentages.
+ * Truthful: a stored numeric value alone is NOT live — the reading is LIVE
+ * (glow + pulse) only while HAL's own heartbeat is fresh. A stale or offline
+ * heartbeat shows the retained value as LAST KNOWN / STALE or LAST KNOWN /
+ * OFFLINE with no live animation; missing telemetry renders an em-dash and
+ * never a fabricated zero.
  */
 function TelemetryDial({ gauge, nodeName }: { gauge: ComputeGauge; nodeName: string }) {
   const accent = DIAL_ACCENT[gauge.accent];
   const glow = DIAL_GLOW[gauge.accent];
   const hasValue = gauge.percent != null && Number.isFinite(gauge.percent);
+  const isLive = hasValue && gauge.freshness === 'live';
   const clamped = hasValue ? Math.max(0, Math.min(100, gauge.percent as number)) : 0;
   const deg = clamped * 3.6;
+  const statusLabel = !hasValue
+    ? 'NOT MONITORED'
+    : isLive
+      ? 'LIVE'
+      : gauge.freshness === 'offline'
+        ? 'LAST KNOWN / OFFLINE'
+        : 'LAST KNOWN / STALE';
+  const ringAccent = isLive ? accent : '#64748b';
+  const statusColor = isLive ? accent : '#64748b';
   const ariaLabel = hasValue
-    ? `${nodeName} ${gauge.label.toLowerCase()} utilization ${clamped.toFixed(1)} percent`
+    ? `${nodeName} ${gauge.label.toLowerCase()} utilization ${clamped.toFixed(1)} percent, ${isLive ? 'live' : 'last known'}`
     : `${nodeName} ${gauge.label.toLowerCase()} utilization not monitored`;
 
   return (
     <div className="flex flex-col items-center gap-1">
       <div
-        className={`ow-dial ${hasValue ? 'ow-dial-live' : 'ow-dial-empty'}`}
+        className={`ow-dial ${isLive ? 'ow-dial-live' : 'ow-dial-empty'}`}
         role="img"
         aria-label={ariaLabel}
         style={{
           '--ow-dial-fill': `${deg}deg`,
-          '--ow-dial-accent': accent,
+          '--ow-dial-accent': ringAccent,
           '--ow-dial-glow': glow,
         } as CSSProperties}
       >
         <div className="ow-dial-center">
-          <span className="ow-dial-value font-mono" style={{ color: hasValue ? accent : '#475569' }}>
+          <span className="ow-dial-value font-mono" style={{ color: hasValue ? (isLive ? accent : '#94a3b8') : '#475569' }}>
             {hasValue ? gauge.value : '—'}
           </span>
         </div>
@@ -119,11 +327,11 @@ function TelemetryDial({ gauge, nodeName }: { gauge: ComputeGauge; nodeName: str
       <span className="text-[7.5px] font-label tracking-[0.18em] text-slate-500 whitespace-nowrap">{gauge.label}</span>
       <span className="flex items-center gap-[3px]">
         <span
-          className={`w-1 h-1 rounded-full ${hasValue ? 'ow-dial-pulse' : ''}`}
-          style={{ background: hasValue ? accent : '#64748b' }}
+          className={`w-1 h-1 rounded-full ${isLive ? 'ow-dial-pulse' : ''}`}
+          style={{ background: statusColor }}
         />
-        <span className="text-[7.5px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: hasValue ? accent : '#64748b' }}>
-          {hasValue ? 'LIVE' : 'NOT MONITORED'}
+        <span className="text-[7.5px] font-label tracking-[0.14em] whitespace-nowrap" style={{ color: statusColor }}>
+          {statusLabel}
         </span>
       </span>
     </div>
@@ -145,7 +353,7 @@ function TronInstrument({ dial, nodeName }: { dial: TronDial; nodeName: string }
   // Healthy (green) and degraded (amber) both breathe; red/muted/violet stay steady.
   const pulseLive = hasValue && (dial.tone === 'green' || dial.tone === 'amber');
 
-  const ariaLabel = `${nodeName} ${dial.label.toLowerCase()} ${hasValue ? dial.value : 'not monitored'}`;
+  const ariaLabel = `${nodeName} ${dial.label.toLowerCase()} ${dial.value} ${dial.statusLabel.toLowerCase()}`;
 
   return (
     <div className="flex flex-col items-center gap-1">
@@ -349,11 +557,67 @@ function AiSystemStatusRow({ row, icon, alertIcon }: { row: AiSystemRow; icon: s
  * HAL, TRON, DFP Relay and AI Systems always share a single row.
  */
 export default function ComputeCore() {
-  const { hal, tron, link } = getComputeCore();
+  const { hal, tron } = getComputeCore();
   const halColor = hal.tone === 'green' ? '#fb923c' : toneHex(hal.tone);
   const tronColor = '#a78bfa';
-  const linkColor = toneHex(link.tone);
-  const relayMode = link.tone === 'green' ? 'active' : link.tone === 'amber' ? 'degraded' : 'idle';
+
+  // Runtime resilience — composed + evaluated data (same HAL/TRON source).
+  const resilienceNodes = getRuntimeResilienceView()?.nodes ?? [];
+  const halRes = findResilienceNode(resilienceNodes, 'hal');
+  const tronRes = findResilienceNode(resilienceNodes, 'tron');
+  const halWatchdog = watchdogDisplay(halRes?.watchdogStatus ?? null);
+  const tronWatchdog = watchdogDisplay(tronRes?.watchdogStatus ?? null);
+  const halRecovery = recoveryDisplay(halRes);
+  const tronRecovery = recoveryDisplay(tronRes);
+
+  // --- DFP Relay — live cross-node status (HAL ⇄ DFP COMMAND ⇄ TRON) ------
+  const halSide = relaySideState(hal, halRes);
+  const tronSide = relaySideState(tron, tronRes);
+  const relayOverall = relayOverallState(halSide, tronSide);
+  const overallColor = RELAY_OVERALL_COLOR[relayOverall];
+
+  // Bridges + heartbeats — each node's own BRIDGE row + heartbeat signal.
+  const halBridgeLive = hal.statusRows.some((r) => r.label === 'BRIDGE' && r.value === 'LIVE');
+  const tronBridgeLive = tron.statusRows.some((r) => r.label === 'BRIDGE' && r.value === 'LIVE');
+  const bridgesLive = (halBridgeLive ? 1 : 0) + (tronBridgeLive ? 1 : 0);
+
+  const halHeartbeatLive = hal.heartbeat.value === 'LIVE';
+  const tronHeartbeatLive = tron.heartbeat.value === 'LIVE';
+  const heartbeatsLive = (halHeartbeatLive ? 1 : 0) + (tronHeartbeatLive ? 1 : 0);
+
+  // Watchdogs — HAL + TRON only (2/2 semantics), never inferred from bridge.
+  const halWatchdogActive = isWatchdogRunning(halRes?.watchdogStatus ?? null);
+  const tronWatchdogActive = isWatchdogRunning(tronRes?.watchdogStatus ?? null);
+  const watchdogsActive = (halWatchdogActive ? 1 : 0) + (tronWatchdogActive ? 1 : 0);
+  const hasWatchdogData = Boolean(halRes?.hasResilienceSnapshot || tronRes?.hasResilienceSnapshot);
+
+  // Recovery SLA — never PASS without real recovery data.
+  const halRecoveryMet = halRes?.recoveryTargetMet ?? null;
+  const tronRecoveryMet = tronRes?.recoveryTargetMet ?? null;
+  const halHasRecovery = halRecoveryMet != null;
+  const tronHasRecovery = tronRecoveryMet != null;
+  const hasAnyRecovery = halHasRecovery || tronHasRecovery;
+  const hasAllRecovery = halHasRecovery && tronHasRecovery;
+
+  let slaLabel: string;
+  let slaColor: string;
+  if (!hasAnyRecovery) {
+    slaLabel = 'PARTIAL';
+    slaColor = '#64748b';
+  } else if (!hasAllRecovery) {
+    const known = halHasRecovery ? halRecoveryMet : tronRecoveryMet;
+    slaLabel = known ? 'PARTIAL' : 'FAIL';
+    slaColor = known ? '#f59e0b' : '#ef4444';
+  } else {
+    const pass = halRecoveryMet === true && tronRecoveryMet === true;
+    slaLabel = pass ? 'PASS' : 'FAIL';
+    slaColor = pass ? '#22c55e' : '#ef4444';
+  }
+
+  // Summary count colours (2/2 green · 1/2 amber · 0/2 red).
+  const bridgesColor = bridgesLive === 2 ? '#22c55e' : bridgesLive === 1 ? '#f59e0b' : '#ef4444';
+  const heartbeatsColor = heartbeatsLive === 2 ? '#22c55e' : heartbeatsLive === 1 ? '#f59e0b' : '#ef4444';
+  const watchdogColor = !hasWatchdogData ? '#64748b' : watchdogsActive === 2 ? '#22c55e' : watchdogsActive === 1 ? '#f59e0b' : '#ef4444';
 
   return (
     <section className="ow-compute-core">
@@ -390,34 +654,54 @@ export default function ComputeCore() {
             </div>
           )}
 
-          <NodeMetrics node={hal} accentColor={halColor} single />
+          <div className="shrink-0 ow-node-role mt-2">
+            {hal.statusRows.map((row) => (
+              <RoleStatusTile key={row.label} row={row} />
+            ))}
+          </div>
+
+          <div className="shrink-0 ow-node-resilience mt-auto">
+            <HeartbeatECG label={hal.heartbeat.label} state={ecgState(hal.heartbeat.value)} text={hal.heartbeat.value} accent={halColor} color={metricColor(hal.heartbeat.value, halColor)} recovering={halRes?.nodeStatus === 'RECOVERING'} />
+            <WatchdogStatusIndicator state={halRes?.nodeStatus === 'OFFLINE' ? 'none' : halWatchdog.state} text={halWatchdog.label} color={halWatchdog.color} />
+            <RecoveryStatusIndicator value={halRecovery.value} result={halRecovery.result} valueColor={halRecovery.valueColor} resultColor={halRecovery.resultColor} targetLabel={TARGET_LABEL} state={halRecovery.state} />
+          </div>
         </div>
 
-        {/* DFP Relay — HAL ⇄ DFP COMMAND ⇄ TRON */}
+        {/* DFP Relay — HAL ⇄ DFP COMMAND ⇄ TRON live cross-node hub */}
         <div className="flex flex-col items-center justify-center px-1 min-w-0">
-          <span className="font-mono text-[10px] tracking-[0.08em] whitespace-nowrap" style={{ color: linkColor }}>DFP RELAY</span>
+          <span className="font-mono text-[10px] tracking-[0.08em] whitespace-nowrap" style={{ color: overallColor }}>DFP RELAY</span>
 
-          <div className={`ow-relay ow-relay-${relayMode} mt-1.5`}>
-            <div className="ow-relay-track ow-relay-track-hal">
+          <div className="ow-relay mt-1.5" aria-label={`DFP relay ${RELAY_OVERALL_LABEL[relayOverall]}`}>
+            <div className={`ow-relay-track ow-relay-track-hal ow-relay-track-${halSide}`}>
               <span className="ow-relay-packet ow-relay-packet-hal" />
               <span className="ow-relay-packet ow-relay-ack-hal" />
             </div>
-            <div className="ow-relay-core">
+            <div className={`ow-relay-core ow-relay-core-${relayOverall}`}>
               <i className="ri-node-tree text-[14px]"></i>
             </div>
-            <div className="ow-relay-track ow-relay-track-tron">
+            <div className={`ow-relay-track ow-relay-track-tron ow-relay-track-${tronSide}`}>
               <span className="ow-relay-packet ow-relay-packet-tron" />
               <span className="ow-relay-packet ow-relay-ack-tron" />
             </div>
           </div>
 
-          <span className="text-[7.5px] font-label tracking-[0.12em] text-slate-500 mt-1.5 text-center leading-tight">
-            HEARTBEATS · HEALTH · MODEL CATALOGUE
-          </span>
+          {/* Compact per-node state (no duplicated telemetry). */}
+          <div className="flex flex-col items-center gap-[3px] mt-1.5 min-w-0">
+            <RelaySideLabel node="HAL" side={halSide} />
+            <RelaySideLabel node="TRON" side={tronSide} />
+          </div>
 
-          <div className="text-center leading-tight mt-1.5 min-w-0">
-            <div className="text-[8px] font-label tracking-[0.14em]" style={{ color: linkColor }}>{link.label}</div>
-            <div className="text-[7px] font-label tracking-[0.14em] mt-0.5" style={{ color: '#64748b' }}>{link.sublabel}</div>
+          {/* Cross-node summary counts. */}
+          <div className="flex flex-col items-center gap-[3px] mt-1.5 min-w-0">
+            <RelaySummaryRow label="BRIDGES" value={`${bridgesLive}/2`} color={bridgesColor} dot={bridgesLive === 2} />
+            <RelaySummaryRow label="HEARTBEATS" value={`${heartbeatsLive}/2`} color={heartbeatsColor} dot={heartbeatsLive === 2} />
+            <RelaySummaryRow label="WATCHDOGS" value={hasWatchdogData ? `${watchdogsActive}/2` : '—'} color={watchdogColor} dot={watchdogsActive === 2} />
+            <div className="flex items-center justify-center gap-1">
+              {slaLabel === 'PASS' && <span className="ow-summary-dot" style={{ background: '#22c55e' }} aria-hidden="true" />}
+              <div className="text-[7px] font-label tracking-[0.12em] whitespace-nowrap" style={{ color: slaColor }}>
+                RECOVERY {TARGET_LABEL} · {slaLabel}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -447,7 +731,17 @@ export default function ComputeCore() {
             </div>
           )}
 
-          <NodeMetrics node={tron} accentColor={tronColor} single />
+          <div className="shrink-0 ow-node-role mt-2">
+            {tron.statusRows.map((row) => (
+              <RoleStatusTile key={row.label} row={row} />
+            ))}
+          </div>
+
+          <div className="shrink-0 ow-node-resilience mt-auto">
+            <HeartbeatECG label={tron.heartbeat.label} state={ecgState(tron.heartbeat.value)} text={tron.heartbeat.value} accent={tronColor} color={metricColor(tron.heartbeat.value, tronColor)} recovering={tronRes?.nodeStatus === 'RECOVERING'} />
+            <WatchdogStatusIndicator state={tronRes?.nodeStatus === 'OFFLINE' ? 'none' : tronWatchdog.state} text={tronWatchdog.label} color={tronWatchdog.color} />
+            <RecoveryStatusIndicator value={tronRecovery.value} result={tronRecovery.result} valueColor={tronRecovery.valueColor} resultColor={tronRecovery.resultColor} targetLabel={TARGET_LABEL} state={tronRecovery.state} />
+          </div>
         </div>
 
         {/* AI Systems diagnostic block */}

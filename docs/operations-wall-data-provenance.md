@@ -54,6 +54,53 @@ row is now `BRIDGE` and shows the authoritative bridge state (`LIVE` / `STALE` /
 
 ---
 
+## Runtime Resilience (HAL / TRON)
+
+A dedicated, isolated resilience band. Data is composed from the EXISTING
+authoritative bridge sources plus two new dedicated tables — no field has a
+competing source of truth.
+
+- **Node identity / bridge state / cloud heartbeat** → `ai_runtime_bridge_nodes`
+  (authoritative, `atlas-hal-runtime-01` / `atlas-tron-runtime-01`).
+- **n8n / Ollama / CPU / memory** → newest per-node `ai_runtime_bridge_heartbeats`
+  (`n8n_status`, `ollama_status`, `local_services.ollama.model_count`,
+  `local_services.host.cpu_percent` / `memory_percent`).
+- **Watchdog / LOCAL liveness / fault+recovery / restart / container-uptime /
+  temperature** → `runtime_resilience_nodes` (new snapshot; one row per node,
+  `node_id` FK to the bridge node).
+- **Recovery history** → `runtime_recovery_events` (new append-only table,
+  newest-first bounded read).
+
+| Display field | Source | Class | Missing-data behaviour |
+| --- | --- | --- | --- |
+| Node state (HEALTHY / DEGRADED / RECOVERING / OFFLINE / WATCHDOG FAULT) | central `evaluateNodeState()` over composed node | DERIVED LIVE | `AWAITING TELEMETRY` until a resilience snapshot exists (never HEALTHY) |
+| Bridge status | `deriveBridgeNodeState()` (2 / 5 min windows) | DERIVED LIVE | `NOT REGISTERED` |
+| Watchdog | `runtime_resilience_nodes.watchdog_status` | DERIVED LIVE | `UNAVAILABLE` (not a fault) |
+| Last heartbeat | bridge node `last_heartbeat_at` / `last_seen_at` | DERIVED LIVE | `—` |
+| Local liveness age | `runtime_resilience_nodes.last_liveness_at` / `liveness_age_ms` (own 60s window, NOT the cloud heartbeat) | DERIVED LIVE | `UNAVAILABLE` (never derived from heartbeat) |
+| Last fault / reason | `runtime_resilience_nodes.last_fault_at` / `last_fault_reason` | DERIVED LIVE | `NO RECORDED FAULT` |
+| Last recovery (duration) | `runtime_resilience_nodes.last_recovery_ms` | DERIVED LIVE | `—` and result `—` (never auto-PASS) |
+| Recovery target / met | target = 5000ms; `met = last_recovery_ms <= target` | DERIVED LIVE | result `—` when no recovery data |
+| Restarts 24h / container uptime | `runtime_resilience_nodes` counters | DERIVED LIVE | `UNAVAILABLE` (never 0) |
+| Ollama models | heartbeat `local_services.ollama.model_count` | DERIVED LIVE | `UNAVAILABLE` (never 0) |
+| CPU / RAM | heartbeat `local_services.host.cpu_percent` / `memory_percent` | DERIVED LIVE | `UNAVAILABLE` (never 0) |
+| Temperature | `runtime_resilience_nodes.temperature_c` | DERIVED LIVE | `UNAVAILABLE` (never 0) |
+| Recovery events | `runtime_recovery_events` (node, method, fault/recovered times, reason, target result) | DERIVED LIVE | `NO RECOVERY EVENTS RECORDED` |
+
+**Key rules:**
+- Local liveness and cloud heartbeat remain separate — liveness is never
+  computed from heartbeat timestamps, and the cloud heartbeat interval is never
+  used as the recovery timer.
+- `target_met = recovery_ms <= target_ms`; the node result derives from real
+  `last_recovery_ms` only. Missing recovery data never renders PASS.
+- WATCHDOG FAULT (watchdog stopped/failed while bridge may run) is distinct from
+  OFFLINE (bridge stopped reporting beyond the authoritative 5-minute timeout).
+- Incomplete optional telemetry alone never marks a node OFFLINE.
+- The runtime bridge remains outbound-only and fail-closed; this band adds no
+  inbound control path to HAL or TRON.
+
+---
+
 ## AI Systems card (Compute Core right)
 
 | Display label | Selector | Underlying source | Class | Freshness | Missing-data | Simulation |

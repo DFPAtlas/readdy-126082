@@ -1,0 +1,39 @@
+# Environment / secrets
+
+.env
+.env.local
+.env.production
+.env.staging
+.env.*.local
+.env.*.production
+.env.*.staging
+
+# Local runtime bridge secrets
+
+runtime-bridge/.env
+
+# Private keys / certificates
+
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dependencies / build output
+
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Editor / OS
+
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Logs
+
+*.log
+npm-debug.log*

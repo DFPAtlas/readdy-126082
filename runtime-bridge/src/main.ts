@@ -37,6 +37,7 @@ const config = {
   n8nSecondaryUrl: (Deno.env.get("N8N_SECONDARY_URL") ?? "").trim(),
   n8nSandboxWebhookPath: (Deno.env.get("N8N_SANDBOX_WEBHOOK_PATH") ?? "").trim(),
   ollamaUrl: (Deno.env.get("OLLAMA_LOCAL_URL") ?? "").trim(),
+  ragUrl: (Deno.env.get("RAG_LOCAL_URL") ?? "").trim(),
   heartbeatSeconds: parseInt(Deno.env.get("HEARTBEAT_INTERVAL_SECONDS") ?? "60", 10),
   pollSeconds: parseInt(Deno.env.get("POLL_INTERVAL_SECONDS") ?? "30", 10),
 };
@@ -169,6 +170,123 @@ async function checkOllama(): Promise<{ status: string; latency_ms: number | nul
   } catch {
     return { status: "unavailable", latency_ms: null, models: null };
   }
+}
+
+// --- Local Atlas TRON RAG health check (read-only, sanitised) -----------------
+// The Atlas TRON RAG API is a local FastAPI service (systemd atlas-rag-api.service)
+// bound to TRON on port 8100. The bridge checks GET /health (expects status=ok +
+// service=atlas-tron-rag) and confirms the required embedding model
+// nomic-embed-text is present in the sanitised Ollama catalogue. It NEVER calls
+// /search, /api/embed, or any retrieval endpoint, and never sends prompts,
+// retrieved text, embeddings, or knowledge content to DFP Command.
+const RAG_EMBED_MODEL = "nomic-embed-text";
+const RAG_HEALTH_TIMEOUT_MS = 10000;
+
+interface RagHealth {
+  configured: boolean;
+  /** RAG state word: ready | degraded | offline | not_configured. */
+  status: string;
+  /** Sanitised health-vocabulary status for ai_runtime_health_checks. */
+  health_status: string;
+  api_status: string;
+  embedding_model_status: string;
+  latency_ms: number | null;
+  reason: string;
+  sampled_at: string;
+}
+
+async function checkRag(): Promise<RagHealth> {
+  const sampledAt = new Date().toISOString();
+  if (!config.ragUrl) {
+    return {
+      configured: false,
+      status: "not_configured",
+      health_status: "not_configured",
+      api_status: "not_configured",
+      embedding_model_status: "not_configured",
+      latency_ms: null,
+      reason: "rag_not_configured",
+      sampled_at: sampledAt,
+    };
+  }
+
+  // 1. RAG API /health probe (fixed local target, never cloud-supplied).
+  let apiStatus = "unreachable";
+  let apiHealthy = false;
+  let latencyMs: number | null = null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), RAG_HEALTH_TIMEOUT_MS);
+  try {
+    const started = Date.now();
+    const res = await fetch(config.ragUrl.replace(/\/+$/, "") + "/health", {
+      method: "GET",
+      signal: controller.signal,
+    });
+    latencyMs = Date.now() - started;
+    if (res.ok) {
+      const data = (await res.json()) as Record<string, unknown>;
+      const statusOk = typeof data.status === "string" && data.status.trim().toLowerCase() === "ok";
+      const serviceOk = typeof data.service === "string" && data.service.trim().toLowerCase() === "atlas-tron-rag";
+      apiStatus = statusOk && serviceOk ? "ok" : "unhealthy";
+      apiHealthy = apiStatus === "ok";
+    } else {
+      apiStatus = "unhealthy";
+    }
+  } catch {
+    apiStatus = "unreachable";
+    latencyMs = null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  // 2. Required embedding model presence (reuse sanitised Ollama catalogue).
+  let embeddingStatus = "missing";
+  if (config.ollamaUrl) {
+    const models = await fetchOllamaCatalogue();
+    const names = models.map((m) => {
+      const n = m.name;
+      return typeof n === "string" ? n.trim().toLowerCase() : "";
+    });
+    const present = names.some((n) => {
+      const base = n.split(":")[0] ?? "";
+      return base === RAG_EMBED_MODEL || n === RAG_EMBED_MODEL || n === `${RAG_EMBED_MODEL}:latest`;
+    });
+    if (present) embeddingStatus = "present";
+  }
+
+  // 3. Derive the RAG state.
+  let status: string;
+  let reason: string;
+  if (apiHealthy && embeddingStatus === "present") {
+    status = "ready";
+    reason = "healthy";
+  } else if (apiHealthy && embeddingStatus === "missing") {
+    status = "degraded";
+    reason = "embedding_model_missing";
+  } else if (apiStatus === "unhealthy") {
+    status = "offline";
+    reason = "rag_api_unhealthy";
+  } else {
+    status = "offline";
+    reason = "rag_api_unreachable";
+  }
+
+  const healthStatus =
+    status === "ready" ? "healthy"
+      : status === "degraded" ? "degraded"
+        : status === "offline" ? "unavailable"
+          : "not_configured";
+
+  return {
+    configured: true,
+    status,
+    health_status: healthStatus,
+    api_status: apiStatus,
+    embedding_model_status: embeddingStatus,
+    latency_ms: latencyMs,
+    reason,
+    sampled_at: sampledAt,
+  };
 }
 
 // --- Sanitised Ollama catalogue relay (Prompt 09C) ----------------------------
@@ -1640,7 +1758,7 @@ async function handshake(): Promise<boolean> {
     software_version: "1.0.0",
     platform: "deno",
     configuration_state: "configured",
-    capabilities: ["n8n_health", "n8n_metadata", "ollama_health", "ollama_models", "signed_callbacks", "outbound_https"],
+    capabilities: ["n8n_health", "n8n_metadata", "ollama_health", "ollama_models", "rag_health", "signed_callbacks", "outbound_https"],
   });
   if (result && (result as { verified?: boolean }).verified) {
     log("handshake verified — bridge registered (execution disabled).");
@@ -1654,6 +1772,7 @@ async function heartbeat(): Promise<void> {
   const n8n = await checkN8nUrl(config.n8nUrl);
   const n8nSecondary = await checkN8nUrl(config.n8nSecondaryUrl);
   const ollama = await checkOllama();
+  const rag = await checkRag();
   const host = await sampleHostTelemetry();
   const started = Date.now();
   const result = await sendRequest("heartbeat", {
@@ -1667,10 +1786,19 @@ async function heartbeat(): Promise<void> {
       n8n: { configured: n8n.configured, status: n8n.status, latency_ms: n8n.latency_ms, sampled_at: n8n.sampled_at },
       n8n_secondary: { configured: n8nSecondary.configured, status: n8nSecondary.status, latency_ms: n8nSecondary.latency_ms, sampled_at: n8nSecondary.sampled_at },
       ollama: { configured: !!config.ollamaUrl, status: ollama.status, model_count: ollama.models },
+      rag: {
+        configured: rag.configured,
+        status: rag.status,
+        api_status: rag.api_status,
+        embedding_model_status: rag.embedding_model_status,
+        latency_ms: rag.latency_ms,
+        sampled_at: rag.sampled_at,
+        reason: rag.reason,
+      },
       host,
     },
-    safe_summary: `Bridge heartbeat: n8n=${n8n.status}, n8n_secondary=${n8nSecondary.status}, ollama=${ollama.status} (no inference, no workflow).`,
-    capabilities: ["n8n_health", "n8n_metadata", "ollama_health", "ollama_models", "signed_callbacks", "outbound_https"],
+    safe_summary: `Bridge heartbeat: n8n=${n8n.status}, n8n_secondary=${n8nSecondary.status}, ollama=${ollama.status}, rag=${rag.status} (no inference, no workflow, no retrieval).`,
+    capabilities: ["n8n_health", "n8n_metadata", "ollama_health", "ollama_models", "rag_health", "signed_callbacks", "outbound_https"],
   });
   if (result) {
     await sendRequest("report_health", {
@@ -1678,6 +1806,7 @@ async function heartbeat(): Promise<void> {
       checks: [
         { service: "n8n", status: n8n.status, latency_ms: n8n.latency_ms, safe_message: "Local n8n /healthz (read-only, no workflow)." },
         { service: "ollama", status: ollama.status, latency_ms: ollama.latency_ms, safe_message: "Local Ollama /api/tags (catalogue only, no inference)." },
+        { service: "rag", status: rag.health_status, latency_ms: rag.latency_ms, safe_message: "Local Atlas TRON RAG /health + nomic-embed-text presence (read-only, no retrieval)." },
         { service: "bridge", status: "healthy", latency_ms: null, safe_message: "Bridge process healthy." },
       ],
     });

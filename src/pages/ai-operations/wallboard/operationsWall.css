@@ -240,43 +240,137 @@
   100% { left: 100%; opacity: 0; }
 }
 
-/* Healthy — full data-flow animation. */
-.ow-relay-active .ow-relay-packet-hal {
+/* Node endpoints — low-intensity glow points at HAL (left) and TRON (right),
+   drawn as ::before dots on the outer edge of each track. The DFP centre
+   point remains the existing ow-relay-core. */
+.ow-relay-track-hal::before,
+.ow-relay-track-tron::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transition: opacity 0.4s ease, box-shadow 0.4s ease;
+}
+.ow-relay-track-hal::before {
+  left: 0;
+  transform: translate(-50%, -50%);
+  background: #fb923c;
+}
+.ow-relay-track-tron::before {
+  right: 0;
+  transform: translate(50%, -50%);
+  background: #a78bfa;
+}
+
+.ow-relay-track-hal.ow-relay-track-live::before {
+  box-shadow: 0 0 6px 1px rgba(251, 146, 60, 0.8);
+}
+.ow-relay-track-tron.ow-relay-track-live::before {
+  box-shadow: 0 0 6px 1px rgba(167, 139, 250, 0.8);
+}
+.ow-relay-track-degraded::before {
+  background: #f59e0b;
+  box-shadow: 0 0 5px 1px rgba(245, 158, 11, 0.55);
+}
+.ow-relay-track-recovering::before {
+  background: #f59e0b;
+  box-shadow: 0 0 6px 1px rgba(245, 158, 11, 0.7);
+  animation: ow-relay-recover 1.2s ease-in-out infinite;
+}
+.ow-relay-track-offline::before {
+  background: #475569;
+  box-shadow: none;
+  opacity: 0.5;
+}
+
+@keyframes ow-relay-recover {
+  0%, 100% { opacity: 0.95; }
+  50% { opacity: 0.35; }
+}
+
+/* HAL side packets — HAL → DFP (rightwards). */
+.ow-relay-track-hal.ow-relay-track-live .ow-relay-packet-hal {
   animation: ow-relay-hal-to-dfp 4s linear infinite;
 }
-.ow-relay-active .ow-relay-ack-hal {
+.ow-relay-track-hal.ow-relay-track-live .ow-relay-ack-hal {
   animation: ow-relay-dfp-to-hal 4s linear infinite;
   animation-delay: 0.5s;
 }
-.ow-relay-active .ow-relay-packet-tron {
+.ow-relay-track-hal.ow-relay-track-degraded .ow-relay-packet-hal {
+  animation: ow-relay-hal-to-dfp 9s linear infinite;
+}
+.ow-relay-track-hal.ow-relay-track-degraded .ow-relay-ack-hal {
+  animation: ow-relay-dfp-to-hal 9s linear infinite;
+  animation-delay: 0.5s;
+}
+.ow-relay-track-hal.ow-relay-track-recovering .ow-relay-packet-hal {
+  animation: ow-relay-hal-to-dfp 6s linear infinite;
+}
+.ow-relay-track-hal.ow-relay-track-recovering .ow-relay-ack-hal {
+  animation: ow-relay-dfp-to-hal 6s linear infinite;
+  animation-delay: 0.5s;
+}
+
+/* TRON side packets — TRON → DFP (leftwards). */
+.ow-relay-track-tron.ow-relay-track-live .ow-relay-packet-tron {
   animation: ow-relay-tron-to-dfp 4s linear infinite;
   animation-delay: 1s;
 }
-.ow-relay-active .ow-relay-ack-tron {
+.ow-relay-track-tron.ow-relay-track-live .ow-relay-ack-tron {
   animation: ow-relay-dfp-to-tron 4s linear infinite;
   animation-delay: 1.5s;
 }
+.ow-relay-track-tron.ow-relay-track-degraded .ow-relay-packet-tron {
+  animation: ow-relay-tron-to-dfp 9s linear infinite;
+  animation-delay: 1s;
+}
+.ow-relay-track-tron.ow-relay-track-degraded .ow-relay-ack-tron {
+  animation: ow-relay-dfp-to-tron 9s linear infinite;
+  animation-delay: 1.5s;
+}
+.ow-relay-track-tron.ow-relay-track-recovering .ow-relay-packet-tron {
+  animation: ow-relay-tron-to-dfp 6s linear infinite;
+  animation-delay: 1s;
+}
+.ow-relay-track-tron.ow-relay-track-recovering .ow-relay-ack-tron {
+  animation: ow-relay-dfp-to-tron 6s linear infinite;
+  animation-delay: 1.5s;
+}
 
-/* Degraded — packets stop, core glows a slow static amber. */
+/* Degraded / recovering side — the whole side dims and pulses amber. */
+.ow-relay-track-degraded {
+  opacity: 0.5;
+}
+.ow-relay-track-recovering {
+  animation: ow-relay-recover 1.2s ease-in-out infinite;
+}
+/* Offline side — static, dim, no packet motion. */
+.ow-relay-track-offline {
+  opacity: 0.28;
+}
+
+/* Centre DFP point — overall cross-node state (healthy keeps the cyan base). */
 @keyframes ow-relay-amber {
   0%, 100% { box-shadow: 0 0 8px 0 rgba(245, 158, 11, 0.2), inset 0 0 8px 0 rgba(245, 158, 11, 0.1); }
   50% { box-shadow: 0 0 16px 0 rgba(245, 158, 11, 0.45), inset 0 0 10px 0 rgba(245, 158, 11, 0.2); }
 }
-.ow-relay-degraded .ow-relay-track {
-  opacity: 0.45;
-}
-.ow-relay-degraded .ow-relay-core {
+.ow-relay-core-degraded,
+.ow-relay-core-partial {
   border-color: rgba(245, 158, 11, 0.55);
   color: #fbbf24;
   background: radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.16), rgba(245, 158, 11, 0.03));
   animation: ow-relay-amber 3s ease-in-out infinite;
 }
-
-/* Offline / partial — all motion stops, tracks dim, core muted. */
-.ow-relay-idle .ow-relay-track {
-  opacity: 0.3;
+.ow-relay-core-recovering {
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fbbf24;
+  background: radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.16), rgba(245, 158, 11, 0.03));
+  box-shadow: 0 0 10px 0 rgba(245, 158, 11, 0.3), inset 0 0 9px 0 rgba(245, 158, 11, 0.16);
+  animation: ow-relay-recover 1.2s ease-in-out infinite;
 }
-.ow-relay-idle .ow-relay-core {
+.ow-relay-core-offline {
   opacity: 0.5;
   border-color: rgba(100, 116, 139, 0.4);
   color: #64748b;
@@ -871,6 +965,7 @@
 @media (prefers-reduced-motion: reduce) {
   .ow-pulse, .ow-hb-pulse, .ow-alert, .ow-alert-row, .ow-ring, .ow-flow, .ow-flow-y, .ow-arrive, .ow-progress,
   .ow-relay-packet-hal, .ow-relay-ack-hal, .ow-relay-packet-tron, .ow-relay-ack-tron, .ow-relay-core,
+  .ow-relay-track-recovering, .ow-relay-track-recovering::before,
   .ow-dial-pulse, .ow-tron-orbit, .ow-tron-pulse,
   .ow-ai-vector-orbit, .ow-ai-tools-point, .ow-safety-alert, .ow-safety-pulse,
   .ow-ticker-track,
@@ -1276,4 +1371,342 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   white-space: nowrap;
+}
+
+/* --- HAL / TRON node-card zones (machine identity layout) --------------- */
+
+/* Role-specific system states — clean inline rows (label + icon + status),
+   grouped above the resilience strip without heavy table borders. */
+.ow-node-role {
+  border-top: 1px solid var(--ow-border-subtle);
+  padding-top: 5px;
+}
+
+/* Resilience footer strip — a dedicated, visually anchored subsystem. */
+.ow-node-resilience {
+  margin-top: auto;
+  border-top: 1px solid var(--ow-border);
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.06), rgba(34, 211, 238, 0.02));
+  padding: 5px 7px 4px;
+}
+
+/* --- RAG / OVERWATCH role states (STANDBY dormant + live active) ---------- */
+
+/* STANDBY dot — low-intensity neutral pulse (system defined, telemetry not
+   yet connected). Never red; never implies a fault. */
+@keyframes ow-standby-pulse {
+  0%, 100% { opacity: 0.85; box-shadow: 0 0 3px 0 rgba(100, 116, 139, 0.28); }
+  50% { opacity: 0.4; box-shadow: 0 0 6px 0 rgba(100, 116, 139, 0.4); }
+}
+.ow-standby-pulse {
+  animation: ow-standby-pulse 3.6s ease-in-out infinite;
+}
+
+/* RAG dormant — faint scanning line sweeping across the icon (retrieval layer
+   defined but not yet connected). */
+.ow-role-dormant-rag {
+  position: relative;
+  overflow: hidden;
+  border-radius: 2px;
+}
+.ow-role-dormant-rag::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(100, 116, 139, 0.22) 50%, transparent 100%);
+  transform: translateX(-120%);
+  animation: ow-rag-scan 4.5s ease-in-out infinite;
+}
+@keyframes ow-rag-scan {
+  0% { transform: translateX(-120%); }
+  55%, 100% { transform: translateX(120%); }
+}
+
+/* OVERWATCH dormant — slow radar sweep (a faint arc rotating around the icon). */
+.ow-role-dormant-overwatch {
+  position: relative;
+}
+.ow-role-dormant-overwatch::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  border-top-color: rgba(100, 116, 139, 0.4);
+  animation: ow-overwatch-sweep 5s linear infinite;
+}
+@keyframes ow-overwatch-sweep {
+  to { transform: rotate(360deg); }
+}
+
+/* RAG READY — subtle active glow (reserved for real live telemetry; never
+   shown while STANDBY). */
+.ow-role-active-rag {
+  position: relative;
+}
+.ow-role-active-rag::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 2px;
+  box-shadow: 0 0 6px 0 rgba(34, 197, 94, 0.5);
+  animation: ow-rag-active 2.8s ease-in-out infinite;
+}
+@keyframes ow-rag-active {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 0.35; }
+}
+
+/* OVERWATCH ACTIVE — distinct monitoring sweep (brighter, reserved for real
+   live telemetry; never shown while STANDBY). */
+.ow-role-active-overwatch {
+  position: relative;
+}
+.ow-role-active-overwatch::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  border-top-color: rgba(34, 197, 94, 0.7);
+  animation: ow-overwatch-active 2.4s linear infinite;
+}
+@keyframes ow-overwatch-active {
+  to { transform: rotate(360deg); }
+}
+
+/* ============================================================================
+   RUNTIME RESILIENCE INDICATORS — ECG heartbeat / watchdog / recovery.
+   Presentation-only motion for the HAL + TRON resilience rows inside Compute
+   Core. All effects are subtle, low-noise and GPU-friendly (stroke-dashoffset
+   and transform-rotate on tiny elements). No business logic lives here.
+   ============================================================================ */
+
+/* --- Heartbeat ECG trace ------------------------------------------------ */
+
+.ow-ecg {
+  display: block;
+  width: 46px;
+  height: 14px;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.ow-ecg-path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ow-ecg-base {
+  stroke: var(--ow-ecg-accent, #22d3ee);
+  stroke-width: 1;
+  opacity: 0.22;
+}
+
+.ow-ecg-sweep {
+  stroke: var(--ow-ecg-accent, #22d3ee);
+  stroke-width: 1.6;
+  opacity: 0.95;
+  stroke-dasharray: 12 130;
+}
+
+/* Healthy — bright pulse travelling along the trace + a faint glow. */
+.ow-ecg-live .ow-ecg-sweep {
+  animation: ow-ecg-sweep 2.6s linear infinite;
+  filter: drop-shadow(0 0 2.5px var(--ow-ecg-accent, #22d3ee));
+}
+
+/* Degraded — same trace, slower + weaker (warning tone). */
+.ow-ecg-stale .ow-ecg-sweep {
+  animation: ow-ecg-sweep 5.2s linear infinite;
+  opacity: 0.5;
+}
+
+/* Offline / none — flat inactive trace, no motion. */
+.ow-ecg-offline .ow-ecg-base,
+.ow-ecg-none .ow-ecg-base {
+  opacity: 0.12;
+}
+.ow-ecg-offline .ow-ecg-sweep,
+.ow-ecg-none .ow-ecg-sweep {
+  opacity: 0;
+  animation: none;
+}
+
+/* Recovering — the trace keeps sweeping but flickers through the transition. */
+.ow-ecg-recovering .ow-ecg-sweep {
+  animation: ow-ecg-sweep 2.6s linear infinite, ow-ecg-flicker 1.1s ease-in-out infinite;
+}
+
+@keyframes ow-ecg-sweep {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -142; }
+}
+
+@keyframes ow-ecg-flicker {
+  0%, 100% { opacity: 0.95; }
+  50% { opacity: 0.4; }
+}
+
+/* --- Watchdog indicator -------------------------------------------------- */
+
+.ow-watchdog {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.ow-watchdog-mark {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ow-watchdog-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    var(--ow-wd-accent, #22c55e) 0deg,
+    var(--ow-wd-accent, #22c55e) 70deg,
+    transparent 70deg,
+    transparent 360deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1px));
+}
+
+.ow-watchdog-core {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ow-wd-accent, #22c55e);
+}
+
+/* Running — steady breathing core + slow radar sweep (active / watching). */
+.ow-watchdog-running .ow-watchdog-ring {
+  animation: ow-watchdog-sweep 3.2s linear infinite;
+}
+.ow-watchdog-running .ow-watchdog-core {
+  animation: ow-watchdog-breathe 2.8s ease-in-out infinite;
+}
+
+/* Recovering — dashed stepped ring (in progress, not a full sweep). */
+.ow-watchdog-recovering .ow-watchdog-ring {
+  background: none;
+  border: 1px dashed var(--ow-wd-accent, #f59e0b);
+  -webkit-mask: none;
+  mask: none;
+  animation: ow-watchdog-spin 1.4s linear infinite;
+}
+.ow-watchdog-recovering .ow-watchdog-core {
+  animation: ow-watchdog-breathe 1.4s ease-in-out infinite;
+}
+
+/* Fault — static red ring, slow serious pulse (no healthy sweep). */
+.ow-watchdog-fault .ow-watchdog-ring {
+  background: none;
+  border: 1px solid var(--ow-wd-accent, #ef4444);
+  -webkit-mask: none;
+  mask: none;
+  animation: ow-watchdog-fault-ring 1.8s ease-in-out infinite;
+}
+.ow-watchdog-fault .ow-watchdog-core {
+  animation: ow-watchdog-breathe 1.8s ease-in-out infinite;
+}
+
+/* None — muted static marker. */
+.ow-watchdog-none .ow-watchdog-ring {
+  opacity: 0.35;
+}
+
+@keyframes ow-watchdog-sweep {
+  to { transform: rotate(360deg); }
+}
+@keyframes ow-watchdog-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes ow-watchdog-breathe {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px 0 var(--ow-wd-accent, #22c55e); }
+  50% { opacity: 0.45; box-shadow: 0 0 8px 0 var(--ow-wd-accent, #22c55e); }
+}
+@keyframes ow-watchdog-fault-ring {
+  0%, 100% { opacity: 0.9; box-shadow: 0 0 4px 0 var(--ow-wd-accent, #ef4444); }
+  50% { opacity: 0.4; box-shadow: 0 0 9px 0 var(--ow-wd-accent, #ef4444); }
+}
+
+/* --- Recovery indicator --------------------------------------------------- */
+
+.ow-recovery-progress-bar {
+  width: 22px;
+  height: 3px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.ow-recovery-pass-value {
+  text-shadow: 0 0 6px rgba(34, 197, 94, 0.45);
+}
+
+.ow-recovery-pass {
+  animation: ow-recovery-pass 3s ease-in-out infinite;
+}
+
+.ow-recovery-fail {
+  animation: ow-recovery-fail 2s ease-in-out infinite;
+}
+
+@keyframes ow-recovery-pass {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+  50% { box-shadow: 0 0 6px 0 rgba(34, 197, 94, 0.55); }
+}
+@keyframes ow-recovery-fail {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  50% { box-shadow: 0 0 6px 0 rgba(239, 68, 68, 0.5); }
+}
+
+/* --- DFP Relay estate summary live dot ------------------------------------ */
+
+.ow-summary-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: ow-summary-pulse 3s ease-in-out infinite;
+}
+
+@keyframes ow-summary-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 3px 0 rgba(34, 197, 94, 0.6); }
+  50% { opacity: 0.4; box-shadow: 0 0 6px 0 rgba(34, 197, 94, 0.8); }
+}
+
+/* Respect reduced-motion users — stop all new decorative movement. */
+@media (prefers-reduced-motion: reduce) {
+  .ow-ecg-live .ow-ecg-sweep,
+  .ow-ecg-stale .ow-ecg-sweep,
+  .ow-ecg-recovering .ow-ecg-sweep,
+  .ow-watchdog-running .ow-watchdog-ring,
+  .ow-watchdog-running .ow-watchdog-core,
+  .ow-watchdog-recovering .ow-watchdog-ring,
+  .ow-watchdog-recovering .ow-watchdog-core,
+  .ow-watchdog-fault .ow-watchdog-ring,
+  .ow-watchdog-fault .ow-watchdog-core,
+  .ow-recovery-pass,
+  .ow-recovery-fail,
+  .ow-summary-dot,
+  .ow-standby-pulse,
+  .ow-role-dormant-rag::after,
+  .ow-role-dormant-overwatch::before,
+  .ow-role-active-rag::after,
+  .ow-role-active-overwatch::before {
+    animation: none !important;
+  }
 }

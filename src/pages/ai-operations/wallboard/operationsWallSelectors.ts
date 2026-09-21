@@ -28,6 +28,7 @@ import {
 import {
   getSiteMasterCards,
   getGroupOrchestrator,
+  type GroupOrchestrator,
 } from '@/pages/ai-operations/wallboard/masterAgentsSelectors';
 import { getOperationsHealthData } from '@/pages/ai-operations/wallboard/operationsHealthStore';
 import { getHalHost, getTronHost } from '@/pages/ai-operations/wallboard/aiInfraSelectors';
@@ -552,9 +553,46 @@ export interface GlobalSystemState {
   tone: Tone;
 }
 
+/** Core-system statuses that are explicitly healthy. Every other status —
+ *  offline / degraded / unknown / not_monitored / not_configured — is
+ *  non-healthy and prevents an unsupported NOMINAL claim. */
+const CORE_HEALTHY_STATUS = new Set<CoreSystemStatus>(['online', 'active', 'healthy']);
+
+/** AI-system displayed values that are NOT healthy (offline / degraded /
+ *  unknown). The command-wide state can never report NOMINAL while any AI
+ *  system row is showing one of these. */
+const AI_UNHEALTHY_VALUES = new Set<string>([
+  'OFFLINE',
+  'DEGRADED',
+  'UNKNOWN',
+  'UNAVAILABLE',
+  'ALERT',
+  'WARNING',
+]);
+
+/**
+ * Command-wide system state — derived from EVERY required current signal, not
+ * only the website modules and persisted alerts. Priority:
+ *
+ *   1. Group live-data unavailable                          → OFFLINE
+ *   2. Active critical alert / incident                     → CRITICAL
+ *   3. HAL + TRON both offline, the data platform offline,
+ *      or a safety alert                                    → CRITICAL
+ *   4. Any core system not explicitly healthy (including
+ *      unknown / not monitored / not configured)            → DEGRADED
+ *   5. Any website offline / degraded / stale / unknown      → DEGRADED
+ *   6. Any AI system offline / degraded / unknown            → DEGRADED
+ *   7. Otherwise                                             → NOMINAL
+ *
+ * NOMINAL is allowed ONLY when every required current signal is explicitly
+ * healthy — missing, unknown, stale and fallback data are never treated as
+ * healthy. The website metrics ("8/8 sites online" / "100% estate online")
+ * stay website-only and never determine the command-wide state.
+ */
 export function getGlobalSystemState(): GlobalSystemState {
   const data = getGroupLiveData();
 
+  // 1. No authoritative group live data at all.
   if (data.mode === 'unavailable') {
     return { state: 'offline', label: 'OFFLINE', tone: 'muted' };
   }
@@ -568,16 +606,38 @@ export function getGlobalSystemState(): GlobalSystemState {
   const criticalAlerts = data.alerts.filter((a) => isActiveAlert(a) && a.severity === 'critical').length;
   const highAlerts = data.alerts.filter((a) => isActiveAlert(a) && a.severity === 'high').length;
 
+  // 2. Active critical alert / incident.
   if (criticalIncidents > 0 || criticalAlerts > 0) {
     return { state: 'critical', label: 'CRITICAL', tone: 'red' };
   }
+
+  // 3. Critical core / safety fault — both runtime nodes down, the data
+  //    platform down, or a safety alert.
+  const core = getCoreSystems();
+  const coreByKey = new Map(core.map((c) => [c.key, c]));
+  const halOffline = coreByKey.get('hal')?.status === 'offline';
+  const tronOffline = coreByKey.get('tron')?.status === 'offline';
+  const supabaseOffline = coreByKey.get('supabase')?.status === 'offline';
+  const safetyAlert = getSafetyAssessment().status === 'alert';
+
+  if ((halOffline && tronOffline) || supabaseOffline || safetyAlert) {
+    return { state: 'critical', label: 'CRITICAL', tone: 'red' };
+  }
+
+  // 4. Any visible core system that is not explicitly healthy (this includes
+  //    offline / degraded / unknown / not monitored / not configured).
+  if (core.some((c) => !CORE_HEALTHY_STATUS.has(c.status))) {
+    return { state: 'degraded', label: 'DEGRADED', tone: 'amber' };
+  }
+
+  // High-severity incidents / alerts sit below the critical tier.
   if (highIncidents > 0 || highAlerts > 0) {
     return { state: 'degraded', label: 'DEGRADED', tone: 'amber' };
   }
 
+  // 5. Website estate contribution — offline/degraded failures plus stale and
+  //    unknown (unverifiable) results all prevent an unsupported NOMINAL claim.
   const modules = getSiteModules();
-  // Website contribution to global state — offline/degraded failures plus stale
-  // and unknown (unverifiable) results all prevent an unsupported NOMINAL claim.
   const websiteDegraded = modules.filter(
     (x) =>
       x.state === 'degraded' ||
@@ -588,6 +648,13 @@ export function getGlobalSystemState(): GlobalSystemState {
   if (websiteDegraded > 0) {
     return { state: 'degraded', label: 'DEGRADED', tone: 'amber' };
   }
+
+  // 6. AI systems contribution — any offline / degraded / unknown row.
+  if (getAiSystemsStatus().some((r) => AI_UNHEALTHY_VALUES.has(r.value))) {
+    return { state: 'degraded', label: 'DEGRADED', tone: 'amber' };
+  }
+
+  // 7. Every required current signal is explicitly healthy.
   return { state: 'nominal', label: 'NOMINAL', tone: 'green' };
 }
 
@@ -637,6 +704,26 @@ function freshnessOf(iso: string | null | undefined): Freshness {
   if (age < 0) return 'live';
   if (age <= LIVE_AGE_MS) return 'live';
   if (age <= STALE_AGE_MS) return 'stale';
+  return 'offline';
+}
+
+// Overwatch freshness — the cloud-side runtime monitoring sweep runs on a
+// ~15-minute schedule (ai_runtime_monitoring_rules.interval_minutes), so a
+// much longer window than the 150s/5m bridge-heartbeat window is authoritative:
+//   LIVE    ≤ 30 min  (≤ 1 missed cycle)
+//   STALE   ≤ 60 min  (2–3 missed cycles)
+//   OFFLINE  > 60 min
+const OVERWATCH_LIVE_AGE_MS = 30 * 60_000;
+const OVERWATCH_STALE_AGE_MS = 60 * 60_000;
+
+function overwatchFreshnessOf(iso: string | null | undefined): Freshness {
+  if (!iso) return 'offline';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 'offline';
+  const age = Date.now() - t;
+  if (age < 0) return 'live';
+  if (age <= OVERWATCH_LIVE_AGE_MS) return 'live';
+  if (age <= OVERWATCH_STALE_AGE_MS) return 'stale';
   return 'offline';
 }
 
@@ -941,6 +1028,10 @@ export interface ComputeGauge {
   value: string;
   percent: number | null;
   accent: 'orange' | 'cyan';
+  /** Telemetry freshness derived from the node's OWN heartbeat. A stored value
+   *  alone is never live — stale/offline retained readings are labelled
+   *  LAST KNOWN by the presentation layer. */
+  freshness: 'live' | 'stale' | 'offline';
 }
 
 /** Ring tone for a TRON HUD instrument (count/status dials, never a percentage). */
@@ -960,58 +1051,289 @@ export interface TronDial {
   live: boolean;
 }
 
+/** A single role-specific status row (N8N/MASTER/BRIDGE on HAL; RAG/OVERWATCH
+ *  on TRON). `tone` drives the value colour — green/amber/red for live states,
+ *  muted for AWAITING TELEMETRY / NOT CONFIGURED / —. `detail` is an optional
+ *  secondary sub-label (e.g. "SUPABASE SCHEDULER") rendered beneath the row
+ *  to record the authoritative source of the status. */
+export interface ComputeStatusRow {
+  label: string;
+  value: string;
+  tone: Tone;
+  detail?: string;
+}
+
 export interface ComputeNode {
   name: string;
   subtitle: string;
   state: 'nominal' | 'degraded' | 'offline';
   stateLabel: string;
   tone: Tone;
-  metrics: { label: string; value: string }[];
+  /** Role-specific status rows (node fields that are NOT the heartbeat). */
+  statusRows: ComputeStatusRow[];
+  /** The ECG heartbeat signal (label + value derived from the bridge node). */
+  heartbeat: { label: string; value: string };
   gauges?: ComputeGauge[];
   dials?: TronDial[];
   /** True when this node's latest heartbeat was operator-injected (SIM- key). */
   simulated: boolean;
 }
 
+/** Freshness of a runtime node's OWN heartbeat, reusing the shared 150s live /
+ *  5-minute offline thresholds. An operator-injected (SIM-) heartbeat is never
+ *  treated as live telemetry. */
+function nodeHeartbeatFreshness(nodeKey: string): 'live' | 'stale' | 'offline' {
+  const health = getRuntimeHealthState();
+  const node = health.bridgeNodesByKey[nodeKey];
+  const hb = health.latestHeartbeatByNodeKey[nodeKey];
+  if (hb?.heartbeat_key?.startsWith('SIM')) return 'stale';
+  return freshnessOf(hb?.received_at ?? node?.last_heartbeat_at ?? node?.last_seen_at);
+}
+
 /** Read HAL's own bridge heartbeat host telemetry (CPU / memory). Never falls
  *  back to TRON or any other node. Missing/invalid telemetry → null → NOT
- *  MONITORED (never fabricated zero). */
-function getHalHostTelemetry(): { cpuPercent: number | null; memoryPercent: number | null } {
+ *  MONITORED (never fabricated zero). `freshness` is HAL's OWN heartbeat
+ *  freshness — a stored numeric value alone never makes the telemetry live. */
+function getHalHostTelemetry(): {
+  cpuPercent: number | null;
+  memoryPercent: number | null;
+  freshness: 'live' | 'stale' | 'offline';
+} {
   const health = getRuntimeHealthState();
   const hb = health.latestHeartbeatByNodeKey[HAL_RUNTIME_NODE_KEY];
+  const freshness = nodeHeartbeatFreshness(HAL_RUNTIME_NODE_KEY);
   const host = hb?.local_services && typeof hb.local_services === 'object'
     ? (hb.local_services as Record<string, unknown>).host
     : null;
-  if (!host || typeof host !== 'object') return { cpuPercent: null, memoryPercent: null };
+  if (!host || typeof host !== 'object') return { cpuPercent: null, memoryPercent: null, freshness };
   const h = host as Record<string, unknown>;
   const num = (v: unknown): number | null =>
     typeof v === 'number' && Number.isFinite(v) ? (v as number) : null;
   return {
     cpuPercent: num(h.cpu_percent),
     memoryPercent: num(h.memory_percent),
+    freshness,
   };
 }
 
-/** Authoritative bridge state label for a runtime node (LIVE / STALE / OFFLINE /
- *  UNKNOWN). Never derived from array position or a fabricated uptime value. */
-function bridgeLabel(state: string | null | undefined): string {
+/** HAL N8N service status → compact role row (N8N row on HAL). */
+function n8nRow(status: string | null): ComputeStatusRow {
+  switch (status) {
+    case 'healthy':
+      return { label: 'N8N', value: 'HEALTHY', tone: 'green' };
+    case 'degraded':
+      return { label: 'N8N', value: 'DEGRADED', tone: 'amber' };
+    case 'offline':
+    case 'unavailable':
+      return { label: 'N8N', value: 'OFFLINE', tone: 'red' };
+    case 'not_configured':
+      return { label: 'N8N', value: 'NOT CONFIGURED', tone: 'muted' };
+    default:
+      return { label: 'N8N', value: '—', tone: 'muted' };
+  }
+}
+
+/** HAL MASTER freshness window — the DFP master/orchestration layer is
+ *  on-demand and planning/governance-only (orchestration rows carry
+ *  execution_allowed=false; schedules are never registered with a scheduler),
+ *  so there is NO periodic master heartbeat. "Fresh" therefore means recent
+ *  human-driven orchestration activity (a new orchestration request, a run, or
+ *  a schedule execution) within this window — never HAL host health, never n8n
+ *  health, and never the static registry status alone. */
+const MASTER_ACTIVITY_LIVE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** The freshest orchestration activity timestamp across the real orchestration
+ *  runtime evidence already fetched by the wallboard cycle (ai_orchestrations,
+ *  ai_runs, ai_schedules). Returns 'offline' when no activity has ever been
+ *  recorded (treated as stale, never ACTIVE). */
+function masterActivityFreshness(): Freshness {
+  const data = getGroupLiveData();
+  let latest: string | null = null;
+  const consider = (ts: string | null | undefined): void => {
+    if (!ts) return;
+    if (!latest || ts > latest) latest = ts;
+  };
+  for (const o of data.orchestrations) {
+    consider(o.updated_at ?? o.created_at);
+    consider(o.requested_at);
+    consider(o.completed_at);
+  }
+  for (const r of data.runs) {
+    consider(r.updated_at ?? r.created_at);
+    consider(r.started_at);
+    consider(r.completed_at);
+  }
+  for (const s of data.schedules) {
+    consider(s.last_run_at);
+    consider(s.updated_at);
+  }
+  if (!latest) return 'offline';
+  const t = new Date(latest).getTime();
+  if (Number.isNaN(t)) return 'offline';
+  return Date.now() - t <= MASTER_ACTIVITY_LIVE_MS ? 'live' : 'stale';
+}
+
+/** HAL MASTER — the orchestration / master-agent layer (NOT an individual site
+ *  master).
+ *
+ *  AUTHORITATIVE OWNER: `getGroupOrchestrator()` → the DFP Group Master
+ *  Orchestrator (`core-orchestrator`, category = orchestration, agent_type =
+ *  core, site_id = null) in the Central Agent Registry (ai_operations_agents).
+ *  This is a cloud-side (Supabase) registry agent — there is NO HAL-local
+ *  master process, and HAL's runtime bridge relays only n8n/ollama/host/rag.
+ *
+ *  REGISTRY-GATED (wired 2026-09-20): static registry status alone can NEVER
+ *  produce ACTIVE. ACTIVE requires fresh orchestration activity (≤ 24h across
+ *  ai_orchestrations / ai_runs / ai_schedules); absence of activity is
+ *  ambiguous between "idle" and "dead", so it degrades (never fabricates
+ *  ACTIVE, and never fabricates OFFLINE from mere idleness).
+ *
+ *    ACTIVE    → registered, no fault, AND fresh orchestration activity.
+ *    DEGRADED  → registered but activity stale (> 24h), or health warning/paused.
+ *    OFFLINE   → master explicitly reported offline.
+ *    AWAITING  → no group orchestrator record.
+ *
+ *  The `detail` sub-label "CLOUD ORCHESTRATOR" records honestly that the source
+ *  executes cloud-side (Supabase), not locally on HAL. */
+function masterRow(group: GroupOrchestrator | null): ComputeStatusRow {
+  if (!group) return { label: 'MASTER', value: 'AWAITING TELEMETRY', tone: 'muted' };
+  if (group.state === 'offline') {
+    return { label: 'MASTER', value: 'OFFLINE', tone: 'red', detail: 'CLOUD ORCHESTRATOR' };
+  }
+  if (group.state === 'degraded' || group.state === 'paused') {
+    return { label: 'MASTER', value: 'DEGRADED', tone: 'amber', detail: 'CLOUD ORCHESTRATOR' };
+  }
+  // Enabled + no explicit fault → freshness-gated (registry-gated, never static).
+  if (masterActivityFreshness() === 'live') {
+    return { label: 'MASTER', value: 'ACTIVE', tone: 'green', detail: 'CLOUD ORCHESTRATOR' };
+  }
+  return { label: 'MASTER', value: 'DEGRADED', tone: 'amber', detail: 'CLOUD ORCHESTRATOR' };
+}
+
+/** TRON RAG — the live Atlas TRON RAG / retrieval layer.
+ *
+ *  AUTHORITATIVE LIVE SOURCE (wired 2026-09-20): the Atlas TRON RAG API, a
+ *  local FastAPI service (systemd `atlas-rag-api.service`) bound to TRON on
+ *  port 8100. The TRON runtime bridge checks `GET /health` (expects
+ *  `status = ok`, `service = atlas-tron-rag`) and verifies the required
+ *  embedding model `nomic-embed-text` is present in the sanitised Ollama
+ *  catalogue, then relays a sanitised `local_services.rag` object in the
+ *  heartbeat. No retrieval query, embedding, or knowledge content is sent to
+ *  DFP Command.
+ *
+ *    READY     → RAG API /health ok AND nomic-embed-text present AND fresh.
+ *    DEGRADED  → API healthy but embedding model missing (or telemetry stale).
+ *    OFFLINE   → API unreachable / unhealthy, or stale beyond threshold.
+ *    AWAITING  → no RAG report received yet (or RAG_LOCAL_URL not configured). */
+function ragRow(): ComputeStatusRow {
+  const health = getRuntimeHealthState();
+  const hb = health.latestHeartbeatByNodeKey[TRON_RUNTIME_NODE_KEY];
+  const local = hb?.local_services;
+  const rag = local && typeof local === 'object'
+    ? (local as Record<string, unknown>).rag
+    : null;
+
+  if (!rag || typeof rag !== 'object') {
+    return { label: 'RAG', value: 'AWAITING TELEMETRY', tone: 'muted' };
+  }
+
+  const r = rag as Record<string, unknown>;
+  const status = typeof r.status === 'string' ? r.status : null;
+  const configured = r.configured !== false;
+  const sampledAt = typeof r.sampled_at === 'string' ? r.sampled_at : (hb?.received_at ?? null);
+
+  if (!configured || status == null || status === 'not_configured') {
+    return { label: 'RAG', value: 'AWAITING TELEMETRY', tone: 'muted' };
+  }
+
+  const fresh = freshnessOf(sampledAt);
+
+  if (status === 'ready') {
+    if (fresh === 'live') return { label: 'RAG', value: 'READY', tone: 'green' };
+    if (fresh === 'stale') return { label: 'RAG', value: 'DEGRADED', tone: 'amber' };
+    return { label: 'RAG', value: 'OFFLINE', tone: 'red' };
+  }
+  if (status === 'degraded') return { label: 'RAG', value: 'DEGRADED', tone: 'amber' };
+  if (status === 'offline') return { label: 'RAG', value: 'OFFLINE', tone: 'red' };
+
+  return { label: 'RAG', value: 'AWAITING TELEMETRY', tone: 'muted' };
+}
+
+/** TRON OVERWATCH — the estate-wide AI/runtime observation + supervision role.
+ *
+ *  AUTHORITATIVE LIVE SOURCE (wired 2026-09-20): a derived supervisory status
+ *  over the existing DFP runtime-monitoring capability — NOT a TRON-local
+ *  process. The real Overwatch-equivalent runs as the cloud-side scheduled
+ *  runtime monitoring sweep (Supabase pg_cron → `runtime-health-scheduled` →
+ *  `ai_runtime_health_sweeps` + `ai_runtime_health_checks` + `ai_alerts` for
+ *  anomaly/escalation). The Central Agent Registry's `Monitoring Agent`
+ *  (core-monitoring) / `Diagnostics Agent` (core-diagnostics) carry only static
+ *  metadata and have NO heartbeat, so they are the logical owner identity, not
+ *  the liveness proof — sweep freshness + fault counts ARE the liveness proof.
+ *  TRON's own bridge health is a dependency, never proof of Overwatch.
+ *
+ *  The `detail` sub-label "SUPABASE SCHEDULER" records honestly that the source
+ *  executes cloud-side (Supabase), not on TRON itself.
+ *
+ *    ACTIVE    → fresh sweep (≤ 30 min) AND no degraded/unavailable systems
+ *                AND active monitoring rules present.
+ *    DEGRADED  → sweep stale (≤ 60 min), OR a degraded/unavailable system in
+ *                the latest sweep, OR no active monitoring rules.
+ *    OFFLINE   → established sweep source gone stale beyond 60 min.
+ *    AWAITING  → no sweep has ever been recorded. */
+function overwatchRow(): ComputeStatusRow {
+  const health = getRuntimeHealthState();
+  const sweep = health.sweeps[0] ?? null;
+
+  if (!sweep) {
+    return { label: 'OVERWATCH', value: 'AWAITING TELEMETRY', tone: 'muted', detail: 'SUPABASE SCHEDULER' };
+  }
+
+  const completedAt = sweep.completed_at ?? sweep.created_at ?? sweep.started_at;
+  const fresh = overwatchFreshnessOf(completedAt);
+
+  if (fresh === 'offline') {
+    return { label: 'OVERWATCH', value: 'OFFLINE', tone: 'red', detail: 'SUPABASE SCHEDULER' };
+  }
+
+  const hasFault = (sweep.unavailable_count ?? 0) > 0 || (sweep.degraded_count ?? 0) > 0;
+  const activeRules = health.rules.filter((r) => r.enabled === true && r.is_active === true);
+
+  if (fresh === 'stale' || hasFault || activeRules.length === 0) {
+    return { label: 'OVERWATCH', value: 'DEGRADED', tone: 'amber', detail: 'SUPABASE SCHEDULER' };
+  }
+
+  return { label: 'OVERWATCH', value: 'ACTIVE', tone: 'green', detail: 'SUPABASE SCHEDULER' };
+}
+
+/** BRIDGE connection status → compact role row (BRIDGE row on HAL). */
+function bridgeRow(state: string | null): ComputeStatusRow {
   switch (state) {
     case 'healthy':
-      return 'LIVE';
+      return { label: 'BRIDGE', value: 'LIVE', tone: 'green' };
     case 'stale':
     case 'degraded':
-      return 'STALE';
+      return { label: 'BRIDGE', value: 'STALE', tone: 'amber' };
     case 'offline':
-      return 'OFFLINE';
+      return { label: 'BRIDGE', value: 'OFFLINE', tone: 'red' };
     default:
-      return 'UNKNOWN';
+      return { label: 'BRIDGE', value: 'UNKNOWN', tone: 'muted' };
   }
+}
+
+/** Heartbeat signal value for the ECG row (node-alive signal, mirroring the
+ *  existing TRON derivation: healthy→LIVE, stale→STALE, else OFFLINE). */
+function heartbeatValue(host: { state: string } | null): string {
+  if (!host) return '—';
+  if (host.state === 'healthy') return 'LIVE';
+  if (host.state === 'stale') return 'STALE';
+  return 'OFFLINE';
 }
 
 export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: { label: string; sublabel: string; tone: Tone } } {
   const halHost = getHalHost();
   const tronHost = getTronHost();
-  const m = getStatusBarMetrics();
+  const group = getGroupOrchestrator();
   const hostTelemetry = getHalHostTelemetry();
 
   const halState: ComputeNode['state'] =
@@ -1029,23 +1351,26 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
     stateLabel: halState === 'nominal' ? 'NOMINAL' : halState === 'offline' ? 'OFFLINE' : 'DEGRADED',
     tone: halTone,
     simulated: halHost?.simulated ?? false,
-    metrics: [
-      { label: 'AGENT RUNS', value: String(m.activeRuns) },
-      { label: 'BRIDGE', value: bridgeLabel(halHost?.state) },
-      { label: 'STATE', value: halState === 'nominal' ? 'NOMINAL' : halState === 'offline' ? 'OFFLINE' : 'DEGRADED' },
+    statusRows: [
+      n8nRow(halHost?.n8nStatus ?? null),
+      masterRow(group),
+      bridgeRow(halHost?.state ?? null),
     ],
+    heartbeat: { label: 'HEARTBEAT', value: heartbeatValue(halHost) },
     gauges: [
       {
         label: 'CPU',
         value: hostTelemetry.cpuPercent != null ? `${hostTelemetry.cpuPercent.toFixed(1)}%` : '—',
         percent: hostTelemetry.cpuPercent,
         accent: 'orange',
+        freshness: hostTelemetry.freshness,
       },
       {
         label: 'MEMORY',
         value: hostTelemetry.memoryPercent != null ? `${hostTelemetry.memoryPercent.toFixed(1)}%` : '—',
         percent: hostTelemetry.memoryPercent,
         accent: 'cyan',
+        freshness: hostTelemetry.freshness,
       },
     ],
   };
@@ -1072,6 +1397,13 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
   // TRON dial data — resolved ONLY from TRON's own host/status (never HAL).
   const modelCount = tronHost?.ollamaModelCount ?? null;
   const ollamaStatus = tronHost?.ollamaStatus ?? null;
+
+  // TRON's OWN heartbeat freshness — model count and Ollama status are only
+  // LIVE while TRON's own heartbeat is fresh. A stale or offline heartbeat can
+  // never present OLLAMA LIVE / HEALTHY (retained values become LAST KNOWN).
+  const tronFreshness = nodeHeartbeatFreshness(TRON_RUNTIME_NODE_KEY);
+  const tronTelemetryLive = tronFreshness === 'live';
+  const staleLabel = tronFreshness === 'offline' ? 'LAST KNOWN / OFFLINE' : 'LAST KNOWN / STALE';
 
   let ollamaValue: string;
   let ollamaStatusLabel: string;
@@ -1115,6 +1447,17 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
       ollamaLive = false;
   }
 
+  // A retained health reading is only LIVE while TRON's own heartbeat is fresh;
+  // otherwise it is honestly labelled LAST KNOWN and never shown as LIVE/HEALTHY.
+  const retainedOllamaReading =
+    ollamaStatus === 'healthy' || ollamaStatus === 'degraded' || ollamaStatus === 'unavailable';
+  if (!tronTelemetryLive && retainedOllamaReading) {
+    ollamaLive = false;
+    ollamaTone = 'muted';
+    ollamaValue = '—';
+    ollamaStatusLabel = staleLabel;
+  }
+
   const tron: ComputeNode = {
     name: 'TRON',
     subtitle: 'AI OVERWATCH',
@@ -1122,19 +1465,21 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
     stateLabel: tronStateLabel,
     tone: tronTone,
     simulated: tronHost?.simulated ?? false,
-    metrics: [
-      { label: 'N8N', value: tronHost?.n8nStatus === 'not_configured' ? 'NOT CONFIGURED' : tronHost?.n8nStatus != null ? tronHost.n8nStatus.toUpperCase() : '—' },
-      { label: 'HEARTBEAT', value: tronHost == null ? '—' : tronHost.state === 'healthy' ? 'LIVE' : tronHost.state === 'stale' ? 'STALE' : 'OFFLINE' },
-      { label: 'STATE', value: tronStateLabel },
+    statusRows: [
+      ragRow(),
+      overwatchRow(),
+      bridgeRow(tronHost?.state ?? null),
     ],
+    heartbeat: { label: 'HEARTBEAT', value: heartbeatValue(tronHost) },
     dials: [
       {
         key: 'models',
         label: 'MODELS',
         value: modelCount != null ? String(modelCount) : '—',
-        statusLabel: 'LOCAL',
-        tone: modelCount != null ? 'violet' : 'muted',
-        live: modelCount != null,
+        statusLabel:
+          modelCount == null ? 'UNKNOWN' : tronTelemetryLive ? 'LOCAL' : staleLabel,
+        tone: tronTelemetryLive && modelCount != null ? 'violet' : 'muted',
+        live: tronTelemetryLive && modelCount != null,
       },
       {
         key: 'ollama',
@@ -1206,12 +1551,15 @@ export function getAiSystemsStatus(): AiSystemRow[] {
 
   // MODEL STATUS — OPERATIONAL / DEGRADED / OFFLINE / UNKNOWN. One explicit
   // source: TRON's own paired Ollama heartbeat (this card is the live Compute
-  // Core, so it uses TRON, never a blended HAL/TRON/registry state).
+  // Core, so it uses TRON, never a blended HAL/TRON/registry state). A retained
+  // reading is only LIVE while TRON's own heartbeat is fresh — a stale/offline
+  // heartbeat surfaces UNKNOWN rather than a stale OPERATIONAL claim.
+  const tronTelemetryLive = nodeHeartbeatFreshness(TRON_RUNTIME_NODE_KEY) === 'live';
   const tronOllama = tron?.ollamaStatus ?? null;
   let modelValue: string;
   let modelTone: Tone;
   let modelLive: boolean;
-  if (!tron) {
+  if (!tron || !tronTelemetryLive) {
     modelValue = 'UNKNOWN';
     modelTone = 'muted';
     modelLive = false;
@@ -1327,6 +1675,18 @@ const EVENT_LABELS: Record<string, string> = {
   run_completed: 'Agent run completed',
   run_failed: 'Agent run failed',
   site_status_changed: 'Site status changed',
+  runtime_rag_ready: 'TRON · RAG ready',
+  runtime_rag_degraded: 'TRON · RAG degraded',
+  runtime_rag_offline: 'TRON · RAG offline',
+  runtime_rag_recovered: 'TRON · RAG recovered',
+  runtime_overwatch_active: 'TRON · Overwatch active',
+  runtime_overwatch_degraded: 'TRON · Overwatch degraded',
+  runtime_overwatch_offline: 'TRON · Overwatch offline',
+  runtime_overwatch_recovered: 'TRON · Overwatch recovered',
+  runtime_master_active: 'HAL · Master orchestrator active',
+  runtime_master_degraded: 'HAL · Master orchestrator degraded',
+  runtime_master_offline: 'HAL · Master orchestrator offline',
+  runtime_master_recovered: 'HAL · Master orchestrator recovered',
 };
 
 function humaniseEvent(action: string | null | undefined): string {
@@ -1343,10 +1703,10 @@ function eventTone(status: string | null | undefined, severity: string | null | 
   const s = (status ?? '').toLowerCase();
 
   if (sev === 'critical' || sev === 'high') return 'red';
-  if (['failed', 'blocked', 'error', 'critical', 'rejected'].includes(s)) return 'red';
+  if (['failed', 'blocked', 'error', 'critical', 'rejected', 'offline'].includes(s)) return 'red';
   if (sev === 'warning' || sev === 'medium') return 'amber';
   if (['warning', 'degraded', 'partial'].includes(s)) return 'amber';
-  if (['success', 'completed', 'healthy', 'approved', 'resolved'].includes(s)) return 'green';
+  if (['success', 'completed', 'healthy', 'approved', 'resolved', 'ready', 'recovered'].includes(s)) return 'green';
   if (sev === 'info' || sev === 'low' || ['informational', 'info'].includes(s)) return 'cyan';
   return 'muted';
 }

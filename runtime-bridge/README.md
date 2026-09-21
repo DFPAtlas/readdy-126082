@@ -52,6 +52,7 @@ Required variables:
 | `N8N_LOCAL_URL` | Local n8n URL (optional) |
 | `N8N_SANDBOX_WEBHOOK_PATH` | Fixed local n8n webhook path for the dedicated `DFP Runtime Sandbox Ping` diagnostic (e.g. `/webhook/dfp-runtime-sandbox-ping`); probe fails closed when unset/invalid |
 | `OLLAMA_LOCAL_URL` | Local Ollama URL (optional) |
+| `RAG_LOCAL_URL` | Local Atlas TRON RAG API URL (optional) — the bridge calls `GET /health` only, plus a catalogue-presence check for `nomic-embed-text`; no retrieval/embedding calls |
 
 ## Run
 
@@ -71,8 +72,9 @@ docker compose up -d
 * **Signed machine auth** — HMAC-SHA256 over identity + timestamp + nonce + method +
   path + payload hash, with a ±5-minute window and nonce replay protection.
 * **Allowlisted capabilities only** — `n8n_health`, `n8n_metadata`, `ollama_health`,
-  `ollama_models`, `signed_callbacks`, `outbound_https`. No shell/arbitrary-http/
-  filesystem/docker capability exists.
+  `ollama_models`, `rag_health`, `signed_callbacks`, `outbound_https`. No shell/
+  arbitrary-http/filesystem/docker capability exists, and `rag_health` is a
+  read-only `/health` + catalogue-presence check (no retrieval, no `/api/embed`).
 * **No secrets leave the host** — the cloud learns only `configured true/false` and
   sanitised status, never values/lengths/prefixes.
 

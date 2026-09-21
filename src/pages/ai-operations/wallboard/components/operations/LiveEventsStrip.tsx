@@ -1,9 +1,73 @@
+import { useMemo } from 'react';
 import {
   getLiveEvents,
   getGlobalSystemState,
   toneHex,
   type LiveEventItem,
 } from '@/pages/ai-operations/wallboard/operationsWallSelectors';
+import { useGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
+import { useRuntimeHealth } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
+import { useOperationsHealthData } from '@/pages/ai-operations/wallboard/operationsHealthStore';
+import { useRuntimeResilience } from '@/pages/ai-operations/wallboard/runtimeResilienceStore';
+import type { RuntimeResilienceView } from '@/lib/ai-operations/runtimeResilience';
+
+const FAULT_REASON_LABEL: Record<string, string> = {
+  container_stopped: 'container stopped',
+  liveness_stale: 'liveness stale',
+  liveness_marker_missing: 'liveness marker missing',
+  bridge_process_failed: 'bridge process failed',
+  watchdog_failed: 'watchdog failed',
+  unknown: 'unknown',
+};
+
+function formatRecoveryMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function formatEventTime(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+}
+
+/** Map the latest runtime-recovery events into ticker items (fault + recovery
+ *  pairs). Empty when the resilience backend has not yet produced events. */
+function resilienceEvents(view: RuntimeResilienceView | null): LiveEventItem[] {
+  if (!view) return [];
+  const items: LiveEventItem[] = [];
+  for (const e of view.events.slice(0, 6)) {
+    const name = e.nodeName;
+    const reason = FAULT_REASON_LABEL[e.faultReason ?? ''] ?? e.faultReason ?? 'fault';
+    if (e.faultDetectedAt) {
+      items.push({
+        id: `rr-fault-${e.id}`,
+        time: formatEventTime(e.faultDetectedAt),
+        site: name,
+        text: reason,
+        tone: 'red',
+        sourceType: 'runtime_resilience',
+        provenance: 'live',
+      });
+    }
+    items.push({
+      id: `rr-recover-${e.id}`,
+      time: formatEventTime(e.recoveredAt ?? e.createdAt),
+      site: name,
+      text: `recovered ${e.recoveryMs != null ? formatRecoveryMs(e.recoveryMs) : '—'} · ${e.targetMet == null ? '—' : e.targetMet ? 'PASS' : 'FAIL'}`,
+      tone: e.targetMet == null ? 'muted' : e.targetMet ? 'green' : 'red',
+      sourceType: 'runtime_resilience',
+      provenance: 'live',
+    });
+  }
+  return items;
+}
 
 const PROVENANCE_BADGE: Record<LiveEventItem['provenance'], { label: string; color: string }> = {
   live: { label: 'LIVE', color: '#22d3ee' },
@@ -54,10 +118,27 @@ function TickerRun({ items, hidden }: { items: LiveEventItem[]; hidden: boolean 
  * Bottom Live Events strip — a calm, continuously-moving operational ticker
  * driven by the existing audit-event feed, with the global system state pinned
  * far right.
+ *
+ * Subscribes to the SAME live sources the header composes (group snapshot +
+ * runtime-health + operations-health + runtime-resilience) so the ticker and
+ * the global verdict re-derive on every refresh. "ALL SYSTEMS OPERATIONAL" is
+ * shown ONLY while the derived global state is genuinely NOMINAL.
  */
 export default function LiveEventsStrip() {
-  const events = getLiveEvents();
-  const global = getGlobalSystemState();
+  const group = useGroupLiveData();
+  const runtimeHealth = useRuntimeHealth();
+  const operationsHealth = useOperationsHealthData();
+  const resilience = useRuntimeResilience();
+
+  const events = useMemo(
+    () => [...resilienceEvents(resilience), ...getLiveEvents()],
+    [resilience, group],
+  );
+
+  const global = useMemo(
+    () => getGlobalSystemState(),
+    [group, runtimeHealth, operationsHealth],
+  );
   const gTone = toneHex(global.tone);
   const operational = global.state === 'nominal';
 
