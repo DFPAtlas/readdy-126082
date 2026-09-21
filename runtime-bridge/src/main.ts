@@ -29,7 +29,7 @@ const enc = new TextEncoder();
 // --- Config (from environment; secrets never reported to cloud) --------------
 const config = {
   endpoint: (Deno.env.get("DFP_BRIDGE_ENDPOINT") ?? "").trim(),
-  identity: (Deno.env.get("DFP_BRIDGE_IDENTITY") ?? "dfp-local-runtime-bridge").trim(),
+  identity: (Deno.env.get("DFP_BRIDGE_IDENTITY") ?? "").trim(),
   signingSecret: (Deno.env.get("DFP_BRIDGE_SIGNING_SECRET") ?? "").trim(),
   nodeKey: (Deno.env.get("DFP_BRIDGE_NODE_KEY") ?? "").trim(),
   nodeName: (Deno.env.get("DFP_BRIDGE_NODE_NAME") ?? "").trim(),
@@ -40,6 +40,9 @@ const config = {
   ragUrl: (Deno.env.get("RAG_LOCAL_URL") ?? "").trim(),
   heartbeatSeconds: parseInt(Deno.env.get("HEARTBEAT_INTERVAL_SECONDS") ?? "60", 10),
   pollSeconds: parseInt(Deno.env.get("POLL_INTERVAL_SECONDS") ?? "30", 10),
+  requestTimeoutMs: parseInt(Deno.env.get("DFP_BRIDGE_REQUEST_TIMEOUT_MS") ?? "15000", 10),
+  livenessFile: (Deno.env.get("DFP_BRIDGE_LIVENESS_FILE") ?? "").trim(),
+  livenessSeconds: parseInt(Deno.env.get("DFP_BRIDGE_LIVENESS_INTERVAL_SECONDS") ?? "5", 10),
 };
 
 function log(msg: string) {
@@ -50,10 +53,29 @@ function log(msg: string) {
 function assertConfig(): boolean {
   const missing: string[] = [];
   if (!config.endpoint) missing.push("DFP_BRIDGE_ENDPOINT");
+  if (!config.identity) missing.push("DFP_BRIDGE_IDENTITY");
   if (!config.signingSecret) missing.push("DFP_BRIDGE_SIGNING_SECRET");
   if (!config.nodeKey) missing.push("DFP_BRIDGE_NODE_KEY");
   if (missing.length > 0) {
     log(`FATAL — missing required configuration: ${missing.join(", ")}. The bridge fails closed (no execution, no outbound traffic).`);
+    return false;
+  }
+
+  const expectedIdentityByNode: Record<string, string> = {
+    "atlas-hal-runtime-01": "dfp-runtime-hal",
+    "atlas-tron-runtime-01": "dfp-runtime-tron",
+  };
+  const expectedIdentity = expectedIdentityByNode[config.nodeKey];
+  if (!expectedIdentity || config.identity !== expectedIdentity) {
+    log(`FATAL — node/identity binding is invalid for ${config.nodeKey || "(missing node)"}. The bridge fails closed.`);
+    return false;
+  }
+  if (!Number.isFinite(config.requestTimeoutMs) || config.requestTimeoutMs < 1000 || config.requestTimeoutMs > 60_000) {
+    log("FATAL — DFP_BRIDGE_REQUEST_TIMEOUT_MS must be between 1000 and 60000.");
+    return false;
+  }
+  if (!Number.isFinite(config.livenessSeconds) || config.livenessSeconds < 1 || config.livenessSeconds > 30) {
+    log("FATAL — DFP_BRIDGE_LIVENESS_INTERVAL_SECONDS must be between 1 and 30.");
     return false;
   }
   return true;
@@ -89,6 +111,20 @@ function canonicalPath(pathname: string): string {
   return trimmed || "/";
 }
 
+async function fetchWithTimeout(
+  input: string | URL,
+  init: RequestInit = {},
+  timeoutMs = config.requestTimeoutMs,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function sendRequest(operation: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
   const timestamp = String(Date.now());
   const nonce = crypto.randomUUID();
@@ -107,7 +143,7 @@ async function sendRequest(operation: string, body: Record<string, unknown>): Pr
   const signature = await hmacSha256Hex(config.signingSecret, canonical);
 
   try {
-    const res = await fetch(config.endpoint, {
+    const res = await fetchWithTimeout(config.endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -142,7 +178,7 @@ async function checkN8nUrl(url: string): Promise<{ configured: boolean; status: 
   if (!url) return { configured: false, status: "not_configured", latency_ms: null, sampled_at: new Date().toISOString() };
   const started = Date.now();
   try {
-    const res = await fetch(url.replace(/\/+$/, "") + "/healthz", { method: "GET" });
+    const res = await fetchWithTimeout(url.replace(/\/+$/, "") + "/healthz", { method: "GET" });
     const latencyMs = Date.now() - started;
     return {
       configured: true,
@@ -159,7 +195,7 @@ async function checkOllama(): Promise<{ status: string; latency_ms: number | nul
   if (!config.ollamaUrl) return { status: "not_configured", latency_ms: null, models: null };
   const started = Date.now();
   try {
-    const res = await fetch(config.ollamaUrl.replace(/\/+$/, "") + "/api/tags", { method: "GET" });
+    const res = await fetchWithTimeout(config.ollamaUrl.replace(/\/+$/, "") + "/api/tags", { method: "GET" });
     const latencyMs = Date.now() - started;
     if (!res.ok) return { status: "degraded", latency_ms: latencyMs, models: null };
     const data = await res.json();
@@ -331,7 +367,7 @@ function sanitiseCatalogueModel(raw: unknown): Record<string, unknown> | null {
 async function fetchOllamaCatalogue(): Promise<Record<string, unknown>[]> {
   if (!config.ollamaUrl) return [];
   try {
-    const res = await fetch(config.ollamaUrl.replace(/\/+$/, "") + "/api/tags", { method: "GET" });
+    const res = await fetchWithTimeout(config.ollamaUrl.replace(/\/+$/, "") + "/api/tags", { method: "GET" });
     if (!res.ok) return [];
     const data = await res.json();
     const rawModels = Array.isArray((data as { models?: unknown[] })?.models)
@@ -1768,12 +1804,14 @@ async function handshake(): Promise<boolean> {
   return false;
 }
 
-async function heartbeat(): Promise<void> {
-  const n8n = await checkN8nUrl(config.n8nUrl);
-  const n8nSecondary = await checkN8nUrl(config.n8nSecondaryUrl);
-  const ollama = await checkOllama();
-  const rag = await checkRag();
-  const host = await sampleHostTelemetry();
+async function heartbeat(): Promise<boolean> {
+  const [n8n, n8nSecondary, ollama, rag, host] = await Promise.all([
+    checkN8nUrl(config.n8nUrl),
+    checkN8nUrl(config.n8nSecondaryUrl),
+    checkOllama(),
+    checkRag(),
+    sampleHostTelemetry(),
+  ]);
   const started = Date.now();
   const result = await sendRequest("heartbeat", {
     node_key: config.nodeKey,
@@ -1811,6 +1849,7 @@ async function heartbeat(): Promise<void> {
       ],
     });
   }
+  return result !== null;
 }
 
 async function pollControlMessages(): Promise<void> {
@@ -1885,11 +1924,66 @@ async function pollControlMessages(): Promise<void> {
   }
 }
 
+// --- Supervision + serial scheduling -------------------------------------------
+let livenessWriteInFlight = false;
+
+async function writeLivenessMarker(): Promise<void> {
+  if (!config.livenessFile || livenessWriteInFlight) return;
+  livenessWriteInFlight = true;
+  try {
+    await Deno.writeTextFile(
+      config.livenessFile,
+      JSON.stringify({
+        schema_version: 1,
+        node_key: config.nodeKey,
+        identity: config.identity,
+        pid: Deno.pid,
+        updated_at: new Date().toISOString(),
+      }) + "\n",
+    );
+  } catch (err) {
+    log(`liveness marker write failed: ${(err as Error)?.message ?? "unknown"}`);
+  } finally {
+    livenessWriteInFlight = false;
+  }
+}
+
+function startLivenessMarker(): void {
+  if (!config.livenessFile) {
+    log("WARNING — DFP_BRIDGE_LIVENESS_FILE is unset; external stale-process detection is unavailable.");
+    return;
+  }
+  const intervalMs = config.livenessSeconds * 1000;
+  void writeLivenessMarker();
+  setInterval(() => void writeLivenessMarker(), intervalMs);
+}
+
+async function runPeriodic(
+  name: string,
+  intervalMs: number,
+  task: () => Promise<unknown>,
+): Promise<never> {
+  while (true) {
+    const startedAt = Date.now();
+    try {
+      await task();
+    } catch (err) {
+      log(`${name} loop error: ${(err as Error)?.message ?? "unknown"}`);
+    }
+    const remainingMs = Math.max(1000, intervalMs - (Date.now() - startedAt));
+    await sleep(remainingMs);
+  }
+}
+
 // --- Main loop (outbound-only, fail-closed) -----------------------------------
 async function main() {
-  if (!assertConfig()) return; // fail closed — no traffic, no execution
+  if (!assertConfig()) {
+    Deno.exitCode = 78;
+    return; // fail closed — no traffic, no execution
+  }
 
   log("starting private runtime bridge (outbound-only, no execution).");
+  startLivenessMarker();
 
   // Handshake with backoff until verified.
   let verified = false;
@@ -1906,33 +2000,22 @@ async function main() {
   const pollInterval = config.pollSeconds > 0 ? Math.max(10, config.pollSeconds) * 1000 : 0;
   const catalogueInterval = Math.max(120, config.pollSeconds * 2 || 300) * 1000;
 
-  // Heartbeat loop.
-  setInterval(() => {
-    void heartbeat();
-  }, heartbeatInterval);
-
-  // Catalogue relay loop — sanitised Ollama catalogue only, no inference.
-  setInterval(() => {
-    void relayOllamaCatalogue();
-  }, catalogueInterval);
-
-  // Optional control-message polling (health_request / capability_request only).
+  // Each lane is serialized: a slow request can delay its own next iteration but
+  // can never create an unbounded pile-up of overlapping work.
+  void runPeriodic("heartbeat", heartbeatInterval, heartbeat);
+  void runPeriodic("catalogue", catalogueInterval, relayOllamaCatalogue);
   if (pollInterval > 0) {
-    setInterval(() => {
-      void pollControlMessages();
-    }, pollInterval);
+    void runPeriodic("control-message", pollInterval, pollControlMessages);
   }
 
-  // Kick off immediately.
-  void heartbeat();
-  void relayOllamaCatalogue();
-  if (pollInterval > 0) void pollControlMessages();
-
-  log("heartbeat loop running. Offline = fail closed (no autonomous execution).");
+  log("serialized heartbeat loop running. Offline = fail closed (no autonomous execution).");
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-main();
+main().catch((err) => {
+  log(`FATAL — unhandled bridge error: ${(err as Error)?.message ?? "unknown"}`);
+  Deno.exit(1);
+});
