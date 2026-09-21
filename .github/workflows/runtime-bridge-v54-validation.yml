@@ -1,0 +1,46 @@
+name: Runtime Bridge v54 validation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "runtime-bridge/**"
+      - "supabase/config.toml"
+      - "supabase/functions/runtime-bridge/**"
+      - "supabase/migrations/*runtime_bridge_v54*"
+      - "ops/runtime-bridge-v54/**"
+      - "scripts/validate-runtime-bridge-v54.mjs"
+      - ".github/workflows/runtime-bridge-v54-validation.yml"
+  pull_request:
+    paths:
+      - "runtime-bridge/**"
+      - "supabase/config.toml"
+      - "supabase/functions/runtime-bridge/**"
+      - "supabase/migrations/*runtime_bridge_v54*"
+      - "ops/runtime-bridge-v54/**"
+      - "scripts/validate-runtime-bridge-v54.mjs"
+      - ".github/workflows/runtime-bridge-v54-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Validate fail-closed bridge policy and supervision
+        run: node scripts/validate-runtime-bridge-v54.mjs
+      - name: Validate watchdog shell
+        run: sh -n runtime-bridge/deploy/systemd/watchdog.sh
+      - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb
+        with:
+          deno-version: v2.x
+      - name: Type-check Edge Function
+        run: deno check supabase/functions/runtime-bridge/index.ts
+      - name: Type-check local bridge
+        run: deno check runtime-bridge/src/main.ts
