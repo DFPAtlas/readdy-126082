@@ -98,6 +98,7 @@ import ReadinessPage from "@/pages/ai-operations/readiness/page";
 import RuntimeHealthPage from "@/pages/ai-operations/runtime-health/page";
 import RuntimeControlsPage from "@/pages/ai-operations/runtime-controls/page";
 import Help from "@/pages/help/page";
+import CommsPage from "@/pages/comms/page";
 
 const routes: RouteObject[] = [
   {
@@ -147,6 +148,7 @@ const routes: RouteObject[] = [
     children: [
       { index: true, element: <Dashboard /> },
       { path: "dashboard", element: <Dashboard /> },
+      { path: "comms", element: <CommsPage /> },
       { path: "projects", element: <Projects /> },
       { path: "projects/:slug", element: <ProjectDetail /> },
       { path: "ideas", element: <Ideas /> },
