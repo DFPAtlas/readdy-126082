@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/feature/AuthGuard';
+import Inbox from './Inbox';
 
 type Domain = { domain: string; project_name: string; active: boolean };
 type Account = {
@@ -133,7 +134,7 @@ export default function CommsPage() {
           {accounts.length ? <table className="w-full min-w-[650px] text-sm"><thead className="text-left text-foreground-500"><tr>{['Mailbox','Project','Provider','Purpose','Connection'].map((x) => <th key={x} className="p-4 font-medium">{x}</th>)}</tr></thead><tbody>{accounts.map((a) => <tr key={a.id} className="border-t border-background-200/60 text-foreground-200"><td className="p-4"><div className="font-medium">{a.email_address}</div><div className="text-xs text-foreground-500">{a.display_name}</div></td><td className="p-4">{domains.find((d) => d.domain === a.domain)?.project_name ?? a.domain}</td><td className="p-4 capitalize">{a.provider}</td><td className="p-4 capitalize">{a.purpose}</td><td className="p-4">{a.connection_status === 'connected' ? 'Connected' : a.connection_status === 'attention' ? 'Needs attention' : 'Not connected'}</td></tr>)}</tbody></table> : <p className="p-5 text-sm text-foreground-500">No mailboxes registered yet. Add a domain first, then register a mailbox.</p>}
         </div>
       </div>}
-      {tab === 'inbox' && <div className="rounded-lg border border-background-200/60 bg-background-100 p-8 text-center"><h2 className="font-heading font-semibold text-foreground-50">Unified Inbox</h2><p className="text-sm text-foreground-500 mt-2">Messages will appear here after provider connections and cloud ingestion are configured. No live inbox is connected yet.</p></div>}
+      {tab === 'inbox' && <Inbox accounts={accounts} />}
     </>}
   </div>;
 }
