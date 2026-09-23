@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/feature/AuthGuard';
 import Inbox from './Inbox';
+import ReplyApprovals from './ReplyApprovals';
 
 type Domain = { domain: string; project_name: string; active: boolean };
 type Account = {
@@ -9,11 +10,12 @@ type Account = {
   provider: string; purpose: string; connection_status: string;
   receive_enabled: boolean; send_enabled: boolean;
 };
-type Tab = 'overview' | 'accounts' | 'domains' | 'inbox';
+type Tab = 'overview' | 'accounts' | 'domains' | 'inbox' | 'approvals';
 
 const tabs: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' }, { key: 'accounts', label: 'Accounts' },
   { key: 'domains', label: 'Domains' }, { key: 'inbox', label: 'Unified Inbox' },
+  { key: 'approvals', label: 'Approvals' },
 ];
 const inputClass = 'w-full rounded-md border border-background-300/60 bg-background-50 px-3 py-2 text-sm text-foreground-100 outline-none focus:border-accent-500';
 
@@ -135,6 +137,7 @@ export default function CommsPage() {
         </div>
       </div>}
       {tab === 'inbox' && <Inbox accounts={accounts} />}
+      {tab === 'approvals' && <ReplyApprovals accounts={accounts} />}
     </>}
   </div>;
 }
