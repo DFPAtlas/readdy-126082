@@ -11,7 +11,7 @@ This stage registers only the health of the planned `cloud-core-01` node. It doe
 ## Install after n8n is healthy
 
 1. Create a dedicated `dfp-core` system user and `/opt/dfp-cloud-core`.
-2. Copy `heartbeat.mjs` into that directory. Copy `cloud-core.env.example` to `/etc/dfp/cloud-core.env`, add the key, and set owner root with mode 0600. Grant the service user access to this file through a dedicated group or systemd credentials; do not make it world-readable.
+2. Copy `heartbeat.mjs` into that directory. Copy `cloud-core.env.example` to `/etc/dfp/cloud-core.env`, add the key, and set owner root with mode 0600. The systemd manager reads the root-owned environment file before starting the service; do not make it world-readable.
 3. Copy `dfp-cloud-core-heartbeat.service` to `/etc/systemd/system/` and adjust `ExecStart` if Node is elsewhere. Run `systemctl daemon-reload && systemctl enable --now dfp-cloud-core-heartbeat.service`.
 4. Check `journalctl -u dfp-cloud-core-heartbeat.service -n 30 --no-pager`. It should report `heartbeat_recorded`.
 5. In DFP Supabase, read `dfp_runtime_node_status` for `cloud-core-01`. It should show `observed_status=online` and `dispatch_ready=false`. The Wall's /platform page should show the same.
