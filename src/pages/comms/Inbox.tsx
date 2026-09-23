@@ -24,6 +24,9 @@ export default function Inbox({ accounts }: { accounts: Account[] }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
   const [detailError, setDetailError] = useState('');
+  const [draftBody, setDraftBody] = useState('');
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [draftNotice, setDraftNotice] = useState('');
   const detailRequest = useRef(0);
   const listRequest = useRef(0);
 
@@ -45,7 +48,7 @@ export default function Inbox({ accounts }: { accounts: Account[] }) {
 
   const openThread = async (id: string) => {
     const requestNumber = ++detailRequest.current;
-    setSelectedId(id); setMessages([]); setDetailError(''); setDetailLoading(true);
+    setSelectedId(id); setMessages([]); setDetailError(''); setDetailLoading(true); setDraftBody(''); setDraftNotice('');
     const { data, error: queryError } = await supabase.from('email_messages')
       .select('id,direction,from_address,to_addresses,cc_addresses,subject,body_text,received_at')
       .eq('thread_id', id).order('received_at', { ascending: true }).limit(100);
@@ -62,7 +65,24 @@ export default function Inbox({ accounts }: { accounts: Account[] }) {
     ) : threads;
   }, [threads, accounts, query]);
   const selected = threads.find((thread) => thread.id === selectedId);
+  const lastInbound = [...messages].reverse().find((message) => message.direction === 'inbound');
   const connected = accounts.some((account) => account.connection_status === 'connected');
+
+  const saveDraft = async () => {
+    if (!selected || !lastInbound || !draftBody.trim()) return;
+    setDraftSaving(true); setDraftNotice('');
+    const { data: userResult, error: userError } = await supabase.auth.getUser();
+    if (userError || !userResult.user) { setDraftNotice('Sign in again to save this draft.'); setDraftSaving(false); return; }
+    const { error: insertError } = await supabase.from('email_reply_drafts').insert({
+      thread_id: selected.id, account_id: selected.account_id,
+      recipient_address: lastInbound.from_address,
+      subject: `Re: ${selected.subject.replace(/^re:\s*/i, '')}`.slice(0, 1000),
+      body_text: draftBody.trim(), created_by: userResult.user.id,
+    });
+    setDraftSaving(false);
+    setDraftNotice(insertError ? `Draft could not be saved: ${insertError.message}` : 'Draft saved. Open Approvals to submit it for review.');
+    if (!insertError) setDraftBody('');
+  };
 
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -109,6 +129,13 @@ export default function Inbox({ accounts }: { accounts: Account[] }) {
             <p className="mt-1 text-xs text-foreground-500 break-all">To: {message.to_addresses.join(', ') || '—'}{message.cc_addresses.length ? ` · Cc: ${message.cc_addresses.join(', ')}` : ''}</p>
             <p className="mt-3 text-sm text-foreground-200 whitespace-pre-wrap break-words">{message.body_text || '(No text body stored)'}</p>
           </article>)}
+          {!detailLoading && !detailError && lastInbound && <div className="border-t border-background-300/60 pt-4 space-y-3">
+            <h4 className="text-sm font-semibold text-foreground-100">Prepare reply</h4>
+            <p className="text-xs text-foreground-500 break-all">To: {lastInbound.from_address} · Saved drafts require review and are not sent.</p>
+            <textarea aria-label="Reply body" value={draftBody} onChange={(event) => setDraftBody(event.target.value)} maxLength={1048576} rows={6} className="w-full rounded-md border border-background-300/60 bg-background-50 px-3 py-2 text-sm text-foreground-100" placeholder="Write a reply for review…" />
+            <button type="button" disabled={draftSaving || !draftBody.trim()} onClick={() => void saveDraft()} className="rounded-md bg-accent-500 px-4 py-2 text-sm font-medium text-background-950 disabled:opacity-50">{draftSaving ? 'Saving…' : 'Save draft'}</button>
+            {draftNotice && <p role="status" className="text-xs text-foreground-300">{draftNotice}</p>}
+          </div>}
         </div>}
       </div>
     </div>}
