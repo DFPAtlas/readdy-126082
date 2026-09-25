@@ -1,0 +1,24 @@
+[Unit]
+Description=DFP Cloud Core n8n heartbeat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dfp-core
+Group=dfp-core
+WorkingDirectory=/opt/dfp-cloud-core
+EnvironmentFile=/etc/dfp/cloud-core.env
+ExecStart=/usr/bin/env node /opt/dfp-cloud-core/heartbeat.mjs
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
