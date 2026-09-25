@@ -181,6 +181,7 @@ export function getDataSourceDiagnostics(now: number, staleMs: number): DataSour
     { key: 'schedules-rules', label: 'Schedules & Notifications', usedBy: 'System Health', flags: [a.schedules, a.rules] },
     { key: 'costs-budgets', label: 'Costs & Budgets', usedBy: 'AI Spend, Costs & Health', flags: [a.budgets, a.usageCosts, a.budgetEvents] },
     { key: 'presence', label: 'Users Online (presence)', usedBy: 'Users Online', flags: [a.usersOnline] },
+    { key: 'platform-accounts', label: 'Platform Accounts (feed)', usedBy: 'Header TOTAL USERS', flags: [a.platformAccounts] },
   ];
 
   for (const e of groupEntries) {
@@ -365,6 +366,7 @@ export function getMetricTraces(now: number, staleMs: number): MetricTrace[] {
   };
 
   const users = pick('presence');
+  const platformAccounts = pick('platform-accounts');
   const sites = pick('sites');
   const agents = pick('agents');
   const approvals = pick('approvals');
@@ -378,6 +380,7 @@ export function getMetricTraces(now: number, staleMs: number): MetricTrace[] {
 
   return [
     { metric: 'Users Online', source: 'Presence selector (wallboard_online_presence)', ...users },
+    { metric: 'Total Users (all platforms)', source: 'Per-platform account feed (wallboard_platform_accounts)', ...platformAccounts },
     { metric: 'Site Health', source: 'Group Site Registry (ai_sites)', ...sites },
     { metric: 'Agents Active', source: 'AI Agents registry', ...agents },
     { metric: 'Pending Approvals', source: 'Approvals registry (ai_approvals)', ...approvals },

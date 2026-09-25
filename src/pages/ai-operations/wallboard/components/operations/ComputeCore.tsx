@@ -208,9 +208,11 @@ function RelaySummaryRow({ label, value, color, dot }: { label: string; value: s
   );
 }
 
-/** Icons for the role-specific system states (HAL: N8N / MASTER / BRIDGE,
- *  TRON: RAG / OVERWATCH / BRIDGE). */
+/** Icons for the role-specific system states (HAL: HAL n8n / LeadGen n8n /
+ *  MASTER / BRIDGE, TRON: RAG / OVERWATCH / BRIDGE). */
 const ROLE_ICONS: Record<string, string> = {
+  'HAL N8N': 'ri-git-branch-line',
+  'LEADGEN N8N': 'ri-flow-chart',
   N8N: 'ri-git-branch-line',
   MASTER: 'ri-cpu-line',
   BRIDGE: 'ri-link-m',

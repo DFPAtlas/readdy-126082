@@ -23,17 +23,64 @@ const NODE_CLASS: Record<CoreSystemRow['tone'], string> = {
   muted: 'ow-sys-node-muted',
 };
 
+/** Compact relative age from an ISO timestamp (e.g. "42s ago"), or null. */
+function relativeAge(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
+/** Human-readable container uptime (e.g. "3d 4h"). */
+function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const min = Math.floor(seconds / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ${min % 60}m`;
+  return `${Math.floor(hr / 24)}d ${hr % 24}h`;
+}
+
+/**
+ * Compose a row's hover detail from whatever telemetry ACTUALLY reported.
+ *
+ * Fields that were never received are omitted entirely (never rendered as "—"),
+ * so a feed that only relays a status reads as a short line rather than a wall
+ * of blanks. Surfaced on hover so the fixed-height rail row is never disturbed
+ * on the 1920×1080 wall.
+ */
+function coreSystemDetail(row: CoreSystemRow): string {
+  const parts: string[] = [];
+  if (row.host) parts.push(`Host ${row.host}`);
+  if (row.endpoint) parts.push(`Endpoint ${row.endpoint}${row.port != null ? `:${row.port}` : ''}`);
+  else if (row.port != null) parts.push(`Port ${row.port}`);
+  if (row.containerStatus) parts.push(`Container ${row.containerStatus}`);
+  if (row.restartCount != null) parts.push(`Restarts ${row.restartCount}`);
+  if (row.uptimeSeconds != null) parts.push(`Uptime ${formatUptime(row.uptimeSeconds)}`);
+  if (row.latencyMs != null) parts.push(`Latency ${row.latencyMs}ms`);
+  const age = relativeAge(row.lastCheck);
+  if (age) parts.push(`Checked ${age}`);
+  return parts.join(' · ');
+}
+
 function SystemNodeRow({ row }: { row: CoreSystemRow }) {
   const tone = toneHex(row.tone);
+  const detail = coreSystemDetail(row);
   return (
-    <div className="ow-sys-row">
+    <div className="ow-sys-row" title={detail || undefined}>
       {/* Connector group — horizontal circuit trace into the vertical bus. */}
       <span className="ow-sys-connector" aria-hidden="true">
         <span className="ow-sys-trace" />
         <span
           className={`ow-sys-node ${NODE_CLASS[row.tone]}`}
           role="img"
-          aria-label={`${row.name} — ${row.statusLabel}`}
+          aria-label={detail ? `${row.name} — ${row.statusLabel}. ${detail}` : `${row.name} — ${row.statusLabel}`}
         >
           <i className={SYSTEM_ICON[row.key] ?? 'ri-server-line'}></i>
         </span>
@@ -62,7 +109,7 @@ function SystemNodeRow({ row }: { row: CoreSystemRow }) {
 }
 
 /**
- * Left Core Systems rail — seven console rows (HAL, TRON, N8N-01, N8N-02,
+ * Left Core Systems rail — seven console rows (HAL, TRON, HAL n8n, LeadGen n8n,
  * Supabase, Network, Storage) connected through a thin vertical cyan data bus
  * (monitoring connectivity only), plus the DFP Core Hub identity block at the
  * base as the visual source of the bus.

@@ -27,11 +27,23 @@ here.
 | --- | --- | --- | --- | --- | --- | --- |
 | HAL (orchestration node) | `getCoreSystems()` → `halStatus()` | `getHalHost()` → `HAL_RUNTIME_NODE_KEY` (`atlas-hal-runtime-01`) bridge node + heartbeat | DERIVED LIVE | 2 / 5 min reachable / stale thresholds | `UNKNOWN` (never falls back to first host) | n/a |
 | TRON (AI overwatch) | `getCoreSystems()` → `tronStatus()` | `getOversight()` → `getTronHost()` → `TRON_RUNTIME_NODE_KEY` (`atlas-tron-runtime-01`) | DERIVED LIVE | 2 / 5 min thresholds | `UNKNOWN` / `NOT CONNECTED` (never falls back to HAL) | n/a |
-| N8N-01 | `getCoreSystems()` → `n8nStatusByKey('n8n-primary')` | `getN8nInstances()` resolved by stable key `n8n-primary` | DERIVED LIVE | connector reachability snapshot | `UNKNOWN` if key absent | n/a |
-| N8N-02 | `getCoreSystems()` → `n8nStatusByKey(null)` | no second instance registered | UNAVAILABLE | n/a | `UNKNOWN` (no stable identity) | n/a |
+| HAL n8n | `getCoreSystems()` → `n8nServiceDetail('n8n')` | HAL bridge heartbeat `ai_runtime_bridge_heartbeats.local_services.n8n` (n8n `/healthz`) | DERIVED LIVE | 150s live / 5 min offline on `sampled_at` | `NOT MONITORED` / `UNKNOWN` (never healthy) | n/a |
+| LeadGen n8n | `getCoreSystems()` → `n8nServiceDetail('n8n_secondary')` | HAL bridge heartbeat `local_services.n8n_secondary` (second container, its own local URL) | DERIVED LIVE | 150s live / 5 min offline on `sampled_at` | `NOT CONFIGURED` when `configured != true`; `NOT MONITORED` when absent | n/a |
 | SUPABASE | `getCoreSystems()` → `supabaseStatus()` | `getDatabaseSummary()` | DERIVED LIVE | db summary snapshot | `UNKNOWN` | n/a |
 | NETWORK | `getCoreSystems()` → `networkStatus()` | `getInfrastructureNetwork()` (HAL bridge) | DERIVED LIVE | bridge freshness | `UNKNOWN` | n/a |
 | STORAGE | `getCoreSystems()` → `storageStatus()` | `getInfrastructureStorage()` (`dfp_service_health`) | DERIVED LIVE | service-health snapshot | `UNKNOWN` when empty | n/a |
+
+**Key rules (n8n rows):** the two n8n containers are **independent rows** and are
+never merged. Both derive from HAL's **own** heartbeat `local_services`
+(`n8n` / `n8n_secondary`) — the browser never polls HAL's n8n ports, and no LAN
+address is hardcoded. Health mapping: `healthz` succeeds → `ONLINE`, container
+running but `healthz` failing → `DEGRADED`, container stopped / endpoint
+unreachable → `OFFLINE`, no telemetry → `NOT MONITORED`. Optional extended
+fields (`host`, `endpoint`, `port`, latency, container state, restart count,
+uptime, last check) are surfaced on hover and are **omitted entirely when the
+bridge does not relay them** — today the heartbeat relays `status`,
+`latency_ms` and `sampled_at`; container state / restart count / uptime are not
+yet relayed.
 
 ---
 
@@ -40,6 +52,8 @@ here.
 | Display label | Selector | Underlying source | Class | Freshness | Missing-data | Simulation |
 | --- | --- | --- | --- | --- | --- | --- |
 | HAL state | `getComputeCore().hal.state` | `getHalHost()` (HAL node only) | DERIVED LIVE | 2 / 5 min thresholds | `OFFLINE` | badge shown |
+| HAL n8n | `getComputeCore().hal.statusRows` → `n8nServiceComputeRow('n8n')` | HAL heartbeat `local_services.n8n` (same source as the rail) | DERIVED LIVE | 150s live / 5 min offline | `AWAITING TELEMETRY` | n/a |
+| LeadGen n8n | `getComputeCore().hal.statusRows` → `n8nServiceComputeRow('n8n_secondary')` | HAL heartbeat `local_services.n8n_secondary` | DERIVED LIVE | 150s live / 5 min offline | `NOT CONFIGURED` / `AWAITING TELEMETRY` | n/a |
 | HAL · AGENT RUNS | `getComputeCore().hal.metrics` | `getStatusBarMetrics().activeRuns` | DERIVED LIVE | live registry | real count | n/a |
 | HAL · BRIDGE | `getComputeCore().hal.metrics` | `getHalHost().state` → `bridgeLabel()` | DERIVED LIVE | 2 / 5 min thresholds | `UNKNOWN` | n/a |
 | HAL · CPU / MEMORY | `getComputeCore().hal.gauges` | HAL heartbeat `local_services.host` | DERIVED LIVE | heartbeat age | `—` + `NOT MONITORED` (never 0) | shown but badge marked |
@@ -151,6 +165,40 @@ derived from configuration state alone.
 
 ---
 
+## Header user totals (top bar)
+
+Two separately-sourced figures shown at the top of the wall, next to the clock.
+
+| Display label | Selector | Underlying source | Class | Freshness | Missing-data |
+| --- | --- | --- | --- | --- | --- |
+| ONLINE NOW | `getUserTotals().onlineNow` | `getUsersOnline().total` → `wallboard_online_presence()` over `public_analytics_events` | DERIVED LIVE | 5-minute presence window | `—` when no site has presence data |
+| TOTAL USERS | `getUserTotals().totalAccounts` | `wallboard_platform_accounts()` over `platform_account_feeds` (per-platform reported totals) | DERIVED LIVE | per-platform `reported_at` age | `—` when no platform has reported |
+| n/m PLATFORMS REPORTING | `getUserTotals().platformsReporting` / `platformsTotal` | `platform_account_feeds` join on `ai_sites` (active production only) | DERIVED LIVE | registry snapshot | `NO PLATFORMS REGISTERED` |
+
+**Key rules:**
+
+- **TOTAL USERS is never a sum of the brands' local tables.** This Command
+  Centre database does not hold the platforms' account stores (the migrated
+  brand tables are empty), so they are never used as a proxy. Each platform
+  reports its OWN authoritative registered-account total from its OWN backend
+  through the authenticated `platform-accounts-receiver` Edge Function.
+- A platform that has **never reported** is returned with `account_count = null`
+  and `feed_state = 'awaiting'`, is **excluded** from the grand total, and is
+  named in the reporting coverage (`n/m PLATFORMS REPORTING`) so the figure
+  never implies completeness. It is never shown as `0`.
+- Only an **aggregate integer count** is accepted or stored — no names, emails,
+  user ids, sessions or tokens. `reported_at` is stamped **server-side**, so a
+  reporter can never back-date or forward-date its own feed.
+- Each platform authenticates with **its own** bearer token
+  (`PLATFORM_ACCOUNTS_TOKEN_<SITE_KEY>`); the token is the identity and the
+  payload carries no site identifier, so one brand can never report on another's
+  behalf.
+- The feed table is not readable or writable from a browser; the wall reads the
+  aggregate only through the `SECURITY DEFINER` function, which enforces the same
+  Command Centre role check as the presence reader.
+
+---
+
 ## Autonomous Operations rail (right)
 
 | Display label | Selector | Underlying source | Class | Missing-data |
@@ -216,6 +264,6 @@ simulated:
 | Vector-store health check | No pgvector / vector-service runtime exists; `embedding_state` is a registry marker only. |
 | Host CPU / GPU / disk / temperature | No authoritative telemetry beyond HAL's relayed CPU/memory. |
 | Per-agent progress | No numeric progress field exists on master agents. |
-| Second n8n instance | Only a single instance (`n8n-primary`) is registered. |
+| n8n container-level telemetry | Two n8n containers (HAL n8n / LeadGen n8n) are monitored via HAL's heartbeat `local_services`, but Docker container state, restart count and container uptime are not relayed yet — only `status`, `latency_ms` and `sampled_at` are. |
 | Website monitor coverage | `internal_monitored_websites` domains differ from `ai_sites` registry domains — unmatched sites surface as `NOT MONITORED`. |
 | Presence / analytics | Treated as DERIVED LIVE when available; otherwise `—`. |

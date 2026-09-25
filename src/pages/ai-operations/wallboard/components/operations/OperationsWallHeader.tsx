@@ -4,6 +4,7 @@ import { useRuntimeHealth } from '@/pages/ai-operations/runtime-health/runtimeHe
 import { useOperationsHealthData } from '@/pages/ai-operations/wallboard/operationsHealthStore';
 import {
   getGlobalSystemState,
+  getUserTotals,
   formatWallTime,
   formatWallDate,
   timezoneLabel,
@@ -44,6 +45,14 @@ export default function OperationsWallHeader() {
   );
   const accent = STATE_COLOR[global.state] ?? '#64748b';
 
+  // Platform user totals — re-derived whenever the shared live snapshot changes.
+  const users = useMemo(() => getUserTotals(), [group, runtimeHealth, operationsHealth]);
+  const onlineColor = users.onlineNow == null ? '#64748b' : '#4ade80';
+  const accountsColor = users.totalAccounts == null ? '#64748b' : '#22d3ee';
+  const platformBreakdown = users.platforms
+    .map((p) => `${p.name}: ${p.count == null ? 'awaiting feed' : p.count.toLocaleString('en-GB')}`)
+    .join('\n');
+
   return (
     <header className="shrink-0 flex items-stretch justify-between border-b border-cyan-400/15 h-[64px]">
       {/* Left — title */}
@@ -64,8 +73,44 @@ export default function OperationsWallHeader() {
         </div>
       </div>
 
-      {/* Right — clock + system state */}
+      {/* Right — user totals + clock + system state */}
       <div className="flex items-center gap-5 pr-6">
+        {/* Platform user totals — grand total across every platform. ONLINE NOW
+            is live presence; TOTAL USERS sums each platform's OWN reported
+            account count and names its coverage honestly. */}
+        <div className="flex items-end gap-4" title={platformBreakdown}>
+          <div className="flex flex-col items-end leading-none">
+            <span
+              className="font-mono text-[24px] font-semibold tabular-nums"
+              style={{ color: onlineColor }}
+            >
+              {users.onlineNow == null ? '—' : users.onlineNow.toLocaleString('en-GB')}
+            </span>
+            <span className="text-[8px] font-label tracking-[0.18em] text-slate-500 mt-1 whitespace-nowrap">
+              ONLINE NOW
+            </span>
+          </div>
+
+          <span className="w-px h-8 self-center" style={{ background: 'rgba(34,211,238,0.18)' }} />
+
+          <div className="flex flex-col items-end leading-none">
+            <span
+              className="font-mono text-[24px] font-semibold tabular-nums"
+              style={{ color: accountsColor }}
+            >
+              {users.totalAccounts == null ? '—' : users.totalAccounts.toLocaleString('en-GB')}
+            </span>
+            <span className="text-[8px] font-label tracking-[0.18em] text-slate-500 mt-1 whitespace-nowrap">
+              TOTAL USERS
+            </span>
+            <span className="text-[7.5px] font-label tracking-[0.14em] text-slate-600 mt-0.5 whitespace-nowrap">
+              {users.platformsTotal === 0
+                ? 'NO PLATFORMS REGISTERED'
+                : `${users.platformsReporting}/${users.platformsTotal} PLATFORMS REPORTING`}
+            </span>
+          </div>
+        </div>
+
         <div className="flex flex-col items-end leading-tight">
           <span className="text-[11px] font-label tracking-[0.18em] text-slate-400">
             {formatWallDate(now)}

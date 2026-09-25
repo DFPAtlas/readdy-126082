@@ -24,6 +24,7 @@ import { getSiteHealth, getStatusBarMetrics } from '@/pages/ai-operations/live/l
 import {
   getUsersOnline,
   getWallboardActivity,
+  type PresenceSource,
 } from '@/pages/ai-operations/wallboard/selectors';
 import {
   getSiteMasterCards,
@@ -542,6 +543,87 @@ export function getGroupMetrics(): GroupMetrics {
 }
 
 // ---------------------------------------------------------------------------
+// Platform user totals (header) — ONLINE NOW + TOTAL USERS
+// ---------------------------------------------------------------------------
+
+export interface PlatformAccountTotal {
+  /** Stable platform identity — the registry `site_key`. */
+  key: string;
+  name: string;
+  /** The platform's OWN reported registered-account total, or null when it has not reported. */
+  count: number | null;
+  reportedAt: string | null;
+  /** Minutes since the platform last reported (server-stamped). */
+  ageMinutes: number | null;
+}
+
+export interface WallUserTotals {
+  /** Distinct anonymous visitors active in the last 5 minutes, across every platform. */
+  onlineNow: number | null;
+  onlineSource: PresenceSource;
+  /**
+   * Grand total of the platforms' OWN reported registered-account totals. Null
+   * when no platform has reported yet — never a fabricated zero, and never a
+   * sum of unrelated local tables.
+   */
+  totalAccounts: number | null;
+  accountsSource: 'live' | 'partial' | 'unavailable';
+  platformsTotal: number;
+  platformsReporting: number;
+  platforms: PlatformAccountTotal[];
+}
+
+/**
+ * Header user totals. Two distinct, separately-sourced figures:
+ *
+ *   ONLINE NOW  — live presence from the built-in analytics (distinct anonymous
+ *                 sessions in the last 5 minutes), already privacy-safe.
+ *   TOTAL USERS — the grand total of every platform's OWN authoritative
+ *                 registered-account count, reported from each brand's backend
+ *                 through the authenticated account-feed receiver.
+ *
+ * A platform that has not reported appears in `platforms` with `count = null`
+ * and is excluded from the total; the running/total platform count is exposed so
+ * the display can state coverage honestly instead of implying completeness.
+ */
+export function getUserTotals(): WallUserTotals {
+  const data = getGroupLiveData();
+  const presence = getUsersOnline();
+
+  const platforms: PlatformAccountTotal[] = data.platformAccounts.map((p) => ({
+    key: p.site_key,
+    name: p.platform_name,
+    count: typeof p.account_count === 'number' ? p.account_count : null,
+    reportedAt: p.reported_at ?? null,
+    ageMinutes: typeof p.feed_age_minutes === 'number' ? p.feed_age_minutes : null,
+  }));
+
+  const reporting = platforms.filter((p) => p.count !== null);
+  const totalAccounts = reporting.length > 0
+    ? reporting.reduce((acc, p) => acc + (p.count ?? 0), 0)
+    : null;
+
+  let accountsSource: WallUserTotals['accountsSource'];
+  if (!data.availability.platformAccounts || reporting.length === 0) {
+    accountsSource = 'unavailable';
+  } else if (reporting.length === platforms.length) {
+    accountsSource = 'live';
+  } else {
+    accountsSource = 'partial';
+  }
+
+  return {
+    onlineNow: presence.total,
+    onlineSource: presence.source,
+    totalAccounts,
+    accountsSource,
+    platformsTotal: platforms.length,
+    platformsReporting: reporting.length,
+    platforms,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Global system state
 // ---------------------------------------------------------------------------
 
@@ -685,6 +767,27 @@ export interface CoreSystemRow {
   tone: Tone;
   /** True when this system's latest heartbeat was operator-injected (SIM-). */
   simulated: boolean;
+  /**
+   * Optional extended telemetry — every field below is populated ONLY when the
+   * authoritative source actually relays it. They are never hard-coded and stay
+   * null otherwise (so existing consumers remain fully backwards compatible).
+   */
+  /** The runtime host this service runs on (e.g. HAL). */
+  host?: string | null;
+  /** Service endpoint, when reported. */
+  endpoint?: string | null;
+  /** Host/internal port, when reported. */
+  port?: number | null;
+  /** Measured round-trip latency (ms), when reported. */
+  latencyMs?: number | null;
+  /** Container state (e.g. running / stopped), when reported. */
+  containerStatus?: string | null;
+  /** Restart count, when reported. */
+  restartCount?: number | null;
+  /** Container uptime in seconds, when reported. */
+  uptimeSeconds?: number | null;
+  /** Last-check timestamp (ISO), when reported. */
+  lastCheck?: string | null;
 }
 
 // Centralised freshness thresholds (single source of truth for the wall):
@@ -761,30 +864,99 @@ function isNodeFresh(nodeKey: string): boolean {
   return freshnessOf(hb?.received_at ?? node?.last_heartbeat_at ?? node?.last_seen_at) === 'live';
 }
 
-/** Resolve an n8n container row from HAL's own heartbeat `local_services`. */
-function n8nServiceStatus(serviceKey: 'n8n' | 'n8n_secondary'): CoreStatusResult {
+/** Read an optional non-empty string from an untyped telemetry payload. */
+function optionalString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() !== '' ? v : null;
+}
+
+/** Read an optional finite number (accepts a numeric string) from telemetry. */
+function optionalNumber(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/** An n8n container row: honest status + whatever extra telemetry the bridge
+ *  actually relayed for THIS container. Every optional field is null unless the
+ *  payload supplied it — nothing is ever invented. */
+interface N8nServiceDetail extends CoreStatusResult {
+  /** The runtime host this container runs on (both n8n containers run on HAL). */
+  host: string;
+  endpoint: string | null;
+  port: number | null;
+  latencyMs: number | null;
+  containerStatus: string | null;
+  restartCount: number | null;
+  uptimeSeconds: number | null;
+  lastCheck: string | null;
+}
+
+/** Resolve ONE n8n container from HAL's own heartbeat `local_services`.
+ *
+ *  Health mapping (the wall's runtime vocabulary):
+ *    * `healthy` + fresh reading       → ONLINE   (n8n /healthz succeeded)
+ *    * `healthy` but reading aged out  → DEGRADED (container up, no fresh check)
+ *    * `degraded`                      → DEGRADED (container running, /healthz failing)
+ *    * `unavailable` / reading aged out→ OFFLINE  (container stopped / unreachable)
+ *    * no telemetry at all             → NOT MONITORED (never assumed healthy)
+ *
+ *  Optional fields (endpoint/port/latency/container/restarts/uptime/last check)
+ *  are only read when present; a feed that omits them leaves them null. */
+function n8nServiceDetail(serviceKey: 'n8n' | 'n8n_secondary'): N8nServiceDetail {
   const health = getRuntimeHealthState();
   const hb = health.latestHeartbeatByNodeKey[HAL_RUNTIME_NODE_KEY];
   const local = hb?.local_services as Record<string, unknown> | null | undefined;
   const service = local?.[serviceKey];
+
   if (!service || typeof service !== 'object') {
-    return { status: 'not_monitored', tone: 'muted', simulated: false };
+    return {
+      status: 'not_monitored',
+      tone: 'muted',
+      simulated: false,
+      host: 'HAL',
+      endpoint: null,
+      port: null,
+      latencyMs: null,
+      containerStatus: null,
+      restartCount: null,
+      uptimeSeconds: null,
+      lastCheck: null,
+    };
   }
+
   const s = service as Record<string, unknown>;
+  const detail = {
+    host: 'HAL',
+    endpoint: optionalString(s.endpoint) ?? optionalString(s.url),
+    port: optionalNumber(s.port) ?? optionalNumber(s.host_port),
+    latencyMs: optionalNumber(s.latency_ms) ?? optionalNumber(s.latencyMs),
+    containerStatus: optionalString(s.container_status) ?? optionalString(s.containerStatus),
+    restartCount:
+      optionalNumber(s.restart_count) ?? optionalNumber(s.restartCount) ?? optionalNumber(s.restarts),
+    uptimeSeconds:
+      optionalNumber(s.uptime_seconds) ?? optionalNumber(s.uptimeSeconds) ?? optionalNumber(s.container_uptime_seconds),
+    lastCheck: optionalString(s.sampled_at) ?? optionalString(s.last_check),
+    simulated: false,
+  };
+
   if (s.configured !== true) {
-    return { status: 'not_configured', tone: 'muted', simulated: false };
+    return { ...detail, status: 'not_configured', tone: 'muted' };
   }
+
   const status = typeof s.status === 'string' ? s.status : null;
-  const sampledAt = typeof s.sampled_at === 'string' ? s.sampled_at : null;
-  const fresh = freshnessOf(sampledAt);
+  const fresh = freshnessOf(detail.lastCheck);
+
   if (status === 'healthy') {
-    if (fresh === 'live') return { status: 'online', tone: 'green', simulated: false };
-    if (fresh === 'stale') return { status: 'degraded', tone: 'amber', simulated: false };
-    return { status: 'offline', tone: 'red', simulated: false };
+    if (fresh === 'live') return { ...detail, status: 'online', tone: 'green' };
+    if (fresh === 'stale') return { ...detail, status: 'degraded', tone: 'amber' };
+    return { ...detail, status: 'offline', tone: 'red' };
   }
-  if (status === 'degraded') return { status: 'degraded', tone: 'amber', simulated: false };
-  if (status === 'unavailable') return { status: 'offline', tone: 'red', simulated: false };
-  return { status: 'unknown', tone: 'muted', simulated: false };
+  if (status === 'degraded') return { ...detail, status: 'degraded', tone: 'amber' };
+  if (status === 'unavailable') return { ...detail, status: 'offline', tone: 'red' };
+  return { ...detail, status: 'unknown', tone: 'muted' };
 }
 
 /** SUPABASE — the DFP cloud database/API, from the operations-health snapshot. */
@@ -847,8 +1019,9 @@ const CORE_STATUS_LABEL: Record<CoreSystemStatus, string> = {
 export function getCoreSystems(): CoreSystemRow[] {
   const hal = runtimeNodeStatus(HAL_RUNTIME_NODE_KEY);
   const tron = runtimeNodeStatus(TRON_RUNTIME_NODE_KEY);
-  const n8n1 = n8nServiceStatus('n8n');
-  const n8n2 = n8nServiceStatus('n8n_secondary');
+  // Two INDEPENDENT n8n containers on HAL — never merged into one row.
+  const n8nHal = n8nServiceDetail('n8n');
+  const n8nLeadGen = n8nServiceDetail('n8n_secondary');
   const supabase = supabaseStatus();
   const network = networkStatus();
   const storage = storageStatus();
@@ -862,11 +1035,31 @@ export function getCoreSystems(): CoreSystemRow[] {
     simulated = false,
   ): CoreSystemRow => ({ key, name, subtitle, status, statusLabel: CORE_STATUS_LABEL[status], tone, simulated });
 
+  // n8n rows also carry the optional extended telemetry (host / endpoint / port /
+  // latency / container / restarts / uptime / last check) when the bridge relays it.
+  const makeN8n = (key: string, name: string, d: N8nServiceDetail): CoreSystemRow => ({
+    key,
+    name,
+    subtitle: 'AUTOMATION ENGINE',
+    status: d.status,
+    statusLabel: CORE_STATUS_LABEL[d.status],
+    tone: d.tone,
+    simulated: d.simulated,
+    host: d.host,
+    endpoint: d.endpoint,
+    port: d.port,
+    latencyMs: d.latencyMs,
+    containerStatus: d.containerStatus,
+    restartCount: d.restartCount,
+    uptimeSeconds: d.uptimeSeconds,
+    lastCheck: d.lastCheck,
+  });
+
   return [
     make('hal', 'HAL', 'ORCHESTRATION NODE', hal.status, hal.tone, hal.simulated),
     make('tron', 'TRON', 'AI OVERWATCH', tron.status, tron.tone, tron.simulated),
-    make('n8n-01', 'N8N-01', 'AUTOMATION ENGINE', n8n1.status, n8n1.tone, n8n1.simulated),
-    make('n8n-02', 'N8N-02', 'AUTOMATION ENGINE', n8n2.status, n8n2.tone, n8n2.simulated),
+    makeN8n('n8n-01', 'HAL n8n', n8nHal),
+    makeN8n('n8n-02', 'LeadGen n8n', n8nLeadGen),
     make('supabase', 'SUPABASE', 'DATA PLATFORM', supabase.status, supabase.tone, supabase.simulated),
     make('network', 'NETWORK', 'DFP CONNECTIVITY', network.status, network.tone, network.simulated),
     make('storage', 'STORAGE', 'SUPABASE STORAGE', storage.status, storage.tone, storage.simulated),
@@ -1116,21 +1309,45 @@ function getHalHostTelemetry(): {
   };
 }
 
-/** HAL N8N service status → compact role row (N8N row on HAL). */
-function n8nRow(status: string | null): ComputeStatusRow {
-  switch (status) {
-    case 'healthy':
-      return { label: 'N8N', value: 'HEALTHY', tone: 'green' };
+/** A single n8n container's status row on HAL (HAL n8n / LeadGen n8n).
+ *
+ *  Uses the SAME authoritative source as the CORE SYSTEMS rail (HAL's own
+ *  heartbeat `local_services`), so the Compute Core card and the rail can never
+ *  disagree about a container's state. The optional endpoint/port is shown as a
+ *  sub-label only when the bridge actually relays it — never hard-coded. */
+function n8nServiceComputeRow(serviceKey: 'n8n' | 'n8n_secondary', label: string): ComputeStatusRow {
+  const detail = n8nServiceDetail(serviceKey);
+
+  let value: string;
+  switch (detail.status) {
+    case 'online':
+      value = 'HEALTHY';
+      break;
     case 'degraded':
-      return { label: 'N8N', value: 'DEGRADED', tone: 'amber' };
+      value = 'DEGRADED';
+      break;
     case 'offline':
-    case 'unavailable':
-      return { label: 'N8N', value: 'OFFLINE', tone: 'red' };
+      // Distinguish a stopped container from an unreachable endpoint when the
+      // container state was actually reported.
+      value = detail.containerStatus && detail.containerStatus.toLowerCase() !== 'running' ? 'STOPPED' : 'OFFLINE';
+      break;
     case 'not_configured':
-      return { label: 'N8N', value: 'NOT CONFIGURED', tone: 'muted' };
+      value = 'NOT CONFIGURED';
+      break;
+    case 'not_monitored':
+      value = 'AWAITING TELEMETRY';
+      break;
     default:
-      return { label: 'N8N', value: '—', tone: 'muted' };
+      value = '—';
   }
+
+  const endpointText = detail.endpoint
+    ? `${detail.endpoint}${detail.port != null ? `:${detail.port}` : ''}`
+    : detail.port != null
+      ? `:${detail.port}`
+      : null;
+
+  return { label, value, tone: detail.tone, detail: endpointText ?? undefined };
 }
 
 /** HAL MASTER freshness window — the DFP master/orchestration layer is
@@ -1352,7 +1569,8 @@ export function getComputeCore(): { hal: ComputeNode; tron: ComputeNode; link: {
     tone: halTone,
     simulated: halHost?.simulated ?? false,
     statusRows: [
-      n8nRow(halHost?.n8nStatus ?? null),
+      n8nServiceComputeRow('n8n', 'HAL N8N'),
+      n8nServiceComputeRow('n8n_secondary', 'LEADGEN N8N'),
       masterRow(group),
       bridgeRow(halHost?.state ?? null),
     ],

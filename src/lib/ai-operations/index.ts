@@ -2159,6 +2159,27 @@ export function getOnlinePresence(): Promise<AiOpsResult<OnlinePresenceRow[]>> {
   return runQuery<OnlinePresenceRow[]>(supabase.rpc('wallboard_online_presence'));
 }
 
+// --- Platform account feeds (wallboard grand total) ---------------------------
+//
+// Each DFP platform reports its OWN authoritative registered-account total from
+// ITS OWN backend through the authenticated `platform-accounts-receiver`. This
+// aggregate-only reader returns one row per active production platform, with
+// `account_count = null` + `feed_state = 'awaiting'` for a platform that has not
+// reported yet (an honest gap, never a fabricated zero). The wall never sums the
+// brands' local tables as a proxy. No personal data is ever returned.
+export interface PlatformAccountRow {
+  site_key: string;
+  platform_name: string;
+  account_count: number | null;
+  reported_at: string | null;
+  feed_state: string;
+  feed_age_minutes: number | null;
+}
+
+export function getPlatformAccounts(): Promise<AiOpsResult<PlatformAccountRow[]>> {
+  return runQuery<PlatformAccountRow[]>(supabase.rpc('wallboard_platform_accounts'));
+}
+
 // --- Re-exports for convenience ----------------------------------------------
 
 export type {
