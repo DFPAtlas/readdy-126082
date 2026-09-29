@@ -238,6 +238,7 @@ export interface AssignableStaff {
 
 export interface SupportSite {
   id: string;
+  ai_site_id: string | null;
   website_id: string | null;
   project_id: number | null;
   site_name: string;

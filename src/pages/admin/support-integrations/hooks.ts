@@ -27,7 +27,7 @@ export function useSupportSites() {
       const [sitesRes, statsRes] = await Promise.all([
         supabase
           .from('internal_support_sites')
-          .select('id, website_id, project_id, site_name, site_slug, domain, support_email, is_active, integration_mode, allowed_origins, archived_at, default_support_team_id, status, environment, support_contact, notes, created_at, updated_at')
+          .select('id, ai_site_id, website_id, project_id, site_name, site_slug, domain, support_email, is_active, integration_mode, allowed_origins, archived_at, default_support_team_id, status, environment, support_contact, notes, created_at, updated_at')
           .order('site_name', { ascending: true }),
         supabase.rpc('internal_support_site_stats'),
       ]);
@@ -72,19 +72,27 @@ interface ProjectOption {
   project_slug: string;
 }
 
+export interface GroupSiteOption {
+  id: string;
+  site_key: string;
+  name: string;
+}
+
 export function useIntegrationLookups() {
   const [staff, setStaff] = useState<SupportStaffMember[]>([]);
   const [websites, setWebsites] = useState<WebsiteOption[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [groupSites, setGroupSites] = useState<GroupSiteOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [staffRes, webRes, projRes] = await Promise.allSettled([
+      const [staffRes, webRes, projRes, groupSitesRes] = await Promise.allSettled([
         supabase.rpc('internal_list_staff'),
         supabase.from('client_websites').select('id, name, primary_domain, production_url').order('name'),
         supabase.from('internal_projects').select('id, project_name, project_slug').order('project_name'),
+        supabase.from('ai_sites').select('id, site_key, name').order('name'),
       ]);
 
       if (cancelled) return;
@@ -98,6 +106,9 @@ export function useIntegrationLookups() {
       if (projRes.status === 'fulfilled' && !projRes.value.error) {
         setProjects((projRes.value.data ?? []) as ProjectOption[]);
       }
+      if (groupSitesRes.status === 'fulfilled' && !groupSitesRes.value.error) {
+        setGroupSites((groupSitesRes.value.data ?? []) as GroupSiteOption[]);
+      }
       setLoading(false);
     })();
 
@@ -106,7 +117,7 @@ export function useIntegrationLookups() {
     };
   }, []);
 
-  return { staff, websites, projects, loading };
+  return { staff, websites, projects, groupSites, loading };
 }
 
 // ---------------------------------------------------------------------------
