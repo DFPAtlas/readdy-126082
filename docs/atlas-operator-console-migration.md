@@ -51,18 +51,52 @@ Additional checks:
   cannot execute either operator function. Keep the full ticket contact panel
   behind the caller verification step in the UI.
 
-## Staging baseline blocker
+## Isolated database verification — 29 September 2026
 
-The current Supabase preview branch cannot replay the project's historical
-migrations: production's recorded history starts in May 2026 and assumes core
-tables already exist, while the checked-in repo migrations begin later. A
-branch created without production data failed before the Atlas migrations.
-Do not treat a successful SQL parse as a staging pass. Establish a reproducible
-baseline snapshot/migration for the pre-existing schema and retry branch
-creation. As an interim compatibility check, the two Atlas migrations and a
-role matrix were executed in one rollback-only transaction against the current
-schema; the rollback was verified. That does not replace isolated staging and
-the app-route checks before deployment.
+PASS using the uploaded production schema-only snapshot in a temporary Supabase
+branch (`atlas-operator-schema-staging`). The snapshot contained 1,120 public
+tables, 296 functions and 2,567 policies, and no COPY/INSERT data statements.
+SHA-256: `3dbef6b4ee930c868d5098ba52112c0d2b57195fc95fbcd46f172e109407ce8c`.
+The snapshot was restored into the empty branch, then both Atlas migrations were
+executed successfully. The resulting database contained 1,124 public tables.
+
+`supabase/tests/atlas_operator_access.sql` passed with synthetic fixtures:
+owner/admin global visibility; assigned viewer site A only; unassigned and
+disabled viewers no records; ticket child records and handoffs inherit site
+visibility; site-scoped customer search/context; anonymous table/RPC grants
+revoked; cross-site ticket and PBX links rejected; duplicate interactions and
+pad assignments rejected; viewer pad writes rejected. Fixtures rolled back;
+zero test users and pads remained. The branch was deleted after verification.
+Production schema, data and migration history were not changed.
+
+### Repeat the database test
+
+Use a fresh, isolated Supabase-compatible database, with managed auth schemas
+and roles present. Restore the schema-only snapshot before the Atlas migrations.
+Do not replay historical migrations on top of this current snapshot. With
+`ATLAS_STAGING_DB_URL` set locally to the isolated target, run:
+
+```sh
+psql "$ATLAS_STAGING_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -f schema.sql
+psql "$ATLAS_STAGING_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/20260929144028_atlas_operator_foundation.sql -f supabase/migrations/20260929144314_atlas_operator_site_access.sql
+psql "$ATLAS_STAGING_DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/atlas_operator_access.sql
+```
+
+The raw snapshot remains a private export rather than a checked-in deployment
+migration. It describes the entire shared database and is not safe to apply to
+production as an additive migration.
+
+### Remaining release gates
+
+Automatic branch creation still fails when replaying production's incomplete
+historical migration history. This manual snapshot restore establishes isolated
+SQL compatibility and database access checks; it does not repair automatic
+branch provisioning. A separate migration-history reconciliation is required
+before claiming automatic branching is fixed.
+
+Browser sign-in, app-route access, ticket inbox/detail and the admin selector
+save/error flow still need staging verification. Database role tests do not
+replace those frontend checks or real FreePBX/WebRTC call tests.
 
 ## Rollback
 
