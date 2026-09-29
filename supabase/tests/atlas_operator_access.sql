@@ -57,6 +57,15 @@ DO $$ DECLARE who text; expected integer; actual integer; rel text; BEGIN
   SELECT count(*) INTO actual FROM public.operator_search_site_ticket_customers(md5('atlas-test-site-a')::uuid,'example');
   IF actual <> (CASE WHEN who IN ('owner','admin','assigned') THEN 1 ELSE 0 END) THEN RAISE EXCEPTION 'TEST FAIL: % customer search',who; END IF;
   IF who NOT IN ('owner','admin') AND public.operator_get_site_ticket_context(md5('atlas-test-site-b')::uuid,md5('atlas-test-ticket-b')::uuid) IS NOT NULL THEN RAISE EXCEPTION 'TEST FAIL: % sees foreign ticket context',who; END IF;
+  IF who IN ('owner','admin','assigned') THEN
+   IF public.support_get_ticket_account(md5('atlas-test-ticket-a')::uuid)->>'ticket_id' <> md5('atlas-test-ticket-a')::uuid::text THEN RAISE EXCEPTION 'TEST FAIL: permitted ticket account unavailable'; END IF;
+  END IF;
+  IF who NOT IN ('owner','admin') THEN
+   BEGIN
+    PERFORM public.support_get_ticket_account(md5('atlas-test-ticket-b')::uuid);
+    RAISE EXCEPTION 'TEST FAIL: % sees foreign account details',who;
+   EXCEPTION WHEN raise_exception THEN IF SQLERRM <> 'FORBIDDEN' THEN RAISE; END IF; END;
+  END IF;
  END LOOP;
  PERFORM set_config('request.jwt.claim.sub',md5('atlas-test-assigned')::uuid::text,true);
  IF (SELECT count(*) FROM public.operator_search_site_ticket_customers(md5('atlas-test-site-b')::uuid,'b@example.invalid'))<>0 THEN RAISE EXCEPTION 'TEST FAIL: known foreign email visible'; END IF;
