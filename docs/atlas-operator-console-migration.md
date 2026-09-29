@@ -101,6 +101,21 @@ errors return no access without calling invitation acceptance. Targeted lint
 had zero errors and the existing React Fast Refresh export warning.
 These are component regressions, not live sign-in or end-to-end ticket tests.
 
+### Ticket account access follow-up
+
+A second isolated schema restore and full SQL matrix passed after adding the
+site-access check to `support_get_ticket_account`. Previously this SECURITY
+DEFINER RPC checked internal membership only. It now rejects a ticket outside
+the caller's assigned sites before reading account records or auto-resolving a
+customer. Owner/admin keep access to existing tickets; missing tickets fail.
+The account-access regression is included in the SQL test. Fixtures rolled
+back, zero synthetic users/pads remained, and the branch was deleted.
+
+Five ticket hook DOM checks passed: own ticket/children load; denied ticket
+clears prior records and skips child requests; failed request retains no prior
+customer records; late response cannot overwrite a newer ticket; child-fetch
+errors are reported. These used mocked responses, not a live browser session.
+
 ### Remaining release gates
 
 Automatic branch creation still fails when replaying production's incomplete
