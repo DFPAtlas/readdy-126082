@@ -43,13 +43,20 @@ export function useTicketDetail(ticketId: string | undefined, role: string | nul
   const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
-    if (!ticketId) return;
+    const id = ++requestIdRef.current;
+    setTicket(null);
+    setMessages([]);
+    setAttachments([]);
+    setEvents([]);
+    if (!ticketId) {
+      setLoading(false);
+      return;
+    }
     if (!configured) {
       setError('Supabase is not configured for this project.');
       setLoading(false);
       return;
     }
-    const id = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -72,6 +79,8 @@ export function useTicketDetail(ticketId: string | undefined, role: string | nul
           }
         : null;
       setTicket(detail);
+
+      if (!detail) return;
 
       // Mark read on open (owner/admin only — RLS also enforces this).
       if (detail && detail.is_unread && (role === 'owner' || role === 'admin' || role === 'support_manager' || role === 'support_agent' || role === 'developer')) {
@@ -101,6 +110,9 @@ export function useTicketDetail(ticketId: string | undefined, role: string | nul
       ]);
       if (id !== requestIdRef.current) return;
 
+      if (mRes.error) throw mRes.error;
+      if (aRes.error) throw aRes.error;
+      if (eRes.error) throw eRes.error;
       setMessages((mRes.data ?? []) as TicketMessage[]);
       setAttachments((aRes.data ?? []) as TicketAttachment[]);
       setEvents((eRes.data ?? []) as TicketEvent[]);
