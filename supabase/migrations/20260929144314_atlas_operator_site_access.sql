@@ -101,3 +101,88 @@ returns jsonb language sql stable security invoker set search_path = '' as $$
 $$;
 revoke all on function public.operator_get_site_ticket_context(uuid,uuid) from public, anon;
 grant execute on function public.operator_get_site_ticket_context(uuid,uuid) to authenticated;
+
+-- Existing ticket account panel must enforce the same site boundary before
+-- reading account records or automatically resolving a customer link.
+CREATE OR REPLACE FUNCTION "public"."support_get_ticket_account"("p_ticket_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+  v_role text := public.internal_role();
+  v_link public.support_ticket_customer_links%ROWTYPE;
+  v_profile public.profiles%ROWTYPE;
+  v_org public.clients%ROWTYPE;
+  v_sub public.subscriptions%ROWTYPE;
+  v_email_confirmed_at timestamptz;
+  v_last_sign_in_at timestamptz;
+  v_auth_created_at timestamptz;
+  v_products jsonb;
+BEGIN
+  IF v_role IS NULL OR NOT public.operator_can_access_ticket(p_ticket_id) THEN
+    RAISE EXCEPTION 'FORBIDDEN';
+  END IF;
+
+  SELECT * INTO v_link FROM public.support_ticket_customer_links WHERE ticket_id = p_ticket_id;
+  IF v_link.id IS NULL THEN
+    PERFORM public.support_resolve_ticket_customer(p_ticket_id, 'auto_resolve');
+    SELECT * INTO v_link FROM public.support_ticket_customer_links WHERE ticket_id = p_ticket_id;
+  END IF;
+
+  IF v_link.customer_user_id IS NOT NULL THEN
+    SELECT * INTO v_profile FROM public.profiles WHERE id = v_link.customer_user_id;
+  END IF;
+
+  IF v_profile.auth_user_id IS NOT NULL THEN
+    SELECT u.email_confirmed_at, u.last_sign_in_at, u.created_at
+      INTO v_email_confirmed_at, v_last_sign_in_at, v_auth_created_at
+      FROM auth.users u WHERE u.id = v_profile.auth_user_id;
+  END IF;
+
+  IF v_link.organisation_id IS NOT NULL THEN
+    SELECT * INTO v_org FROM public.clients WHERE id = v_link.organisation_id;
+  END IF;
+
+  v_products := NULL;
+  IF v_org.id IS NOT NULL THEN
+    SELECT jsonb_agg(jsonb_build_object(
+             'id', w.id, 'name', w.name, 'primary_domain', w.primary_domain, 'status', w.status
+           ) ORDER BY w.name)
+      INTO v_products
+      FROM public.client_websites w
+     WHERE w.client_id = v_org.id;
+  END IF;
+
+  IF v_org.id IS NOT NULL THEN
+    SELECT * INTO v_sub FROM public.subscriptions s WHERE s.client_id = v_org.id ORDER BY s.created_at DESC LIMIT 1;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'ticket_id', p_ticket_id,
+    'resolution_status', v_link.resolution_status,
+    'link_source', v_link.link_source,
+    'customer', jsonb_build_object(
+      'customer_id', v_link.customer_user_id,
+      'name', coalesce(v_profile.full_name, v_link.customer_name),
+      'email', coalesce(v_profile.email, v_link.customer_email),
+      'role', v_profile.role,
+      'status', v_profile.status,
+      'email_verified', CASE WHEN v_email_confirmed_at IS NOT NULL THEN true WHEN v_profile.id IS NOT NULL THEN false ELSE NULL END,
+      'last_login', v_last_sign_in_at,
+      'created_at', coalesce(v_profile.created_at, v_auth_created_at)
+    ),
+    'organisation', CASE WHEN v_org.id IS NOT NULL THEN jsonb_build_object(
+      'id', v_org.id, 'name', coalesce(v_org.trading_name, v_org.company_name),
+      'status', v_org.status, 'client_reference', v_org.client_reference
+    ) ELSE NULL END,
+    'source_site', jsonb_build_object('site_id', v_link.site_id, 'product', v_link.product),
+    'products', v_products,
+    'subscription', CASE WHEN v_sub.id IS NOT NULL THEN jsonb_build_object(
+      'id', v_sub.id, 'name', v_sub.name, 'status', v_sub.status,
+      'customer_reference', v_sub.stripe_subscription_id, 'billing_state', v_sub.billing_cycle
+    ) ELSE NULL END
+  );
+END;
+$$;
+REVOKE ALL ON FUNCTION public.support_get_ticket_account(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.support_get_ticket_account(uuid) TO authenticated;
