@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import type { Role } from '@/lib/permissions';
 
-type MfaStatus = 'setup' | 'verify' | 'satisfied';
+type MfaStatus = 'setup' | 'verify' | 'satisfied' | 'error';
 
 interface AuthState {
   loading: boolean;
@@ -26,6 +26,7 @@ async function checkMfaStatus(): Promise<MfaStatus> {
     // A verified factor is what separates "needs setup" from the rest. Reading the
     // factor list directly keeps this correct even when the session token still
     // carries a stale aal2 claim right after the last factor is unenrolled.
+    if (aalRes.error || factorsRes.error || !aalRes.data || !factorsRes.data) return 'error';
     const factors = factorsRes.data;
     if (!factorsRes.error && factors) {
       const hasVerified =
@@ -38,7 +39,7 @@ async function checkMfaStatus(): Promise<MfaStatus> {
     if (aalRes.data?.nextLevel === 'aal2') return 'verify';
     return 'setup';
   } catch {
-    return 'satisfied';
+    return 'error';
   }
 }
 
@@ -61,15 +62,19 @@ export default function AuthGuard({ children }: { children: ReactNode }) {
 
     const fetchRole = async (userId: string): Promise<AuthState['role']> => {
       try {
-        const { data: roleData } = await supabase
+        const { data: roleData, error: roleError } = await supabase
           .from('internal_user_roles')
           .select('role, status')
           .eq('user_id', userId)
           .maybeSingle();
 
         // Disabled staff accounts are denied access (status !== 'active').
-        if (roleData?.role && roleData?.status !== 'disabled') {
-          return roleData.role as AuthState['role'];
+        if (roleError) return null;
+        if (roleData) {
+          if (roleData.status !== 'active') return null;
+          return ['owner', 'admin', 'viewer'].includes(roleData.role)
+            ? roleData.role as AuthState['role']
+            : null;
         }
 
         // No role yet — attempt to accept a pending invitation. This is resolved
@@ -240,6 +245,18 @@ export default function AuthGuard({ children }: { children: ReactNode }) {
           >
             Sign out
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (auth.user && auth.mfaStatus === 'error') {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="text-center">
+          <h1 className="text-xl font-semibold">Unable to verify two-factor authentication</h1>
+          <p className="mt-3">Check your connection and try again.</p>
+          <button onClick={refreshMfa} className="mt-4 px-5 py-3">Try again</button>
         </div>
       </div>
     );
