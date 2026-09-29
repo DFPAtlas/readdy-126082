@@ -5,6 +5,7 @@ import type { SiteEnvironment, SiteStatus, SupportSite } from '@/types/support-t
 import { isValidDomain, isValidEmail, isValidSlug } from '../constants';
 import { ENVIRONMENTS, ENVIRONMENT_LABELS, SITE_STATUSES, SITE_STATUS_META } from '../onboarding-constants';
 import { logAdminEvent } from '../audit';
+import type { GroupSiteOption } from '../hooks';
 import OriginEditor from './OriginEditor';
 
 interface WebsiteOption {
@@ -25,10 +26,12 @@ interface SiteFormModalProps {
   initial: SupportSite | null;
   websites: WebsiteOption[];
   projects: ProjectOption[];
+  groupSites: GroupSiteOption[];
   onSaved: () => void;
 }
 
 interface FormState {
+  ai_site_id: string;
   site_name: string;
   site_slug: string;
   domain: string;
@@ -45,6 +48,7 @@ interface FormState {
 }
 
 const EMPTY: FormState = {
+  ai_site_id: '',
   site_name: '',
   site_slug: '',
   domain: '',
@@ -66,7 +70,7 @@ function friendlySaveError(err: unknown): string {
   const code = (err as { code?: string } | null)?.code;
   switch (code) {
     case '23505':
-      return 'A support site with that name or slug already exists.';
+      return 'The site slug or DFP Command group site is already linked.';
     case '42501':
       return 'You do not have permission to register support sites. Contact an owner or admin.';
     case '23503':
@@ -82,7 +86,7 @@ function friendlySaveError(err: unknown): string {
   }
 }
 
-export default function SiteFormModal({ open, onClose, initial, websites, projects, onSaved }: SiteFormModalProps) {
+export default function SiteFormModal({ open, onClose, initial, websites, projects, groupSites, onSaved }: SiteFormModalProps) {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -92,6 +96,7 @@ export default function SiteFormModal({ open, onClose, initial, websites, projec
     if (!open) return;
     if (initial) {
       setForm({
+        ai_site_id: initial.ai_site_id ?? '',
         site_name: initial.site_name,
         site_slug: initial.site_slug,
         domain: initial.domain ?? '',
@@ -119,6 +124,7 @@ export default function SiteFormModal({ open, onClose, initial, websites, projec
   const validate = (): boolean => {
     const e: Record<string, string> = {};
     if (!form.site_name.trim()) e.site_name = 'Site name is required.';
+    if (!form.ai_site_id) e.ai_site_id = 'Choose the matching DFP Command site.';
     if (!form.site_slug.trim()) {
       e.site_slug = 'Site slug is required.';
     } else if (!isValidSlug(form.site_slug)) {
@@ -139,6 +145,7 @@ export default function SiteFormModal({ open, onClose, initial, websites, projec
     setSubmitError('');
     try {
       const payload = {
+        ai_site_id: form.ai_site_id || null,
         site_name: form.site_name.trim(),
         site_slug: form.site_slug.trim(),
         domain: form.domain.trim() || null,
@@ -165,7 +172,7 @@ export default function SiteFormModal({ open, onClose, initial, websites, projec
         const { data, error } = await supabase.from('internal_support_sites').insert(payload).select('id').single();
         if (error) {
           if (error.code === '23505') {
-            setSubmitError('A support site with that name or slug already exists.');
+            setSubmitError('The site slug or DFP Command group site is already linked.');
             setSaving(false);
             return;
           }
@@ -198,6 +205,18 @@ export default function SiteFormModal({ open, onClose, initial, websites, projec
   return (
     <Modal open={open} onClose={onClose} title={initial ? 'Edit support site' : 'Register support site'} className="max-w-xl">
       <div className="p-5 space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-foreground-400 mb-1" htmlFor="sf-group-site">DFP Command group site</label>
+          <select id="sf-group-site" value={form.ai_site_id} onChange={(e) => set('ai_site_id', e.target.value)} className={inputCls('ai_site_id')}>
+            <option value="">Not linked</option>
+            {groupSites.map((site) => (
+              <option key={site.id} value={site.id}>{site.name} ({site.site_key})</option>
+            ))}
+          </select>
+          <p className="text-xs text-foreground-500 mt-1">Links this support integration to the Group Site Registry for the operator console.</p>
+          {errors.ai_site_id && <p className="text-xs text-red-400 mt-1">{errors.ai_site_id}</p>}
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-foreground-400 mb-1" htmlFor="sf-name">Site name</label>

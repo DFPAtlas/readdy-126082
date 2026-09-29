@@ -37,7 +37,7 @@ export default function SupportIntegrations() {
   const navigate = useNavigate();
 
   const { sites, stats, loading, error, reload } = useSupportSites();
-  const { staff, websites, projects } = useIntegrationLookups();
+  const { staff, websites, projects, groupSites } = useIntegrationLookups();
   const { teams } = useSupportTeams();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -348,6 +348,7 @@ export default function SupportIntegrations() {
         initial={editing}
         websites={websites}
         projects={projects}
+        groupSites={groupSites}
         onSaved={reload}
       />
 
