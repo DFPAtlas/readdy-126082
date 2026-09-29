@@ -86,6 +86,21 @@ The raw snapshot remains a private export rather than a checked-in deployment
 migration. It describes the entire shared database and is not safe to apply to
 production as an additive migration.
 
+### Frontend component verification — 29 September 2026
+
+Ten isolated DOM component checks passed with mocked Supabase responses:
+anonymous direct ticket route redirects; disabled staff denied without invitation
+acceptance; MFA exception and API error block protected content; retry recovers;
+no verified factor redirects to setup; aal1 redirects to verification; active
+aal2 staff can render protected content; missing group site blocks registration;
+selected group ID is submitted; duplicate group links show a safe error.
+
+Fixed AuthGuard's former MFA exception fallback, which returned `satisfied`.
+MFA failures now display a retry screen. Existing inactive roles and role-query
+errors return no access without calling invitation acceptance. Targeted lint
+had zero errors and the existing React Fast Refresh export warning.
+These are component regressions, not live sign-in or end-to-end ticket tests.
+
 ### Remaining release gates
 
 Automatic branch creation still fails when replaying production's incomplete
