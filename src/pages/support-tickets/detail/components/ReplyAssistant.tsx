@@ -38,6 +38,16 @@ const FEEDBACK_REASONS = [
   'Other',
 ];
 
+// Optional fields returned by support_get_reply_suggestions for the Teach Tron
+// learning loop. Kept local so the shared type stays untouched.
+type TeachTronSuggestion = AiReplySuggestion & {
+  sent_text?: string | null;
+  was_edited?: boolean | null;
+  text_similarity?: number | null;
+  knowledge_tier?: 'customer_safe' | null;
+  promoted_at?: string | null;
+};
+
 interface ReplyAssistantProps {
   ticketId: string;
   canGenerate: boolean;
@@ -63,6 +73,8 @@ export default function ReplyAssistant({
   const [busy, setBusy] = useState<'run' | 'feedback' | null>(null);
   const [polling, setPolling] = useState(false);
   const [feedbackFor, setFeedbackFor] = useState<string | null>(null);
+  const [expandedTeaching, setExpandedTeaching] = useState<Set<string>>(new Set());
+  const [promoting, setPromoting] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -184,11 +196,47 @@ export default function ReplyAssistant({
     await load();
   };
 
+  const toggleTeaching = (id: string) => {
+    setExpandedTeaching((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const promoteSuggestion = async (s: TeachTronSuggestion, promote: boolean) => {
+    setPromoting(s.id);
+    const { error: e } = await supabase.rpc('support_promote_reply_to_knowledge', {
+      p_reply_id: s.id,
+      p_promote: promote,
+    });
+    setPromoting(null);
+    if (e) {
+      if (e.message.includes('FORBIDDEN')) {
+        onToast("You don't have permission to approve knowledge.", 'error');
+      } else {
+        onToast(e.message, 'error');
+      }
+      return;
+    }
+    onToast(
+      promote ? 'Promoted — Tron will learn from this within 15 minutes.' : 'Removed from knowledge.',
+      'success',
+    );
+    await load();
+  };
+
   const insertArticle = (a: KnowledgeArticle) => {
     const snippet = a.summary || a.content;
     onUseReply(snippet);
     onToast('Article added to the reply editor.', 'success');
   };
+
+  const teachableSuggestions = suggestions
+    .map((s) => s as TeachTronSuggestion)
+    .filter((s) => s.sent_text)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   const toggleKnowledge = (id: string) => {
     setSelectedKnowledge((prev) => {
@@ -470,6 +518,89 @@ export default function ReplyAssistant({
             </div>
           )}
         </div>
+
+        {/* Teach Tron */}
+        {teachableSuggestions.length > 0 && (
+          <div className="border-t border-background-200/50 pt-3">
+            <p className="text-[11px] font-label text-foreground-500 uppercase tracking-wider mb-1">Teach Tron</p>
+            <p className="text-xs text-foreground-600 mb-2">
+              Replies you sent from an AI draft. Promote good ones so future drafts for this site learn
+              from them. Personal details are removed automatically.
+            </p>
+
+            <div className="space-y-1.5">
+              {teachableSuggestions.map((s) => {
+                const sentText = s.sent_text ?? '';
+                const isLong = sentText.length > 160;
+                const isExpanded = expandedTeaching.has(s.id);
+                const shown = isLong && !isExpanded ? `${sentText.slice(0, 160)}…` : sentText;
+                return (
+                  <div key={s.id} className="bg-background-50 border border-background-200/50 rounded-lg p-3">
+                    <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                      <span className="text-[10px] text-foreground-600 whitespace-nowrap">
+                        {new Date(s.created_at).toLocaleDateString()}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 text-[10px] font-label px-2 py-0.5 rounded-full whitespace-nowrap ${
+                          s.was_edited
+                            ? 'bg-amber-500/15 text-amber-300'
+                            : 'bg-secondary-500/15 text-secondary-300'
+                        }`}
+                      >
+                        <i
+                          className={`${
+                            s.was_edited ? 'ri-edit-line' : 'ri-send-plane-line'
+                          } text-xs w-3 h-3 flex items-center justify-center`}
+                        ></i>
+                        {s.was_edited ? 'Edited before sending' : 'Sent as drafted'}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-foreground-300 leading-relaxed whitespace-pre-wrap">{shown}</p>
+                    {isLong && (
+                      <button
+                        type="button"
+                        onClick={() => toggleTeaching(s.id)}
+                        className="mt-1 text-[11px] font-medium text-accent-400 hover:text-accent-300 transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        {isExpanded ? 'Show less' : 'Show more'}
+                      </button>
+                    )}
+
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      {s.knowledge_tier === 'customer_safe' ? (
+                        <>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-label px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 whitespace-nowrap">
+                            <i className="ri-check-line text-xs w-3 h-3 flex items-center justify-center"></i>
+                            In knowledge
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => promoteSuggestion(s, false)}
+                            disabled={promoting === s.id}
+                            className="text-[11px] font-medium text-foreground-500 hover:text-red-400 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
+                          >
+                            Remove
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => promoteSuggestion(s, true)}
+                          disabled={promoting === s.id}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border border-background-300/60 text-foreground-300 hover:text-emerald-400 hover:border-emerald-500/40 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
+                        >
+                          <i className="ri-bookmark-line w-4 h-4 flex items-center justify-center"></i>
+                          Promote to knowledge
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {error && <p className="text-xs text-red-400">{error}</p>}
       </div>
