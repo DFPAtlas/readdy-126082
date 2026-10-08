@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useExecutiveDashboard } from './useExecutiveDashboard';
 import ExecutiveHeader from './components/ExecutiveHeader';
 import NeedsAttentionPanel from './components/NeedsAttentionPanel';
@@ -38,7 +38,19 @@ function Skeleton() {
 
 export default function Dashboard() {
   const d = useExecutiveDashboard();
-  const [view, setView] = useState<DashboardView>('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const candidate = searchParams.get('view');
+  const view: DashboardView = VIEWS.some((item) => item.key === candidate)
+    ? candidate as DashboardView
+    : 'overview';
+  const setView = (next: DashboardView) => {
+    setSearchParams((previous) => {
+      const updated = new URLSearchParams(previous);
+      if (next === 'overview') updated.delete('view');
+      else updated.set('view', next);
+      return updated;
+    }, { replace: true });
+  };
 
   const activity = (
     <ActivityPanel
@@ -58,7 +70,7 @@ export default function Dashboard() {
           <button
             key={item.key}
             type="button"
-            aria-current={view === item.key ? 'page' : undefined}
+            aria-pressed={view === item.key}
             onClick={() => setView(item.key)}
             className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${view === item.key
               ? 'bg-accent-500/15 text-accent-400 border border-accent-500/30'
