@@ -48,6 +48,40 @@ const uatNavItems = [
   { tab: 'approval', icon: 'ri-shield-check-line', label: 'Approvals' },
 ];
 
+type GroupItem = NavItem & { permission?: 'support.metrics.view' | 'staff.manage' | 'support.knowledge.view' | 'support.integrations.manage'; tab?: string };
+type NavigationGroup = { id: string; label: string; icon: string; items: GroupItem[] };
+
+// Every existing destination remains available; grouping does not change access checks.
+const navigationGroups: NavigationGroup[] = [
+  { id: 'overview', label: 'Overview', icon: 'ri-dashboard-3-line', items: [
+    navItems[0], navItems[15], navItems[11],
+  ] },
+  { id: 'projects', label: 'Projects & Development', icon: 'ri-folder-3-line', items: [
+    ...navItems.slice(1, 11), navItems[16],
+  ] },
+  { id: 'uat', label: 'UAT & Testing', icon: 'ri-test-tube-line', items:
+    uatNavItems.map((item) => ({ ...item, to: '/admin/website-uat', ownerAdminOnly: true })),
+  },
+  { id: 'ai', label: 'AI & Infrastructure', icon: 'ri-robot-2-line', items: [
+    navItems[12], navItems[13], navItems[14], navItems[17],
+  ] },
+  { id: 'support', label: 'Commercial & Support', icon: 'ri-customer-service-2-line', items: [
+    { to: '/support-tickets', icon: 'ri-ticket-2-line', label: 'Support Tickets' },
+    { to: '/customers', icon: 'ri-user-search-line', label: 'Customers' },
+    { to: '/support-repairs', icon: 'ri-tools-line', label: 'Support Repairs' },
+    { to: '/support-tickets/reports', icon: 'ri-bar-chart-2-line', label: 'Support Analytics', permission: 'support.metrics.view' },
+    { to: '/support-teams', icon: 'ri-group-2-line', label: 'Support Teams', permission: 'staff.manage' },
+    { to: '/support-routing', icon: 'ri-git-branch-line', label: 'Routing Rules', permission: 'staff.manage' },
+    { to: '/support-knowledge', icon: 'ri-book-open-line', label: 'Knowledge Base', permission: 'support.knowledge.view' },
+    { to: '/admin/support-integrations', icon: 'ri-plug-2-line', label: 'Support Integrations', permission: 'support.integrations.manage' },
+  ] },
+  { id: 'admin', label: 'Administration', icon: 'ri-settings-3-line', items: [
+    { to: '/security', icon: 'ri-shield-keyhole-line', label: 'Security' },
+    { to: '/team', icon: 'ri-team-line', label: 'Team & Access', permission: 'staff.manage' },
+    navItems[18],
+  ] },
+];
+
 export default function AppLayout() {
   const auth = useAuth();
   const navigate = useNavigate();
@@ -57,7 +91,24 @@ export default function AppLayout() {
   const activeTab = searchParams.get('tab') ?? 'register';
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => ({
+    overview: true,
+    projects: false,
+    uat: false,
+    ai: false,
+    support: false,
+    admin: false,
+  }));
   const unreadTickets = useUnreadTicketCount();
+  // Open the relevant group when navigating directly or via browser history.
+  useEffect(() => {
+    const match = navigationGroups.find((group) => group.items.some((item) =>
+      item.tab
+        ? location.pathname === '/admin/website-uat'
+        : location.pathname === item.to || (item.to !== '/dashboard' && location.pathname.startsWith(item.to + '/'))
+    ));
+    if (match) setOpenGroups((prev) => prev[match.id] ? prev : { ...prev, [match.id]: true });
+  }, [location.pathname]);
   const mainRef = useRef<HTMLElement>(null);
   const scrollPositions = useRef<Map<string, number>>(new Map());
 
@@ -117,243 +168,63 @@ export default function AppLayout() {
           </span>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
-          {navItems.map((item) => {
-            if (item.ownerAdminOnly && auth.role !== 'owner' && auth.role !== 'admin') return null;
+        <nav aria-label="Main navigation" className="flex-1 overflow-y-auto py-3 px-3 space-y-1">
+          {navigationGroups.map((group) => {
+            const visibleItems = group.items.filter((item) =>
+              (!item.ownerAdminOnly || auth.role === 'owner' || auth.role === 'admin') &&
+              (!item.permission || hasPermission(auth.role, item.permission))
+            );
+            if (visibleItems.length === 0) return null;
+            const expanded = openGroups[group.id] ?? false;
+            const active = visibleItems.some((item) =>
+              item.tab
+                ? location.pathname === '/admin/website-uat' && activeTab === item.tab
+                : location.pathname === item.to || (item.to !== '/dashboard' && location.pathname.startsWith(item.to + '/'))
+            );
             return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                  isActive
-                    ? 'bg-accent-500/10 text-accent-400 font-medium'
-                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-                }`
-              }
-              title={sidebarCollapsed ? item.label : undefined}
-            >
-              <i className={`${item.icon} text-base w-4 h-4 flex items-center justify-center shrink-0`}></i>
-              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
-            </NavLink>
+              <div key={group.id}>
+                <button type="button"
+                  aria-expanded={expanded}
+                  aria-controls={`nav-group-${group.id}`}
+                  title={sidebarCollapsed ? group.label : undefined}
+                  onClick={() => {
+                    if (sidebarCollapsed) setSidebarCollapsed(false);
+                    setOpenGroups((prev) => ({ ...prev, [group.id]: !expanded }));
+                  }}
+                  className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-left transition-colors ${active ? 'text-accent-400' : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}
+                >
+                  <i className={`${group.icon} text-base w-4 h-4 shrink-0`} aria-hidden="true" />
+                  <span className={`flex-1 font-medium ${sidebarCollapsed ? 'lg:hidden' : ''}`}>{group.label}</span>
+                  <i className={`ri-arrow-down-s-line text-base transition-transform ${expanded ? 'rotate-180' : ''} ${sidebarCollapsed ? 'lg:hidden' : ''}`} aria-hidden="true" />
+                </button>
+                {expanded && (
+                  <div id={`nav-group-${group.id}`} className={`mt-1 space-y-0.5 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
+                    {visibleItems.map((item) => (
+                      <NavLink key={item.tab ?? item.to}
+                        to={item.tab ? `/admin/website-uat?tab=${item.tab}` : item.to}
+                        onClick={() => setSidebarOpen(false)}
+                        title={item.label}
+                        className={() => {
+                          const selected = item.tab
+                            ? location.pathname === '/admin/website-uat' && activeTab === item.tab
+                            : location.pathname === item.to || (item.to !== '/dashboard' && location.pathname.startsWith(item.to + '/'));
+                          return `flex items-center gap-3 rounded-lg text-sm pl-7 pr-3 py-2 transition-colors ${selected ? 'bg-accent-500/10 text-accent-400 font-medium' : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'}`;
+                        }}
+                      >
+                        <i className={`${item.icon} text-base w-4 h-4 shrink-0`} aria-hidden="true" />
+                        <span className="flex-1 truncate">{item.label}</span>
+                        {item.to === '/support-tickets' && unreadTickets > 0 && (
+                          <span aria-label={`${unreadTickets} unread tickets`} className="text-[10px] font-semibold bg-accent-500 text-background-950 rounded-full px-1.5 py-0.5">
+                            {unreadTickets > 99 ? '99+' : unreadTickets}
+                          </span>
+                        )}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
             );
           })}
-
-          {/* Security */}
-          <NavLink
-            to="/security"
-            onClick={() => setSidebarOpen(false)}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                isActive
-                  ? 'bg-accent-500/10 text-accent-400 font-medium'
-                  : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-              }`
-            }
-            title={sidebarCollapsed ? 'Security' : undefined}
-          >
-            <i className="ri-shield-keyhole-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
-            <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Security</span>
-          </NavLink>
-
-          {/* Support Tickets */}
-          <NavLink
-            to="/support-tickets"
-            onClick={() => setSidebarOpen(false)}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                isActive
-                  ? 'bg-accent-500/10 text-accent-400 font-medium'
-                  : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-              }`
-            }
-            title={sidebarCollapsed ? 'Support Tickets' : undefined}
-          >
-            <i className="ri-ticket-2-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
-            <span className={`flex-1 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>Support Tickets</span>
-            {unreadTickets > 0 && (
-              <span
-                className={`text-[10px] font-label font-semibold bg-accent-500 text-background-950 rounded-full px-1.5 py-0.5 leading-none ${sidebarCollapsed ? 'lg:hidden' : ''}`}
-                aria-label={`${unreadTickets} unread tickets`}
-              >
-                {unreadTickets > 99 ? '99+' : unreadTickets}
-              </span>
-            )}
-          </NavLink>
-
-          {/* Customers */}
-          <NavLink
-            to="/customers"
-            onClick={() => setSidebarOpen(false)}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                isActive
-                  ? 'bg-accent-500/10 text-accent-400 font-medium'
-                  : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-              }`
-            }
-            title={sidebarCollapsed ? 'Customers' : undefined}
-          >
-            <i className="ri-user-search-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
-            <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Customers</span>
-          </NavLink>
-
-          {/* Support Repairs */}
-          <NavLink
-            to="/support-repairs"
-            onClick={() => setSidebarOpen(false)}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                isActive
-                  ? 'bg-accent-500/10 text-accent-400 font-medium'
-                  : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-              }`
-            }
-            title={sidebarCollapsed ? 'Support Repairs' : undefined}
-          >
-            <i className="ri-tools-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
-            <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Support Repairs</span>
-          </NavLink>
-
-          {/* Support Analytics */}
-          {hasPermission(auth.role, 'support.metrics.view') && (
-            <NavLink
-              to="/support-tickets/reports"
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                  isActive
-                    ? 'bg-accent-500/10 text-accent-400 font-medium'
-                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-                }`
-              }
-              title={sidebarCollapsed ? 'Support Analytics' : undefined}
-            >
-              <i className="ri-bar-chart-2-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
-              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Support Analytics</span>
-            </NavLink>
-          )}
-
-          {/* Owner/Admin settings */}
-          {hasPermission(auth.role, 'staff.manage') && (
-            <NavLink
-              to="/team"
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                  isActive
-                    ? 'bg-accent-500/10 text-accent-400 font-medium'
-                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-                }`
-              }
-              title={sidebarCollapsed ? 'Team & Access' : undefined}
-            >
-              <i className="ri-team-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
-              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Team &amp; Access</span>
-            </NavLink>
-          )}
-
-          {/* Support Teams */}
-          {hasPermission(auth.role, 'staff.manage') && (
-            <NavLink
-              to="/support-teams"
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                  isActive
-                    ? 'bg-accent-500/10 text-accent-400 font-medium'
-                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-                }`
-              }
-              title={sidebarCollapsed ? 'Support Teams' : undefined}
-            >
-              <i className="ri-group-2-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
-              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Support Teams</span>
-            </NavLink>
-          )}
-
-          {/* Routing Rules */}
-          {hasPermission(auth.role, 'staff.manage') && (
-            <NavLink
-              to="/support-routing"
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                  isActive
-                    ? 'bg-accent-500/10 text-accent-400 font-medium'
-                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-                }`
-              }
-              title={sidebarCollapsed ? 'Routing Rules' : undefined}
-            >
-              <i className="ri-git-branch-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
-              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Routing Rules</span>
-            </NavLink>
-          )}
-
-          {/* Knowledge Base */}
-          {hasPermission(auth.role, 'support.knowledge.view') && (
-            <NavLink
-              to="/support-knowledge"
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                  isActive
-                    ? 'bg-accent-500/10 text-accent-400 font-medium'
-                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-                }`
-              }
-              title={sidebarCollapsed ? 'Knowledge Base' : undefined}
-            >
-              <i className="ri-book-open-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
-              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Knowledge Base</span>
-            </NavLink>
-          )}
-
-          {/* Support Integrations */}
-          {hasPermission(auth.role, 'support.integrations.manage') && (
-            <NavLink
-              to="/admin/support-integrations"
-              onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} ${
-                  isActive
-                    ? 'bg-accent-500/10 text-accent-400 font-medium'
-                    : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'
-                }`
-              }
-              title={sidebarCollapsed ? 'Support Integrations' : undefined}
-            >
-              <i className="ri-plug-2-line text-base w-4 h-4 flex items-center justify-center shrink-0"></i>
-              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>Support Integrations</span>
-            </NavLink>
-          )}
-
-          {/* Website UAT Section */}
-          {(auth.role === 'owner' || auth.role === 'admin') && (
-            <>
-              <div className={`pt-3 mt-3 border-t border-background-200/60 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
-                <p className="px-3 py-1 text-[10px] font-label text-foreground-600 uppercase tracking-widest whitespace-nowrap">Website UAT &amp; Changes</p>
-              </div>
-              {uatNavItems.map((item) => (
-                <NavLink
-                  key={item.tab}
-                  to={`/admin/website-uat?tab=${item.tab}`}
-                  onClick={() => setSidebarOpen(false)}
-                  className={
-                    activeTab === item.tab
-                      ? `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} bg-accent-500/10 text-accent-400 font-medium`
-                      : `flex items-center gap-3 rounded-lg text-sm transition-colors duration-150 whitespace-nowrap ${sidebarCollapsed ? 'lg:justify-center lg:px-0' : 'px-3 py-2.5'} text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50`
-                  }
-                  title={sidebarCollapsed ? item.label : undefined}
-                >
-                  <i className={`${item.icon} text-base w-4 h-4 flex items-center justify-center shrink-0`}></i>
-                  <span className={`${sidebarCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
-                </NavLink>
-              ))}
-            </>
-          )}
         </nav>
 
         <div className={`border-t border-background-200/60 p-4 ${sidebarCollapsed ? 'lg:flex lg:flex-col lg:items-center lg:px-2' : ''}`}>
