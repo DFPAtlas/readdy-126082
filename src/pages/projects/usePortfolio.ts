@@ -142,8 +142,8 @@ export function usePortfolio(): PortfolioData {
     const errors: PortfolioSourceErrors = { ...NO_ERRORS };
 
     // Helper: run a query, capture error, return rows.
-    const bulk = async <T extends { [key: string]: unknown }>(
-      fn: () => Promise<{ data: T[] | null; error: { message?: string } | null }>,
+    const bulk = async <T>(
+      fn: () => PromiseLike<{ data: unknown; error: unknown }>,
       onError: () => void,
     ): Promise<T[]> => {
       try {
@@ -251,13 +251,14 @@ export function usePortfolio(): PortfolioData {
     if (id !== requestIdRef.current) return;
 
     // ── Group sources by project ────────────────────────────────────────────
-    const byProject = <T extends { project_id?: number | null }>(rows: T[]): Map<number, T[]> => {
+    const byProject = <T>(rows: T[]): Map<number, T[]> => {
       const m = new Map<number, T[]>();
       for (const r of rows) {
-        if (r.project_id == null) continue;
-        const arr = m.get(r.project_id) ?? [];
+        const projectId = (r as { project_id?: number | null }).project_id;
+        if (projectId == null) continue;
+        const arr = m.get(projectId) ?? [];
         arr.push(r);
-        m.set(r.project_id, arr);
+        m.set(projectId, arr);
       }
       return m;
     };
