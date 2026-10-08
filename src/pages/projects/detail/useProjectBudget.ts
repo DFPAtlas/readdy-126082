@@ -73,10 +73,10 @@ export function useProjectBudget(
       query('internal_project_budget_events'),
     ]);
 
-    setBudgets(b.data as ProjectBudget[]);
-    setCostItems(c.data as CostItem[]);
-    setRecurringCosts(r.data as RecurringCost[]);
-    setEvents(ev.data as BudgetEvent[]);
+    setBudgets(b.data as unknown as ProjectBudget[]);
+    setCostItems(c.data as unknown as CostItem[]);
+    setRecurringCosts(r.data as unknown as RecurringCost[]);
+    setEvents(ev.data as unknown as BudgetEvent[]);
 
     const errs: SourceErrors = { budgets: b.err, costs: c.err, recurring: r.err, events: ev.err };
     setSourceErrors(errs);
