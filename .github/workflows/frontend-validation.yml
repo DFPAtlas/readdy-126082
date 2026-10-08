@@ -1,0 +1,28 @@
+name: DFP Command frontend validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-package-lock
+      - name: TypeScript check
+        run: npm run type-check
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build

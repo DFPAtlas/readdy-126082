@@ -154,7 +154,7 @@ export function useExecutiveDashboard(): ExecutiveDashboardData {
     let cancelled = false;
 
     (async () => {
-      const bulk = async <T>(fn: () => Promise<{ data: T | null; error: unknown }>): Promise<{ data: T[]; ok: boolean }> => {
+      const bulk = async <T>(fn: () => PromiseLike<{ data: unknown; error: unknown }>): Promise<{ data: T[]; ok: boolean }> => {
         try {
           const { data, error } = await fn();
           if (error) return { data: [], ok: false };
