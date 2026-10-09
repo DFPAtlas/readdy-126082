@@ -35,6 +35,7 @@ const navItems: NavItem[] = [
   { to: '/activity-log', icon: 'ri-history-line', label: 'Activity' },
   { to: '/github', icon: 'ri-github-fill', label: 'GitHub' },
   { to: '/ai-operations', icon: 'ri-robot-2-line', label: 'AI Operations' },
+  { to: '/comms', icon: 'ri-mail-settings-line', label: 'DFP Comms', ownerAdminOnly: true },
   { to: '/help', icon: 'ri-question-line', label: 'Help Centre' },
 ];
 
