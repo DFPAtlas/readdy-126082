@@ -24,5 +24,5 @@ BEGIN
     ('support@guardian-hub.uk', guardian_site_id, 'ticket', true,
      'GuardianHub custom-domain support inbox; original Digital Footprint alias retained.')
   ON CONFLICT (address) DO NOTHING;
-END
+END;
 $migration$;
