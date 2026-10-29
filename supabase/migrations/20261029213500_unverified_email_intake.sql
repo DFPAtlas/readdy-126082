@@ -12,4 +12,6 @@ create table if not exists public.internal_unverified_email_intake (
  unique (site_slug, provider_message_id)
 );
 alter table public.internal_unverified_email_intake enable row level security;
-revoke all on public.internal_unverified_email_intake from anon, authenticated;
+revoke all on public.internal_unverified_email_intake from public, anon, authenticated;
+-- Access remains service-role only. No customer-facing policy is created.
+
