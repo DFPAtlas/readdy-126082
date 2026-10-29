@@ -7,7 +7,7 @@ create table if not exists public.internal_unverified_email_intake (
  subject text not null default '',
  body_text text not null default '',
  received_at timestamptz not null,
- verification_status text not null default 'unverified',
+ verification_status text not null default 'unverified' check (verification_status in ('unverified','verified','rejected')),
  created_at timestamptz not null default now(),
  unique (site_slug, provider_message_id)
 );
