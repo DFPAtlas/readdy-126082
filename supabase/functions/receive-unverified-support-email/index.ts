@@ -34,7 +34,7 @@ serve(async req => {
   const {siteSlug,providerEmailId,from,to,subject,text,receivedAt}=data;
   if(siteSlug !== "quickguard" || typeof providerEmailId !== "string" ||
     !/^[a-zA-Z0-9_-]{16,100}$/.test(providerEmailId) ||
-    typeof from !== "string" || from.length > 320 ||
+    typeof from !== "string" || from.length > 320 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(from) ||
     typeof to !== "string" || to.toLowerCase() !== "support@quickguard.uk" ||
     typeof subject !== "string" || subject.length > 500 ||
     typeof text !== "string" || text.length > 20000 ||
@@ -44,6 +44,7 @@ serve(async req => {
   const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const {data:site}=await db.from("internal_support_sites").select("id").eq("site_slug",siteSlug).eq("is_active",true).maybeSingle();
   if(!site) return reply(403,{error:"Site disabled"});
+  // Persist first; duplicate provider IDs are acknowledged without overwriting the prior record.
   const {error}=await db.from("internal_unverified_email_intake").upsert({
     site_slug:siteSlug, provider_message_id:providerEmailId, sender_email:from, recipient_email:to,
     subject, body_text:text, received_at:new Date(receivedAt).toISOString()
