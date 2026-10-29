@@ -1,0 +1,12 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+const key="test-only-shared-secret-0123456789abcdef";
+const email={siteSlug:"quickguard",providerEmailId:"msg_3LNZxjiapjTA4kxJUNBXPVwqrkd",from:"sender@example.test",to:"support@quickguard.uk",subject:"Test",text:"Testing",receivedAt:"2026-10-29T20:44:53Z"};
+const raw=JSON.stringify(email),timestamp="2026-10-29T21:26:00Z";
+const sign=(key,timestamp,raw)=>createHmac("sha256",key).update(timestamp+"\n"+raw).digest("hex");
+test("signed intake payload verifies",()=>assert.equal(sign(key,timestamp,raw),sign(key,timestamp,raw)));
+test("tampered body changes signature",()=>assert.notEqual(sign(key,timestamp,raw),sign(key,timestamp,raw+"altered")));
+test("incorrect secret fails",()=>assert.notEqual(sign(key,timestamp,raw),sign(key+"wrong",timestamp,raw)));
+test("changed timestamp fails",()=>assert.notEqual(sign(key,timestamp,raw),sign(key,timestamp+"later",raw)));
+test("required contract fields",()=>assert.deepEqual(Object.keys(email),["siteSlug","providerEmailId","from","to","subject","text","receivedAt"]));
