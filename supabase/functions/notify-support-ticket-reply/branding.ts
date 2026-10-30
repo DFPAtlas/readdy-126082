@@ -8,9 +8,10 @@ export function renderSupportReply(
   replyBody: string,
 ) {
   const guardian = site?.site_slug === "guardianhub" && site.domain === "guardian-hub.uk";
-  const label = guardian ? "GuardianHub Support" : "Digital Footprint Support";
-  const from = guardian ? "GuardianHub Support <support@guardian-hub.uk>" : `Digital Footprint Support <${fallbackAddress}>`;
-  const subject = `[${ticketNumber}] ${guardian ? "GuardianHub Support" : "Reply from Digital Footprint Support"}`;
+  const quickguard = site?.site_slug === "quickguard" && site.domain === "quickguard.uk";
+  const label = quickguard ? "QuickGuard Support" : guardian ? "GuardianHub Support" : "Digital Footprint Support";
+  const from = quickguard ? "QuickGuard Support <support@quickguard.uk>" : guardian ? "GuardianHub Support <support@guardian-hub.uk>" : `Digital Footprint Support <${fallbackAddress}>`;
+  const subject = `[${ticketNumber}] ${quickguard ? "Reply from QuickGuard Support" : guardian ? "GuardianHub Support" : "Reply from Digital Footprint Support"}`;
   const number = escapeHtml(ticketNumber);
   const bodyHtml = escapeHtml(replyBody).replace(/\n/g, "<br>");
   const html = guardian ? `<!doctype html>
@@ -23,7 +24,7 @@ export function renderSupportReply(
 <tr><td style="padding:20px 24px;border-top:1px solid #334155;color:#cbd5e1;font-size:13px;line-height:1.6;">To continue this conversation, reply to this email.<br><a href="https://guardian-hub.uk" style="color:#93c5fd;">guardian-hub.uk</a><br>GuardianHub is owned and operated by <a href="https://digital-footprint.uk" style="color:#93c5fd;">Digital Footprint</a>.</td></tr>
 </table></td></tr></table></body></html>` : `
     <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;background:#ffffff;color:#1a1a1a;">
-      <p style="margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:20px;">Ticket ${number}</p>
+      ${quickguard ? '<h1 style="font-size:22px;margin:0 0 20px;color:#1a1a1a;">QuickGuard Support</h1>' : ""}<p style="margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:20px;">Ticket ${number}</p>
       <div style="background:#f5f5f5;border-radius:8px;padding:16px;font-size:14px;line-height:1.6;white-space:pre-wrap;">${bodyHtml}</div>
       <p style="margin:24px 0 0;font-size:13px;color:#888;">If you need anything else, just reply to this email.</p>
     </div>
