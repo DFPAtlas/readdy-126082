@@ -34,7 +34,7 @@ serve(async req => {
   const {siteSlug,providerEmailId,from,to,subject,text,receivedAt}=data;
   if(siteSlug !== "quickguard" || typeof providerEmailId !== "string" ||
     !/^[a-zA-Z0-9_-]{16,100}$/.test(providerEmailId) ||
-    typeof from !== "string" || from.length > 320 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(from) ||
+    typeof from !== "string" || from.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from) ||
     typeof to !== "string" || to.toLowerCase() !== "support@quickguard.uk" ||
     typeof subject !== "string" || subject.length > 500 ||
     typeof text !== "string" || text.length > 20000 ||
