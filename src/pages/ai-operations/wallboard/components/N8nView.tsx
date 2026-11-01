@@ -1,4 +1,3 @@
-import HalAgentRuns from './HalAgentRuns';
 import { useN8nData } from '@/pages/ai-operations/wallboard/n8nStore';
 import {
   getN8nSummary,
@@ -373,7 +372,6 @@ export default function N8nView() {
         <div className="grid grid-cols-12 gap-3 flex-1 min-h-0">
           {/* Workflows (left) */}
           <div className="col-span-8 min-h-0 flex flex-col gap-3 overflow-y-auto pr-1">
-            <HalAgentRuns />
             <section className="shrink-0">
               <div className="flex items-center gap-2 mb-2">
                 <span className="w-7 h-7 flex items-center justify-center rounded-md bg-background-200/50 text-accent-400">

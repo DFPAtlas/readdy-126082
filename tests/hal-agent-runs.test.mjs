@@ -42,3 +42,27 @@ test('normalisation rejects malformed rows, unknown instances and invalid dates'
   assert.equal(sanitiseRuns([{...run('1'), status: 'invented', startedAt: 'bad'}])[0].status, 'unknown');
   assert.deepEqual(readN8nRunSamples([{instance: 'other', sampledAt: new Date().toISOString()}]), []);
 });
+
+const { deriveHalRunActivity } = await import('../src/lib/ai-operations/halRunActivity.ts');
+test('wall activity namespaces IDs and counts only fresh running rows', () => {
+  const now = Date.parse('2026-11-01T12:01:00Z');
+  const timestamp = new Date(now).toISOString();
+  const samples = ['hall-n8n', 'leadgen_n8n'].map(instance => ({instance, state: 'available', sampledAt: timestamp, truncated: false, runs: [run('1', 'running')]}));
+  const activity = deriveHalRunActivity(samples, timestamp, now);
+  assert.equal(activity.running, 2); assert.equal(activity.complete, true);
+  assert.equal(new Set(activity.rows.map(r => r.key)).size, 2);
+  assert.equal(activity.rows[0].durationMs, 60000);
+  const stale = deriveHalRunActivity(samples, timestamp, now + 120000);
+  assert.equal(stale.running, 0); assert.equal(stale.rows[0].status, 'unknown');
+  assert.equal(stale.rows[0].durationMs, null); assert.equal(stale.complete, false);
+});
+test('wall distinguishes missing, unavailable, partial and simulated sources', () => {
+  assert.equal(deriveHalRunActivity(null, null).instances.length, 2);
+  assert.equal(deriveHalRunActivity(null, null).instances[0].label, 'NO TELEMETRY');
+  const stamp = new Date().toISOString();
+  const samples = [{instance: 'hall-n8n', state: 'available', sampledAt: stamp, truncated: true, runs: [run('1', 'running')]}];
+  assert.equal(deriveHalRunActivity(samples, stamp).complete, false);
+  const simulated = deriveHalRunActivity(samples, stamp, Date.now(), true);
+  assert.equal(simulated.running, 0); assert.equal(simulated.rows[0].status, 'unknown');
+  assert.equal(simulated.instances[0].label, 'SIMULATED');
+});

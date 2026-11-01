@@ -1710,3 +1710,14 @@
     animation: none !important;
   }
 }
+/* Bounded, read-only HAL activity on the active operations rail. */
+.ow-hal-activity {
+  flex: 0 0 238px;
+  min-height: 238px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(34, 211, 238, 0.15);
+  overflow: hidden;
+}
+.ow-hal-run { min-width: 0; border-left: 2px solid rgba(34,211,238,0.35); padding-left: 7px; }

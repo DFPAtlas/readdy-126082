@@ -1,6 +1,6 @@
 # HAL agent run visibility
 
-The Operations Wall → Automation & Workflows view now includes **HAL agent runs** for `hall-n8n` and `leadgen_n8n`. It displays execution IDs, workflow IDs (registry names for unambiguous main-instance matches), status, start/end times and completed duration. Status filters help find running, successful, failed and waiting executions.
+The active Operations Wall right-hand Autonomous Operations rail now includes **HAL Run Activity** for `hall-n8n` and `leadgen_n8n`. It displays execution IDs, workflow IDs, status, start/end times and completed duration or live elapsed time. Two run cards rotate through the bounded sample, prioritising fresh running executions. Both instance collection states and sample times remain visible. Master-agent mission rows now paginate three at a time to reserve space for activity. The wall remains read-only.
 
 ## Data path
 
@@ -26,8 +26,12 @@ Collection is opt-in. Missing keys show not configured, HTTP/auth/network failur
 
 ## Limits
 
-This is a bounded sample of saved executions, not a complete audit log or lifetime execution count. n8n save/prune settings determine available history; busy instances may omit runs. Individual specialist nodes inside one workflow are not separate execution records and require workflow instrumentation for per-specialist visibility. Registry names are used only for an unambiguous main-instance workflow ID; leadgen shows IDs to avoid cross-instance misattribution. Existing callback-derived wallboard KPIs retain their existing source and are distinct from this panel.
+This is a bounded sample of saved executions, not a complete audit log or lifetime execution count. n8n save/prune settings determine available history; busy instances may omit runs. Individual specialist nodes inside one workflow are not separate execution records and require workflow instrumentation for per-specialist visibility. Both instances show workflow IDs until an instance-aware agent mapping is implemented; the panel never guesses an agent name or task from an execution ID. Simulated heartbeat data is explicitly labelled and excluded from live running counts. Existing callback-derived wallboard KPIs retain their existing source and are distinct from this panel.
 
 ## Validation
 
 `node --experimental-strip-types --test tests/hal-agent-runs.test.mjs` covers private-data stripping, read-only requests, failure/configuration states, deduplication, limits, running priority and timestamp expiry. Production build and ESLint on changed UI files pass. Full TypeScript validation reports 290 errors on both this branch and unchanged main, with identical diagnostics and no added errors. The collector module also passes an isolated TypeScript check. Live HAL collection still requires the rollout and an observed execution; unit tests do not establish a live connection.
+
+### Active wall validation follow-up
+
+Seven focused tests pass, including instance ID collisions, live elapsed time, stale counts and simulated data. Changed TypeScript/UI files pass ESLint, and the production bundle includes the new active-rail component. Project TypeScript diagnostics remain identical to unchanged main (290 existing errors). Browser layout inspection remains outstanding: Chromium is absent in this environment and its download returned a truncated archive. Verify the complete wall at 1920×1080, 1920×900 and 1536×864 before deployment.
