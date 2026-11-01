@@ -6,7 +6,7 @@ interface RegistryIdentity {
 interface AgentIdentity {
   id: string; name: string; site_id: string | null; environment: string; is_active: boolean; workflow_id?: string | null;
 }
-interface SiteIdentity { id: string; name: string; environment: string; is_active: boolean }
+interface SiteIdentity { id: string; site_key?: string; name: string; environment: string; is_active: boolean }
 export interface WorkflowMappingContext {
   registry: RegistryIdentity[]; agents: AgentIdentity[]; sites: SiteIdentity[];
   environment: string; available: boolean;
