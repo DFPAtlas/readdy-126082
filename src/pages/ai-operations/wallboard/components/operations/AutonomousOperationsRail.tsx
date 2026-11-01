@@ -1,3 +1,4 @@
+import HalRunActivityPanel from './HalRunActivityPanel';
 import {
   getMasterAgentRows,
   toneHex,
@@ -41,7 +42,7 @@ const HUB_R = 25;
 
 // The mission list shows DFP (hub) plus up to seven surrounding masters per
 // page — the same "hub + seven" arrangement as the central wall.
-const MISSION_ROWS_PER_PAGE = 8;
+const MISSION_ROWS_PER_PAGE = 3;
 
 /** Honest task line: MASTER NOT ASSIGNED when unassigned, NO ACTIVE COMMAND
  *  when there is no real task, otherwise the real task text. Never a generated
@@ -289,6 +290,7 @@ export default function AutonomousOperationsRail() {
             <span className="ow-page-label">{page + 1}/{pageCount}</span>
           </div>
         )}
+        <HalRunActivityPanel />
       </div>
     </aside>
   );
