@@ -21,7 +21,7 @@ export default function HalRunActivityPanel() {
     latestHeartbeat?.received_at ?? null, now, latestHeartbeat?.heartbeat_key?.startsWith('SIM-') ?? false, {
       registry: registry.workflows, agents: group.agents, sites: group.sites, environment: bridgeNode?.environment ?? '',
       available: registry.registryAvailability && group.availability.agents && group.availability.sites,
-    });
+    }, latestHeartbeat?.local_services?.task_activity);
   const pageCount = Math.max(1, Math.ceil(activity.rows.length / 2));
   const [page] = useAutoPage(pageCount);
   return <HalRunActivityView activity={activity} page={page} />;
@@ -49,12 +49,15 @@ export function HalRunActivityView({ activity, page = 0 }: { activity: ReturnTyp
         </div>
         <p className="text-[9px] text-amber-400 truncate" title={run.identity.label}>{run.identity.siteName ?? run.identity.scopeLabel ?? 'Site unassigned'} · {run.identity.label}</p>
         <p className="text-[9px] text-slate-400 truncate" title={`Workflow ${run.workflowId} · ${run.instance} · Run ${run.id}`}>{run.instance} · Run {run.id}</p>
+        {run.taskEvent && <p className="text-[9px] text-cyan-300 truncate" title={`Task ${run.taskEvent.taskId} · ${run.taskEvent.occurredAt}${run.taskTarget ? ` · peer: ${run.taskTarget}` : ''}`}>
+          {run.taskCurrent ? 'Reported step' : 'Last reported step'}: {run.taskEvent.phase.replaceAll('_', ' ')}{run.taskTarget ? ` · ${run.taskTarget}` : ''}
+        </p>}
         <p className="text-[10px] text-slate-300 tabular-nums">Start {time(run.startedAt)} · {run.stoppedAt ? `End ${time(run.stoppedAt)}` : run.status === 'unknown' ? `Last: ${run.lastStatus}` : ['new', 'running', 'waiting'].includes(run.status) ? 'In progress' : 'End unknown'}{run.durationMs === null ? '' : ` · ${(run.durationMs / 1000).toFixed(0)}s ${run.durationLabel}`}</p>
       </article>)}
     </div>
     <div className="flex justify-between gap-2 mt-2 text-[9px] text-slate-500">
       <span>Saved workflow sample · London time</span><span>{activity.rows.length ? `${page + 1}/${pageCount}` : '—'}</span>
     </div>
-    <p className="text-[9px] text-slate-500">Workflow labels ≠ specialist step activity</p>
+    <p className="text-[9px] text-slate-500">{activity.tasks.state === 'not_configured' ? 'Step telemetry not configured' : !activity.taskSourceCurrent ? 'Step telemetry unavailable or stale' : activity.tasks.truncated ? 'Reported step sample · partial' : 'Reported steps · handovers require receiver confirmation'}</p>
   </section>;
 }

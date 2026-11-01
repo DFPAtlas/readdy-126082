@@ -1712,8 +1712,8 @@
 }
 /* Bounded, read-only HAL activity on the active operations rail. */
 .ow-hal-activity {
-  flex: 0 0 238px;
-  min-height: 238px;
+  flex: 0 0 266px;
+  min-height: 266px;
   display: flex;
   flex-direction: column;
   padding: 10px 12px;
