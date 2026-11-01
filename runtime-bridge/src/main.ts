@@ -1,3 +1,4 @@
+import { collectN8nRuns } from "./n8nExecutions.ts";
 // ============================================================================
 // dfp-runtime-bridge — private local runtime bridge for DFP AI Operations.
 //
@@ -34,6 +35,8 @@ const config = {
   nodeKey: (Deno.env.get("DFP_BRIDGE_NODE_KEY") ?? "").trim(),
   nodeName: (Deno.env.get("DFP_BRIDGE_NODE_NAME") ?? "").trim(),
   n8nUrl: (Deno.env.get("N8N_LOCAL_URL") ?? "").trim(),
+  n8nApiKey: (Deno.env.get("N8N_LOCAL_API_KEY") ?? "").trim(),
+  n8nSecondaryApiKey: (Deno.env.get("N8N_SECONDARY_API_KEY") ?? "").trim(),
   n8nSecondaryUrl: (Deno.env.get("N8N_SECONDARY_URL") ?? "").trim(),
   n8nSandboxWebhookPath: (Deno.env.get("N8N_SANDBOX_WEBHOOK_PATH") ?? "").trim(),
   ollamaUrl: (Deno.env.get("OLLAMA_LOCAL_URL") ?? "").trim(),
@@ -1774,6 +1777,10 @@ async function heartbeat(): Promise<void> {
   const ollama = await checkOllama();
   const rag = await checkRag();
   const host = await sampleHostTelemetry();
+  const n8nExecutions = await Promise.all([
+    collectN8nRuns("hall-n8n", config.n8nUrl, config.n8nApiKey),
+    collectN8nRuns("leadgen_n8n", config.n8nSecondaryUrl, config.n8nSecondaryApiKey),
+  ]);
   const started = Date.now();
   const result = await sendRequest("heartbeat", {
     node_key: config.nodeKey,
@@ -1796,6 +1803,7 @@ async function heartbeat(): Promise<void> {
         reason: rag.reason,
       },
       host,
+      n8n_executions: n8nExecutions,
     },
     safe_summary: `Bridge heartbeat: n8n=${n8n.status}, n8n_secondary=${n8nSecondary.status}, ollama=${ollama.status}, rag=${rag.status} (no inference, no workflow, no retrieval).`,
     capabilities: ["n8n_health", "n8n_metadata", "ollama_health", "ollama_models", "rag_health", "signed_callbacks", "outbound_https"],
