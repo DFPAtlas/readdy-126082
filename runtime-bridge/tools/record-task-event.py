@@ -47,6 +47,10 @@ def main():
     with open(lock_path, 'a', encoding='utf-8') as lock:
         os.chmod(lock_path, 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX)
+        # Sample time after acquiring the lock: another writer may have emitted
+        # an event while this process waited. A pre-lock clock would drop it.
+        now = dt.datetime.now(dt.timezone.utc)
+        event['occurredAt'] = now.isoformat()
         events = []
         if args.file.exists():
             with open(args.file, 'rb') as source:
