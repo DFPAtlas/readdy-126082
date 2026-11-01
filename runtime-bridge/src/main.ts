@@ -1,4 +1,5 @@
 import { collectN8nRuns } from "./n8nExecutions.ts";
+import { collectTaskSample } from "./taskTelemetry.ts";
 // ============================================================================
 // dfp-runtime-bridge — private local runtime bridge for DFP AI Operations.
 //
@@ -12,7 +13,9 @@ import { collectN8nRuns } from "./n8nExecutions.ts";
 // It NEVER:
 //   * executes an n8n workflow or calls a webhook
 //   * performs arbitrary Ollama inference (except the single fixed sandbox ping)
-//   * runs shell commands, arbitrary HTTP, filesystem, or Docker control
+//   * runs shell commands, arbitrary HTTP, arbitrary filesystem, or Docker control
+// Optional task telemetry reads ONE operator-configured snapshot, with a scoped
+// Deno read permission. No file path is accepted from the cloud or a workflow.
 //   * decides to execute queued work while offline (fail-closed — no offline
 //     execution mode)
 //
@@ -1774,6 +1777,20 @@ async function handshake(): Promise<boolean> {
 }
 
 async function heartbeat(): Promise<void> {
+  const taskActivity = await collectTaskSample((Deno.env.get("HAL_TASK_TELEMETRY_FILE") ?? "").trim(), async path => {
+    const file = await Deno.open(path, { read: true });
+    try {
+      const buffer = new Uint8Array(65_537);
+      let size = 0;
+      while (size < buffer.length) {
+        const count = await file.read(buffer.subarray(size));
+        if (count === null) break;
+        size += count;
+      }
+      if (size > 65_536) throw new Error("Task snapshot too large");
+      return new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, size));
+    } finally { file.close(); }
+  });
   const n8n = await checkN8nUrl(config.n8nUrl);
   const n8nSecondary = await checkN8nUrl(config.n8nSecondaryUrl);
   const ollama = await checkOllama();
@@ -1806,6 +1823,7 @@ async function heartbeat(): Promise<void> {
       },
       host,
       n8n_executions: n8nExecutions,
+      task_activity: taskActivity,
     },
     safe_summary: `Bridge heartbeat: n8n=${n8n.status}, n8n_secondary=${n8nSecondary.status}, ollama=${ollama.status}, rag=${rag.status} (no inference, no workflow, no retrieval).`,
     capabilities: ["n8n_health", "n8n_metadata", "ollama_health", "ollama_models", "rag_health", "signed_callbacks", "outbound_https"],
