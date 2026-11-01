@@ -106,3 +106,40 @@ test('collector ignores upstream identity and uses only its own instance mapping
   assert.equal(activity.rows.find(row=>row.instance==='hall-n8n').identity.mapped,true);
   assert.equal(activity.rows.find(row=>row.instance==='leadgen_n8n').identity.mapped,false);
 });
+
+const { HAL_WORKFLOW_CATALOGUE, resolveHalRunIdentity } = await import('../src/lib/ai-operations/halWorkflowCatalogue.ts');
+const production = {...context,sites:[{...site,site_key:'quickguard'}]};
+test('observed catalogue covers all 59 supplied workflow identities without duplicate instance IDs', () => {
+  assert.equal(HAL_WORKFLOW_CATALOGUE.length,59);
+  assert.equal(HAL_WORKFLOW_CATALOGUE.filter(row=>row.instance==='hall-n8n').length,41);
+  assert.equal(HAL_WORKFLOW_CATALOGUE.filter(row=>row.instance==='leadgen_n8n').length,18);
+  assert.equal(new Set(HAL_WORKFLOW_CATALOGUE.map(row=>row.instance+':'+row.workflowId)).size,59);
+  assert.equal(HAL_WORKFLOW_CATALOGUE.filter(row=>row.activeAtInventory).length,29);
+});
+test('current QuickGuard master gets its actual workflow label and site without claiming the old supervisor identity', () => {
+  const identity=resolveHalRunIdentity('hall-n8n','hd2rIh2umh83tydj',null,production);
+  assert.equal(identity.title,'QuickGuard Master Agent v01.2 - Legacy Detection Fix');
+  assert.equal(identity.siteName,'QuickGuard');assert.equal(identity.catalogueMatched,true);
+  assert.equal(identity.agentName,null);assert.equal(identity.registryVerified,false);assert.equal(identity.mapped,false);
+  assert.equal(resolveHalRunIdentity('hall-n8n','SzPl8DDm3aBAAOjI',null,production).catalogueMatched,false);
+});
+test('catalogue never guesses across instances or environments and cannot override configured conflicts', () => {
+  assert.equal(resolveHalRunIdentity('leadgen_n8n','hd2rIh2umh83tydj',null,production).catalogueMatched,false);
+  assert.equal(resolveHalRunIdentity('hall-n8n','hd2rIh2umh83tydj',null,{...production,environment:'sandbox'}).catalogueMatched,false);
+  const conflict=resolveHalRunIdentity('hall-n8n','hd2rIh2umh83tydj','quickguard-manager',production);
+  assert.equal(conflict.label,'WORKFLOW ID MISMATCH');assert.equal(conflict.catalogueMatched,false);
+});
+test('inactive duplicates retain their own IDs and infrastructure is not assigned to a website', () => {
+  const old=resolveHalRunIdentity('leadgen_n8n','l6fHq1YQywAYnM1a',null,production);
+  const current=resolveHalRunIdentity('leadgen_n8n','bSe8NHr3zxJgxuuH',null,production);
+  assert.equal(old.title,current.title);assert.equal(old.workflowActiveAtInventory,false);assert.equal(current.workflowActiveAtInventory,true);
+  const infrastructure=resolveHalRunIdentity('hall-n8n','Gx3SKlsHbWCeM2xa',null,production);
+  assert.equal(infrastructure.siteName,null);assert.equal(infrastructure.scopeLabel,'Group infrastructure');
+});
+test('observed names remain dated metadata when site resolution is unavailable', () => {
+  const row=resolveHalRunIdentity('hall-n8n','hd2rIh2umh83tydj',null,{...production,available:false});
+  assert.equal(row.catalogueMatched,true);assert.equal(row.siteName,null);assert.match(row.label,/SITE UNRESOLVED/);
+  const sample={instance:'hall-n8n',state:'available',sampledAt:'2026-11-01T12:01:00Z',truncated:false,runs:[{...run('1','running'),workflowId:'hd2rIh2umh83tydj'}]};
+  const activity=deriveHalRunActivity([sample],sample.sampledAt,Date.parse(sample.sampledAt)+120000,false,production);
+  assert.equal(activity.rows[0].identity.catalogueMatched,true);assert.equal(activity.rows[0].status,'unknown');assert.equal(activity.running,0);
+});
