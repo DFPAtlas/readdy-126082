@@ -35,6 +35,8 @@ const config = {
   nodeKey: (Deno.env.get("DFP_BRIDGE_NODE_KEY") ?? "").trim(),
   nodeName: (Deno.env.get("DFP_BRIDGE_NODE_NAME") ?? "").trim(),
   n8nUrl: (Deno.env.get("N8N_LOCAL_URL") ?? "").trim(),
+  n8nWorkflowMap: Deno.env.get("N8N_LOCAL_WORKFLOW_MAP") ?? "",
+  n8nSecondaryWorkflowMap: Deno.env.get("N8N_SECONDARY_WORKFLOW_MAP") ?? "",
   n8nApiKey: (Deno.env.get("N8N_LOCAL_API_KEY") ?? "").trim(),
   n8nSecondaryApiKey: (Deno.env.get("N8N_SECONDARY_API_KEY") ?? "").trim(),
   n8nSecondaryUrl: (Deno.env.get("N8N_SECONDARY_URL") ?? "").trim(),
@@ -1778,8 +1780,8 @@ async function heartbeat(): Promise<void> {
   const rag = await checkRag();
   const host = await sampleHostTelemetry();
   const n8nExecutions = await Promise.all([
-    collectN8nRuns("hall-n8n", config.n8nUrl, config.n8nApiKey),
-    collectN8nRuns("leadgen_n8n", config.n8nSecondaryUrl, config.n8nSecondaryApiKey),
+    collectN8nRuns("hall-n8n", config.n8nUrl, config.n8nApiKey, fetch, config.n8nWorkflowMap),
+    collectN8nRuns("leadgen_n8n", config.n8nSecondaryUrl, config.n8nSecondaryApiKey, fetch, config.n8nSecondaryWorkflowMap),
   ]);
   const started = Date.now();
   const result = await sendRequest("heartbeat", {

@@ -66,3 +66,43 @@ test('wall distinguishes missing, unavailable, partial and simulated sources', (
   assert.equal(simulated.running, 0); assert.equal(simulated.rows[0].status, 'unknown');
   assert.equal(simulated.instances[0].label, 'SIMULATED');
 });
+
+const { parseWorkflowMap } = await import('../runtime-bridge/src/n8nExecutions.ts');
+const { resolveHalWorkflowMapping } = await import('../src/lib/ai-operations/halWorkflowMapping.ts');
+const registry = {id:'registry1', workflow_key:'quickguard-manager', n8n_workflow_id:'wf1', name:'Manager workflow', agent_id:'agent1', site_id:'site1', environment:'production', is_active:true, runtime_status:'not_verified'};
+const agent = {id:'agent1', name:'QuickGuard Manager', site_id:'site1', workflow_id:null, environment:'production', is_active:true};
+const site = {id:'site1', name:'QuickGuard', environment:'production', is_active:true};
+const context = {registry:[registry], agents:[agent], sites:[site], environment:'production', available:true};
+test('exact mapping resolves saved agent and site but preserves unverified status', () => {
+  const result = resolveHalWorkflowMapping('wf1','quickguard-manager',context);
+  assert.equal(result.title,'QuickGuard Manager'); assert.equal(result.siteName,'QuickGuard');
+  assert.equal(result.label,'REGISTRY UNVERIFIED'); assert.equal(result.registryVerified,false);
+  assert.equal(resolveHalWorkflowMapping('wf1','quickguard-manager',{...context,registry:[{...registry,runtime_status:'verified'}]}).registryVerified,true);
+});
+test('mapping rejects wrong IDs, duplicate keys, environments, inactive rows and site conflicts', () => {
+  for (const invalid of [
+    {...context,registry:[{...registry,n8n_workflow_id:'wrong'}]},
+    {...context,registry:[registry,registry]}, {...context,environment:'staging'},
+    {...context,registry:[{...registry,is_active:false}]},
+    {...context,agents:[{...agent,site_id:'other'}]},
+    {...context,agents:[{...agent,workflow_id:'other'}]},
+    {...context,sites:[]}, {...context,available:false}
+  ]) assert.equal(resolveHalWorkflowMapping('wf1','quickguard-manager',invalid).mapped,false);
+  assert.equal(resolveHalWorkflowMapping('wf1',null,context).label,'UNMAPPED');
+});
+test('map parser fails closed on invalid JSON, unknown fields and excessive entries', () => {
+  assert.equal(parseWorkflowMap('{').state,'invalid'); assert.equal(parseWorkflowMap('[]').state,'invalid');
+  assert.equal(parseWorkflowMap('{"wf1":{"name":"not a registry key"}}').state,'invalid');
+  assert.equal(parseWorkflowMap(JSON.stringify(Object.fromEntries(Array.from({length:129},(_,n)=>['wf'+n,'key'+n])))).state,'invalid');
+});
+test('collector ignores upstream identity and uses only its own instance mapping', async () => {
+  const request = async () => Response.json({data:[{...run('1'),registryWorkflowKey:'forged'}]});
+  const main = await collectN8nRuns('hall-n8n','http://localhost','key',request,'{"wf1":"quickguard-manager"}');
+  const leadgen = await collectN8nRuns('leadgen_n8n','http://localhost','key',request);
+  assert.equal(main.runs[0].registryWorkflowKey,'quickguard-manager');
+  assert.equal(leadgen.runs[0].registryWorkflowKey,null);
+  const stamp = new Date().toISOString(); main.sampledAt=stamp;leadgen.sampledAt=stamp;
+  const activity = deriveHalRunActivity([main,leadgen],stamp,Date.now(),false,context);
+  assert.equal(activity.rows.find(row=>row.instance==='hall-n8n').identity.mapped,true);
+  assert.equal(activity.rows.find(row=>row.instance==='leadgen_n8n').identity.mapped,false);
+});
