@@ -26,7 +26,7 @@ Collection is opt-in. Missing keys show not configured, HTTP/auth/network failur
 
 ## Limits
 
-This is a bounded sample of saved executions, not a complete audit log or lifetime execution count. n8n save/prune settings determine available history; busy instances may omit runs. Individual specialist nodes inside one workflow are not separate execution records and require workflow instrumentation for per-specialist visibility. Both instances show workflow IDs until an instance-aware agent mapping is implemented; the panel never guesses an agent name or task from an execution ID. Simulated heartbeat data is explicitly labelled and excluded from live running counts. Existing callback-derived wallboard KPIs retain their existing source and are distinct from this panel.
+This is a bounded sample of saved executions, not a complete audit log or lifetime execution count. n8n save/prune settings determine available history; busy instances may omit runs. Individual specialist nodes inside one workflow are not separate execution records and require workflow instrumentation for per-specialist visibility. Names resolve only through explicit per-instance maps to saved DFP workflow keys, with exact workflow ID/environment checks and matching active agent/site records. Unmapped or conflicting rows keep workflow IDs. The panel never invents a current task from a workflow name. Simulated heartbeat data is explicitly labelled and excluded from live running counts. Existing callback-derived wallboard KPIs retain their existing source and are distinct from this panel.
 
 ## Validation
 
@@ -35,3 +35,30 @@ This is a bounded sample of saved executions, not a complete audit log or lifeti
 ### Active wall validation follow-up
 
 Seven focused tests pass, including instance ID collisions, live elapsed time, stale counts and simulated data. Changed TypeScript/UI files pass ESLint, and the production bundle includes the new active-rail component. Project TypeScript diagnostics remain identical to unchanged main (290 existing errors). Browser layout inspection remains outstanding: Chromium is absent in this environment and its download returned a truncated archive. Verify the complete wall at 1920×1080, 1920×900 and 1536×864 before deployment.
+
+## Instance-aware name mapping
+
+The bridge accepts two independent JSON objects: `N8N_LOCAL_WORKFLOW_MAP` for hall-n8n and `N8N_SECONDARY_WORKFLOW_MAP` for leadgen_n8n. Keys are exact n8n workflow IDs, values are existing `ai_n8n_workflow_registry.workflow_key` values. These settings identify runs; they never grant dispatch or alter workflows. Default maps are empty.
+
+Example format (replace with confirmed IDs/keys):
+
+```dotenv
+N8N_LOCAL_WORKFLOW_MAP='{"confirmed-workflow-id":"saved-dfp-workflow-key"}'
+N8N_SECONDARY_WORKFLOW_MAP={}
+```
+
+Read-only registry inspection on 1 November 2026 found one saved candidate: workflow ID `SzPl8DDm3aBAAOjI`, registry key `quickguard-autonomous-manager-01`, agent QuickGuard Autonomous Manager 01 - State Supervisor, website QuickGuard, environment production. Its registry status is **not_verified**. The instance binding has not been checked against HAL's live n8n inventory, so no instance map is prefilled automatically. Verify that exact workflow ID inside hall-n8n before adding the following to its local map:
+
+```dotenv
+N8N_LOCAL_WORKFLOW_MAP='{"SzPl8DDm3aBAAOjI":"quickguard-autonomous-manager-01"}'
+```
+
+Do not copy that association to leadgen_n8n without verifying that instance independently. To map additional workflows, use the existing approved workflow registry plus its agent_id/site_id assignments, then configure the confirmed n8n ID in the correct local instance map. Save agent/site identities in DFP rather than embedding display names in HAL configuration.
+
+After a bridge rebuild/restart, mapped heartbeat rows carry only `registryWorkflowKey`; the wall joins that to the current saved registry. Exact ID, environment, active status and relationship checks must agree. Missing or ambiguous rows, conflicting agent/workflow/site relationships, and unavailable lookups fall back to workflow IDs with an explanation. Registry verification state is shown separately and never changed by the telemetry collector.
+
+Invalid JSON, non-string values, invalid identifiers or more than 128 mappings disable mapping for that instance and show MAP INVALID. Run collection continues. Upstream n8n responses cannot supply registry identity: any such field is discarded and replaced from the instance's local map. Removing a mapping, or removing/deactivating the saved registry association, restores the ID fallback on the next refresh.
+
+This requires no database migration. It requires the updated frontend and bridge plus confirmed instance-specific configuration on HAL. No live mappings, agents, websites or verification statuses were changed during implementation. Current task/step and specialist handover reporting remain a later phase.
+
+Mapping validation: all 11 focused tests pass, including exact registry joins, inactive/ambiguous/environment conflicts, independent instance IDs, invalid map configuration and rejection of upstream identity fields. Production build, changed-file lint and an isolated TypeScript check pass. Full project diagnostics remain identical to main's existing 290 errors. Live mapping configuration and browser layout verification are still outstanding.

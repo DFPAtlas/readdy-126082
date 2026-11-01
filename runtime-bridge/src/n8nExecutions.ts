@@ -5,6 +5,7 @@ export interface N8nRun {
   id: string;
   workflowId: string;
   status: string;
+  registryWorkflowKey?: string | null;
   startedAt: string | null;
   stoppedAt: string | null;
 }
@@ -14,25 +15,42 @@ export interface N8nRunSample {
   sampledAt: string;
   truncated: boolean;
   runs: N8nRun[];
+  mappingState?: 'not_configured' | 'configured' | 'invalid';
 }
-const text = (v: unknown) => typeof v === 'string' ? v.slice(0, 100) : '';
+const identifier = (value: unknown): string | null => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value) ? value : null;
+export function parseWorkflowMap(raw: string) {
+  const mappings: Record<string, string> = Object.create(null);
+  if (!raw.trim()) return { mappings, state: 'not_configured' as const };
+  try {
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 128) throw new Error('Invalid mapping');
+    for (const [workflowId, workflowKey] of Object.entries(value)) {
+      if (!identifier(workflowId) || !identifier(workflowKey)) throw new Error('Invalid mapping');
+      mappings[workflowId] = workflowKey as string;
+    }
+    return { mappings, state: 'configured' as const };
+  } catch { return { mappings: Object.create(null) as Record<string, string>, state: 'invalid' as const }; }
+}
 const date = (v: unknown) => typeof v === 'string' && Number.isFinite(Date.parse(v)) ? new Date(v).toISOString() : null;
 export function sanitiseRuns(rows: unknown): N8nRun[] {
   if (!Array.isArray(rows)) return [];
   const result = new Map<string, N8nRun>();
   for (const raw of rows.slice(0, RUN_LIMIT * 2)) {
     if (!raw || typeof raw !== 'object') continue;
-    const id = text(raw.id);
-    const workflowId = text(raw.workflowId);
+    const id = identifier(raw.id);
+    const workflowId = identifier(raw.workflowId);
     if (!id || !workflowId) continue;
     result.set(id, { id, workflowId, status: STATES.has(raw.status) ? raw.status : 'unknown',
+      registryWorkflowKey: identifier(raw.registryWorkflowKey),
       startedAt: date(raw.startedAt), stoppedAt: date(raw.stoppedAt) });
   }
   return [...result.values()].slice(0, RUN_LIMIT);
 }
 export async function collectN8nRuns(instance: string, baseUrl: string, apiKey: string,
-  request: typeof fetch = fetch): Promise<N8nRunSample> {
+  request: typeof fetch = fetch, workflowMapJson = ''): Promise<N8nRunSample> {
   const sample: N8nRunSample = { instance, state: 'not_configured', sampledAt: new Date().toISOString(), truncated: false, runs: [] };
+  const workflowMap = parseWorkflowMap(workflowMapJson);
+  sample.mappingState = workflowMap.state;
   if (!baseUrl || !apiKey) return sample;
   try {
     const base = new URL(baseUrl);
@@ -51,7 +69,9 @@ export async function collectN8nRuns(instance: string, baseUrl: string, apiKey: 
       return page;
     }));
     const combined = [...pages[0].data, ...pages[1].data];
-    sample.runs = sanitiseRuns(combined);
+    // Bind identity only from this instance's trusted local configuration, never upstream JSON.
+    sample.runs = sanitiseRuns(combined).map(run => ({ ...run,
+      registryWorkflowKey: workflowMap.mappings[run.workflowId] ?? null }));
     sample.truncated = pages.some(p => !!p.nextCursor) || new Set(combined.map(r => r.id)).size > RUN_LIMIT;
     sample.state = 'available';
   } catch {
@@ -67,6 +87,7 @@ export function readN8nRunSamples(value: unknown): N8nRunSample[] {
     if (!raw || !['hall-n8n', 'leadgen_n8n'].includes(raw.instance) || !date(raw.sampledAt)) return [];
     return [{ instance: raw.instance, sampledAt: date(raw.sampledAt)!,
       state: ['available', 'not_configured', 'unavailable'].includes(raw.state) ? raw.state : 'unavailable',
+      mappingState: ['not_configured', 'configured', 'invalid'].includes(raw.mappingState) ? raw.mappingState : 'not_configured',
       truncated: raw.truncated === true, runs: sanitiseRuns(raw.runs) } as N8nRunSample];
   });
 }
