@@ -1,7 +1,6 @@
 import type { WorkflowMappingContext } from './halWorkflowMapping.ts';
 import { resolveHalRunIdentity } from './halWorkflowCatalogue.ts';
-import { readTaskSample } from '../../../runtime-bridge/src/taskTelemetry.ts';
-import { readN8nRunSamples, sampleIsFresh } from '../../../runtime-bridge/src/n8nExecutions.ts';
+import { readN8nRunSamples, readTaskSample, sampleIsFresh } from './runtimeBridgeSamples.ts';
 
 export function deriveHalRunActivity(value: unknown, receivedAt: string | null, now = Date.now(), simulated = false, mapping: WorkflowMappingContext = { registry: [], agents: [], sites: [], environment: '', available: false }, taskValue?: unknown) {
   const samples = readN8nRunSamples(value);
@@ -41,6 +40,18 @@ export function deriveHalRunActivity(value: unknown, receivedAt: string | null, 
     const rank = (status: string) => status === 'running' ? 0 : ['new', 'waiting'].includes(status) ? 1 : 2;
     return rank(a.status) - rank(b.status) || Date.parse(b.startedAt ?? '1970-01-01') - Date.parse(a.startedAt ?? '1970-01-01') || a.key.localeCompare(b.key);
   });
+  // Freshness is displayed at a glance: how long ago the newest saved run sample arrived.
+  const sampledStamps = instances
+    .map(source => source.sample?.sampledAt ?? null)
+    .filter((iso): iso is string => !!iso && Number.isFinite(Date.parse(iso)))
+    .sort((a, b) => Date.parse(b) - Date.parse(a));
+  const lastTelemetryAt = sampledStamps[0] ?? (receivedAt && Number.isFinite(Date.parse(receivedAt)) ? receivedAt : null);
+  const telemetryAgeMs = lastTelemetryAt ? Math.max(0, now - Date.parse(lastTelemetryAt)) : null;
+  const freshness = simulated ? 'simulated'
+    : telemetryAgeMs === null ? 'none'
+    : telemetryAgeMs < 60_000 ? 'fresh'
+    : telemetryAgeMs < 120_000 ? 'aging' : 'stale';
   return { instances, rows, tasks, taskSourceCurrent, running: rows.filter(run => run.status === 'running').length,
+    lastTelemetryAt, telemetryAgeMs, freshness,
     complete: instances.every(instance => instance.current) && samples.every(sample => !sample.truncated) };
 }
