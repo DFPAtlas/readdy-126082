@@ -167,7 +167,7 @@ export default function GroupOperationsCenter() {
           <Divider />
           <Metric label="USERS ACTIVE" value={metrics.usersActive == null ? '—' : String(metrics.usersActive)} color="#4ade80" />
           <Divider />
-          <Metric label="AGENTS RUNNING" value={String(metrics.agentsRunning)} color="#a78bfa" />
+          <Metric label="AGENTS WORKING" value={String(metrics.agentsRunning)} color="#a78bfa" sub="REGISTRY STATUS" />
           <Divider />
           <Metric label="ALERTS" value={String(metrics.alerts)} color={metrics.alerts > 0 ? '#ef4444' : '#64748b'} />
         </div>
