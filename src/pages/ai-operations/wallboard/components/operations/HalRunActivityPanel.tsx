@@ -91,7 +91,7 @@ export function HalRunActivityView({ activity, page = 0 }: { activity: ReturnTyp
     <div className="flex-1 min-h-0 space-y-2">
       {visible.length === 0 ? <p className="text-[11px] text-slate-400 leading-relaxed">{activity.complete ? 'No saved executions in the current samples.' : 'Run activity unknown. Awaiting configured, current HAL telemetry.'}</p> : visible.map(run => <article key={run.key} className="ow-hal-run" aria-label={`${run.identity.title}, ${run.identity.siteName ?? run.identity.scopeLabel ?? 'site unassigned'}, ${run.instance}, ${run.status}`}>
         <div className="flex justify-between gap-2">
-          <span className="text-[11px] text-slate-100 truncate" title={`${run.identity.title} · Workflow ${run.workflowId}${run.identity.observedOn ? ` · inventory ${run.identity.observedOn}; workflow ${run.identity.workflowActiveAtInventory ? 'active' : 'inactive'} then` : ''}`}>{run.identity.title}</span>
+          <span className="text-[11px] text-slate-100 truncate" title={`${run.identity.title} · Workflow ${run.workflowId}`}>{run.identity.title}</span>
           <strong className={`text-[10px] uppercase shrink-0 ${run.simulated || run.status === 'unknown' ? 'text-amber-400' : ['error', 'crashed'].includes(run.status) ? 'text-red-400' : run.status === 'success' ? 'text-green-400' : 'text-cyan-300'}`}>{run.simulated ? 'SIMULATED' : run.status}</strong>
         </div>
         <p className="text-[9px] text-amber-400 truncate" title={run.identity.label}>{run.identity.siteName ?? run.identity.scopeLabel ?? 'Site unassigned'} · {run.identity.label}</p>
