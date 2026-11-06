@@ -502,5 +502,5 @@ export function resolveHalRunIdentity(instance: string, workflowId: string, regi
   return { ...base, title: entry.name, siteName: sites.length === 1 ? sites[0].name : null,
     catalogueMatched: true, scopeLabel: entry.scopeLabel, observedOn: HAL_WORKFLOW_INVENTORY_DATE,
     workflowActiveAtInventory: entry.activeAtInventory,
-    label: 'CATALOGUE · 01 NOV' + (entry.siteKey && sites.length !== 1 ? ' · SITE UNRESOLVED' : '') };
+    label: 'CATALOGUE MAPPING' + (entry.siteKey && sites.length !== 1 ? ' · SITE UNRESOLVED' : '') };
 }
