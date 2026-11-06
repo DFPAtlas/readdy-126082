@@ -79,7 +79,7 @@ export function HalRunActivityView({ activity, page = 0 }: { activity: ReturnTyp
       <h3 className="text-[11px] font-semibold tracking-wider text-cyan-300">HAL RUN ACTIVITY</h3>
       <div className="flex items-center gap-2 flex-wrap justify-end">
         <TelemetryFreshness freshness={activity.freshness} ageMs={activity.telemetryAgeMs} lastTelemetryAt={activity.lastTelemetryAt} />
-        <span className="text-[10px] text-slate-400">{activity.complete ? `${activity.running} running` : `${activity.running} observed · partial`}</span>
+        <span className="text-[10px] text-slate-400">{`${activity.rows.length} sampled · ${activity.running} running${activity.complete ? '' : ' · partial'}`}</span>
       </div>
     </div>
     <div className="mt-1 mb-2 space-y-0.5">
