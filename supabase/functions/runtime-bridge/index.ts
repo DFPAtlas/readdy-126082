@@ -1335,7 +1335,7 @@ serve(async (req: Request) => {
       const watchdogStatus = str(resilienceRaw.watchdog_status).toLowerCase();
       const watchdogStatuses = new Set([
         "running", "healthy", "active", "ok", "up", "stopped", "failed",
-        "fault", "not_reporting", "down", "unhealthy", "recovering",
+        "fault", "not_reporting", "down", "unhealthy", "recovering", "unknown",
       ]);
       if (Object.prototype.hasOwnProperty.call(resilienceRaw, "watchdog_status") &&
           watchdogStatuses.has(watchdogStatus)) {
@@ -1354,6 +1354,12 @@ serve(async (req: Request) => {
       if (Number.isInteger(restartCount) && (restartCount as number) >= 0 &&
           (restartCount as number) <= 10_000) {
         snapshot.restart_count_24h = restartCount;
+      }
+
+      const livenessAgeMs = resilienceRaw.liveness_age_ms;
+      if (Number.isInteger(livenessAgeMs) && (livenessAgeMs as number) >= 0 &&
+          (livenessAgeMs as number) <= 86_400_000) {
+        snapshot.liveness_age_ms = livenessAgeMs;
       }
 
       if (Object.keys(snapshot).length > 2) {
