@@ -1322,9 +1322,10 @@ serve(async (req: Request) => {
     // authenticated by the existing node-bound HMAC signature; validate each
     // field independently and never infer a healthy value from a missing field.
     let resilienceRecorded = false;
-    const resilienceRaw = body.resilience && typeof body.resilience === "object" &&
-        !Array.isArray(body.resilience)
-      ? body.resilience as Record<string, unknown>
+    const resilienceValue = localServicesRaw?.resilience;
+    const resilienceRaw = resilienceValue && typeof resilienceValue === "object" &&
+        !Array.isArray(resilienceValue)
+      ? resilienceValue as Record<string, unknown>
       : null;
     if (resilienceRaw) {
       const snapshot: Record<string, unknown> = {
