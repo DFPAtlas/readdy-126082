@@ -1318,6 +1318,53 @@ serve(async (req: Request) => {
       payload_hash: payloadHash,
     }), "ai_runtime_bridge_heartbeats.insert");
 
+    // Optional, monitoring-only resilience snapshot. The enclosing request is
+    // authenticated by the existing node-bound HMAC signature; validate each
+    // field independently and never infer a healthy value from a missing field.
+    let resilienceRecorded = false;
+    const resilienceRaw = body.resilience && typeof body.resilience === "object" &&
+        !Array.isArray(body.resilience)
+      ? body.resilience as Record<string, unknown>
+      : null;
+    if (resilienceRaw) {
+      const snapshot: Record<string, unknown> = {
+        node_id: nodeId,
+        updated_at: receivedAt,
+      };
+      const watchdogStatus = str(resilienceRaw.watchdog_status).toLowerCase();
+      const watchdogStatuses = new Set([
+        "running", "healthy", "active", "ok", "up", "stopped", "failed",
+        "fault", "not_reporting", "down", "unhealthy", "recovering",
+      ]);
+      if (Object.prototype.hasOwnProperty.call(resilienceRaw, "watchdog_status") &&
+          watchdogStatuses.has(watchdogStatus)) {
+        snapshot.watchdog_status = watchdogStatus;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(resilienceRaw, "last_liveness_at") &&
+          typeof resilienceRaw.last_liveness_at === "string") {
+        const livenessMs = Date.parse(resilienceRaw.last_liveness_at);
+        if (Number.isFinite(livenessMs) && livenessMs <= Date.now() + 5 * 60_000) {
+          snapshot.last_liveness_at = new Date(livenessMs).toISOString();
+        }
+      }
+
+      const restartCount = resilienceRaw.restart_count_24h;
+      if (Number.isInteger(restartCount) && (restartCount as number) >= 0 &&
+          (restartCount as number) <= 10_000) {
+        snapshot.restart_count_24h = restartCount;
+      }
+
+      if (Object.keys(snapshot).length > 2) {
+        await checkedWrite(
+          admin.from("runtime_resilience_nodes")
+            .upsert(snapshot, { onConflict: "node_id" }),
+          "runtime_resilience_nodes.upsert",
+        );
+        resilienceRecorded = true;
+      }
+    }
+
     await insertMessage("heartbeat", "status_summary", {
       status,
       latency_ms: latencyMs,
@@ -1337,6 +1384,7 @@ serve(async (req: Request) => {
       operation: "heartbeat",
       nodeKey,
       receivedAt,
+      resilienceRecorded,
       executionEnabled: false,
       message: "Heartbeat recorded. Runtime execution remains disabled.",
     });
