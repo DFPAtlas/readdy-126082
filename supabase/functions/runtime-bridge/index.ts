@@ -1356,12 +1356,18 @@ serve(async (req: Request) => {
       }
 
       if (Object.keys(snapshot).length > 2) {
-        await checkedWrite(
-          admin.from("runtime_resilience_nodes")
-            .upsert(snapshot, { onConflict: "node_id" }),
-          "runtime_resilience_nodes.upsert",
-        );
-        resilienceRecorded = true;
+        try {
+          await checkedWrite(
+            admin.from("runtime_resilience_nodes")
+              .upsert(snapshot, { onConflict: "node_id" }),
+            "runtime_resilience_nodes.upsert",
+          );
+          resilienceRecorded = true;
+        } catch {
+          // A resilience-feed failure must not turn a valid heartbeat into a
+          // bridge outage. Keep the failure visible in Edge Function logs.
+          console.error("runtime_resilience_snapshot_write_failed", { nodeKey });
+        }
       }
     }
 
