@@ -10,6 +10,8 @@
 // ============================================================================
 
 import { useEffect, useCallback } from 'react';
+import { useAuth } from '@/components/feature/AuthGuard';
+import { loadWallboardRegistries } from './registrySnapshot';
 import { GroupLiveDataProvider, refreshGroupLiveData, getGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
 import { refreshHistory } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import WallboardErrorBoundary from '@/pages/ai-operations/wallboard/components/WallboardErrorBoundary';
@@ -59,6 +61,8 @@ export default function WallboardPage() {
 }
 
 function OperationsWall() {
+  const { role, mfaStatus } = useAuth();
+  const canReadRegistries = mfaStatus === 'satisfied' && (role === 'owner' || role === 'admin');
   // Subscribe to every data source the wall reads so it re-renders on refresh.
   useWallData();
 
@@ -68,11 +72,12 @@ function OperationsWall() {
   const performRefresh = useCallback(async (): Promise<boolean> => {
     await refreshGroupLiveData();
     void refreshHistory();
-    void refreshBusinessData();
+    const registries = canReadRegistries ? loadWallboardRegistries() : Promise.resolve(null);
+    void refreshBusinessData(registries);
     void refreshInfrastructureData();
     void refreshPowerData();
     void refreshSecurityData();
-    void refreshBackupData();
+    void refreshBackupData(registries);
     void refreshSiteMonitorData();
     void refreshWorkloadData();
     void refreshDeploymentData();
@@ -91,7 +96,7 @@ function OperationsWall() {
     void refreshWidgetConfigData();
     void refreshRuntimeResilience();
     return getGroupLiveData().mode !== 'unavailable';
-  }, []);
+  }, [canReadRegistries]);
 
   // Resilience — connectivity, last-success tracking, and wake/reconnect refresh.
   const resilience = useWallboardResilience(performRefresh);

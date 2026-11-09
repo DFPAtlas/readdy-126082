@@ -25,7 +25,7 @@
 // ============================================================================
 
 import { useSyncExternalStore } from 'react';
-import { supabase } from '@/lib/supabase';
+import type { WallboardRegistrySnapshot } from './registrySnapshot';
 
 // --- Row shapes (minimal, privacy-safe projection only) ----------------------
 
@@ -113,31 +113,18 @@ export function useBackupData(): BackupData {
 
 // --- Loader ------------------------------------------------------------------
 
-// Fetch both registries independently — a single failed source must not break
-// the other, and never breaks the whole wallboard view.
-export async function refreshBackupData(): Promise<void> {
-  const [recordsRes, drillsRes] = await Promise.all([
-    supabase
-      .from('backup_records')
-      .select(
-        'id,backup_type,backup_scope,provider,environment,status,started_at,completed_at,encryption_status,verification_status,verified_at,retention_until,notes',
-      )
-      .order('completed_at', { ascending: false }),
-    supabase
-      .from('restore_drills')
-      .select(
-        'id,drill_reference,status,planned_at,completed_at,database_result,storage_result,application_result,recovery_time_minutes,recovery_point_gap_minutes,issues_found',
-      )
-      .order('planned_at', { ascending: false }),
-  ]);
+export async function refreshBackupData(
+  registries: Promise<WallboardRegistrySnapshot | null>,
+): Promise<void> {
+  const registryData = await registries;
 
   snapshot = {
     loading: false,
     lastRefreshed: new Date(),
-    recordsAvailability: !recordsRes.error,
-    drillsAvailability: !drillsRes.error,
-    records: (recordsRes.data ?? []) as BackupRecordRow[],
-    drills: (drillsRes.data ?? []) as RestoreDrillRow[],
+    recordsAvailability: Array.isArray(registryData?.backupRecords),
+    drillsAvailability: Array.isArray(registryData?.restoreDrills),
+    records: registryData?.backupRecords ?? [],
+    drills: registryData?.restoreDrills ?? [],
   };
 
   emit();
