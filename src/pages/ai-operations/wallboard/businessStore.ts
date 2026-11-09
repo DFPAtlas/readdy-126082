@@ -13,6 +13,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { supabase } from '@/lib/supabase';
+import type { WallboardRegistrySnapshot } from './registrySnapshot';
 
 // --- Row shapes (minimal projections only) ---------------------------------
 
@@ -202,14 +203,21 @@ export function useBusinessData(): BusinessData {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+export function clearBusinessData(): void {
+  snapshot = emptySnapshot();
+  emit();
+}
+
 // --- Loader ----------------------------------------------------------------
 
-export async function refreshBusinessData(): Promise<void> {
+export async function refreshBusinessData(
+  registries: Promise<WallboardRegistrySnapshot | null>,
+  session: AbortSignal,
+): Promise<void> {
   const [
     leadsRes,
     clientsRes,
-    invoicesRes,
-    checkoutRes,
+    registryData,
     subscriptionsRes,
     projectsRes,
     uatProjectsRes,
@@ -221,8 +229,7 @@ export async function refreshBusinessData(): Promise<void> {
   ] = await Promise.all([
     supabase.from('leads').select('id,status,stage,created_at,estimated_value,currency,archived_at,source,campaign,converted_to_client,converted_to_project,converted_at,lost_reason,next_action_due,stage_changed_at,last_activity_at'),
     supabase.from('clients').select('id,status,created_at,archived_at'),
-    supabase.from('invoices').select('id,status,currency,amount_paid,amount_outstanding,paid_at,archived_at,cancelled_at,written_off_at'),
-    supabase.from('dfp_checkout_orders').select('id,currency,starting_payment_minor,remaining_balance_minor,payment_status,created_at'),
+    registries,
     supabase.from('subscriptions').select('id,status,currency,amount,interval'),
     supabase.from('internal_projects').select('id,status,created_at'),
     supabase.from('uat_projects').select('id,status,created_at'),
@@ -233,11 +240,13 @@ export async function refreshBusinessData(): Promise<void> {
     supabase.from('lead_stage_history').select('id,lead_id,from_stage,to_stage,created_at'),
   ]);
 
+  if (session.aborted) return;
+
   const availability: BusinessAvailability = {
     leads: !leadsRes.error,
     clients: !clientsRes.error,
-    invoices: !invoicesRes.error,
-    checkout: !checkoutRes.error,
+    invoices: Array.isArray(registryData?.invoices),
+    checkout: Array.isArray(registryData?.checkout),
     subscriptions: !subscriptionsRes.error,
     projects: !projectsRes.error,
     uatProjects: !uatProjectsRes.error,
@@ -254,8 +263,8 @@ export async function refreshBusinessData(): Promise<void> {
     availability,
     leads: (leadsRes.data ?? []) as BusinessLeadRow[],
     clients: (clientsRes.data ?? []) as BusinessClientRow[],
-    invoices: (invoicesRes.data ?? []) as BusinessInvoiceRow[],
-    checkout: (checkoutRes.data ?? []) as BusinessCheckoutRow[],
+    invoices: registryData?.invoices ?? [],
+    checkout: registryData?.checkout ?? [],
     subscriptions: (subscriptionsRes.data ?? []) as BusinessSubscriptionRow[],
     projects: (projectsRes.data ?? []) as BusinessProjectRow[],
     uatProjects: (uatProjectsRes.data ?? []) as BusinessUatRow[],
