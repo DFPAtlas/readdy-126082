@@ -263,6 +263,38 @@ function safeIpClass(v: unknown): string | null {
   return allowed.has(s) ? s : null;
 }
 
+function sanitiseResilienceTelemetry(value: unknown, receivedAt: number) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+
+  const raw = value as Record<string, unknown>;
+  const allowedStatuses = new Set([
+    "running", "healthy", "active", "ok", "up", "stopped", "failed",
+    "fault", "not_reporting", "down", "unhealthy", "recovering", "unknown",
+  ]);
+  const status = str(raw.watchdog_status).toLowerCase();
+  const livenessMs = typeof raw.last_liveness_at === "string"
+    ? Date.parse(raw.last_liveness_at)
+    : NaN;
+  const restartCount = raw.restart_count_24h;
+  const livenessAge = raw.liveness_age_ms;
+  const snapshot = {
+    watchdog_status: allowedStatuses.has(status) ? status : null,
+    last_liveness_at: Number.isFinite(livenessMs) && livenessMs <= receivedAt + 5 * 60_000
+      ? new Date(livenessMs).toISOString()
+      : null,
+    restart_count_24h: typeof restartCount === "number" && Number.isInteger(restartCount) &&
+        restartCount >= 0 && restartCount <= 10_000
+      ? restartCount
+      : null,
+    liveness_age_ms: typeof livenessAge === "number" && Number.isInteger(livenessAge) &&
+        livenessAge >= 0 && livenessAge <= 86_400_000
+      ? livenessAge
+      : null,
+  };
+
+  return Object.values(snapshot).some((field) => field !== null) ? snapshot : null;
+}
+
 function sanitiseHostTelemetry(localServices: Record<string, unknown>): Record<string, unknown> | null {
   const host = localServices.host;
   if (!host || typeof host !== "object") return null;
@@ -1276,11 +1308,15 @@ serve(async (req: Request) => {
     const localServicesRaw = typeof body.local_services === "object" && body.local_services !== null
       ? (body.local_services as Record<string, unknown>)
       : null;
-    let localServices: Record<string, unknown> | null = localServicesRaw;
+    // Both heartbeat history and the current resilience row use validated values.
+    const resilience = sanitiseResilienceTelemetry(localServicesRaw?.resilience, now.getTime());
+    const localServices = localServicesRaw;
     if (localServices) {
       const host = sanitiseHostTelemetry(localServices);
       if (host) localServices.host = host;
       else delete localServices.host;
+      if (resilience) localServices.resilience = resilience;
+      else delete localServices.resilience;
     }
     const capabilities = Array.isArray(body.capabilities)
       ? (body.capabilities as string[]).filter((c) => ALLOWED_CAPABILITIES.has(c))
@@ -1318,63 +1354,19 @@ serve(async (req: Request) => {
       payload_hash: payloadHash,
     }), "ai_runtime_bridge_heartbeats.insert");
 
-    // Optional, monitoring-only resilience snapshot. The enclosing request is
-    // authenticated by the existing node-bound HMAC signature; validate each
-    // field independently and never infer a healthy value from a missing field.
     let resilienceRecorded = false;
-    const resilienceValue = localServicesRaw?.resilience;
-    const resilienceRaw = resilienceValue && typeof resilienceValue === "object" &&
-        !Array.isArray(resilienceValue)
-      ? resilienceValue as Record<string, unknown>
-      : null;
-    if (resilienceRaw) {
-      const snapshot: Record<string, unknown> = {
-        node_id: nodeId,
-        updated_at: receivedAt,
-      };
-      const watchdogStatus = str(resilienceRaw.watchdog_status).toLowerCase();
-      const watchdogStatuses = new Set([
-        "running", "healthy", "active", "ok", "up", "stopped", "failed",
-        "fault", "not_reporting", "down", "unhealthy", "recovering", "unknown",
-      ]);
-      if (Object.prototype.hasOwnProperty.call(resilienceRaw, "watchdog_status") &&
-          watchdogStatuses.has(watchdogStatus)) {
-        snapshot.watchdog_status = watchdogStatus;
-      }
-
-      if (Object.prototype.hasOwnProperty.call(resilienceRaw, "last_liveness_at") &&
-          typeof resilienceRaw.last_liveness_at === "string") {
-        const livenessMs = Date.parse(resilienceRaw.last_liveness_at);
-        if (Number.isFinite(livenessMs) && livenessMs <= Date.now() + 5 * 60_000) {
-          snapshot.last_liveness_at = new Date(livenessMs).toISOString();
-        }
-      }
-
-      const restartCount = resilienceRaw.restart_count_24h;
-      if (Number.isInteger(restartCount) && (restartCount as number) >= 0 &&
-          (restartCount as number) <= 10_000) {
-        snapshot.restart_count_24h = restartCount;
-      }
-
-      const livenessAgeMs = resilienceRaw.liveness_age_ms;
-      if (Number.isInteger(livenessAgeMs) && (livenessAgeMs as number) >= 0 &&
-          (livenessAgeMs as number) <= 86_400_000) {
-        snapshot.liveness_age_ms = livenessAgeMs;
-      }
-
-      if (Object.keys(snapshot).length > 2) {
-        try {
-          await checkedWrite(
-            admin.from("runtime_resilience_nodes")
-              .upsert(snapshot, { onConflict: "node_id" }),
-            "runtime_resilience_nodes.upsert",
-          );
-          resilienceRecorded = true;
-        } catch {
-          // A resilience-feed failure must not turn a valid heartbeat into a
-          // bridge outage. Keep the failure visible in Edge Function logs.
-          console.error("runtime_resilience_snapshot_write_failed", { nodeKey });
-        }
+    if (resilience) {
+      try {
+        // Explicit nulls clear stale measurements when a fresh partial snapshot arrives.
+        await checkedWrite(
+          admin.from("runtime_resilience_nodes")
+            .upsert({ ...resilience, node_id: nodeId, updated_at: receivedAt }, { onConflict: "node_id" }),
+          "runtime_resilience_nodes.upsert",
+        );
+        resilienceRecorded = true;
+      } catch {
+        // A failed optional snapshot should leave the heartbeat available.
+        console.error("runtime_resilience_snapshot_write_failed", { nodeKey });
       }
     }
 
