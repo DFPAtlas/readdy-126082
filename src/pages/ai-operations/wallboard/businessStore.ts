@@ -203,10 +203,16 @@ export function useBusinessData(): BusinessData {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+export function clearBusinessData(): void {
+  snapshot = emptySnapshot();
+  emit();
+}
+
 // --- Loader ----------------------------------------------------------------
 
 export async function refreshBusinessData(
   registries: Promise<WallboardRegistrySnapshot | null>,
+  session: AbortSignal,
 ): Promise<void> {
   const [
     leadsRes,
@@ -233,6 +239,8 @@ export async function refreshBusinessData(
     supabase.from('lead_follow_ups').select('id,lead_id,action,due_at,completed_at,outcome,created_at'),
     supabase.from('lead_stage_history').select('id,lead_id,from_stage,to_stage,created_at'),
   ]);
+
+  if (session.aborted) return;
 
   const availability: BusinessAvailability = {
     leads: !leadsRes.error,

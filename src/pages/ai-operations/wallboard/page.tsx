@@ -9,7 +9,7 @@
 // READ-ONLY: no navigation, controls, editing, or management actions.
 // ============================================================================
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useLayoutEffect, useState } from 'react';
 import { useAuth } from '@/components/feature/AuthGuard';
 import { loadWallboardRegistries } from './registrySnapshot';
 import { GroupLiveDataProvider, refreshGroupLiveData, getGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
@@ -23,11 +23,11 @@ import ComputeCore from '@/pages/ai-operations/wallboard/components/operations/C
 import LiveEventsStrip from '@/pages/ai-operations/wallboard/components/operations/LiveEventsStrip';
 import { useWallboardResilience } from '@/pages/ai-operations/wallboard/useWallboardResilience';
 import { useWallData } from '@/pages/ai-operations/wallboard/useWallData';
-import { refreshBusinessData } from '@/pages/ai-operations/wallboard/businessStore';
+import { clearBusinessData, refreshBusinessData } from '@/pages/ai-operations/wallboard/businessStore';
 import { refreshInfrastructureData } from '@/pages/ai-operations/wallboard/infrastructureStore';
 import { refreshPowerData } from '@/pages/ai-operations/wallboard/powerStore';
 import { refreshSecurityData } from '@/pages/ai-operations/wallboard/securityStore';
-import { refreshBackupData } from '@/pages/ai-operations/wallboard/backupStore';
+import { clearBackupData, refreshBackupData } from '@/pages/ai-operations/wallboard/backupStore';
 import { refreshSiteMonitorData } from '@/pages/ai-operations/wallboard/siteStore';
 import { refreshWorkloadData } from '@/pages/ai-operations/wallboard/workloadStore';
 import { refreshDeploymentData } from '@/pages/ai-operations/wallboard/deploymentStore';
@@ -51,18 +51,44 @@ import './operationsWall.css';
 const REFRESH_INTERVAL_SECONDS = 30;
 
 export default function WallboardPage() {
+  const { user, role, mfaStatus } = useAuth();
+  const canReadRegistries = mfaStatus === 'satisfied' && (role === 'owner' || role === 'admin');
+
   return (
     <GroupLiveDataProvider>
       <WallboardErrorBoundary>
-        <OperationsWall />
+        <WallboardSession
+          key={`${user?.id ?? ''}:${role ?? ''}:${mfaStatus ?? ''}`}
+          canReadRegistries={canReadRegistries}
+        />
       </WallboardErrorBoundary>
     </GroupLiveDataProvider>
   );
 }
 
-function OperationsWall() {
-  const { role, mfaStatus } = useAuth();
-  const canReadRegistries = mfaStatus === 'satisfied' && (role === 'owner' || role === 'admin');
+function WallboardSession({ canReadRegistries }: { canReadRegistries: boolean }) {
+  const [session, setSession] = useState<AbortSignal | null>(null);
+
+  // Mount the new wall only after the previous session's layout cleanup ran.
+  useLayoutEffect(() => {
+    const controller = new AbortController();
+    setSession(controller.signal);
+    return () => {
+      controller.abort();
+      clearBusinessData();
+      clearBackupData();
+    };
+  }, []);
+
+  return session && !session.aborted
+    ? <OperationsWall canReadRegistries={canReadRegistries} session={session} />
+    : null;
+}
+
+function OperationsWall({ canReadRegistries, session }: {
+  canReadRegistries: boolean;
+  session: AbortSignal;
+}) {
   // Subscribe to every data source the wall reads so it re-renders on refresh.
   useWallData();
 
@@ -71,13 +97,15 @@ function OperationsWall() {
   // group registries loaded.
   const performRefresh = useCallback(async (): Promise<boolean> => {
     await refreshGroupLiveData();
+    if (session.aborted) return false;
+
     void refreshHistory();
     const registries = canReadRegistries ? loadWallboardRegistries() : Promise.resolve(null);
-    void refreshBusinessData(registries);
+    void refreshBusinessData(registries, session);
     void refreshInfrastructureData();
     void refreshPowerData();
     void refreshSecurityData();
-    void refreshBackupData(registries);
+    void refreshBackupData(registries, session);
     void refreshSiteMonitorData();
     void refreshWorkloadData();
     void refreshDeploymentData();
@@ -96,22 +124,21 @@ function OperationsWall() {
     void refreshWidgetConfigData();
     void refreshRuntimeResilience();
     return getGroupLiveData().mode !== 'unavailable';
-  }, [canReadRegistries]);
+  }, [canReadRegistries, session]);
 
   // Resilience — connectivity, last-success tracking, and wake/reconnect refresh.
-  const resilience = useWallboardResilience(performRefresh);
+  const { refresh } = useWallboardResilience(performRefresh);
 
   // Load all wallboard data once on mount.
   useEffect(() => {
-    resilience.refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    refresh();
+  }, [refresh]);
 
   // Auto-refresh — one coordinated live-registry refresh (no per-widget polling).
   useEffect(() => {
-    const id = setInterval(() => resilience.refresh(), REFRESH_INTERVAL_SECONDS * 1000);
+    const id = setInterval(refresh, REFRESH_INTERVAL_SECONDS * 1000);
     return () => clearInterval(id);
-  }, [resilience.refresh]);
+  }, [refresh]);
 
   return (
     <div className="ow-root ow-grid h-screen w-screen overflow-hidden flex flex-col select-none">

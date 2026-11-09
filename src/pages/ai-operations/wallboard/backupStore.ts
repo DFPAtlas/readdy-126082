@@ -111,12 +111,20 @@ export function useBackupData(): BackupData {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+export function clearBackupData(): void {
+  snapshot = emptySnapshot();
+  emit();
+}
+
 // --- Loader ------------------------------------------------------------------
 
 export async function refreshBackupData(
   registries: Promise<WallboardRegistrySnapshot | null>,
+  session: AbortSignal,
 ): Promise<void> {
   const registryData = await registries;
+
+  if (session.aborted) return;
 
   snapshot = {
     loading: false,
