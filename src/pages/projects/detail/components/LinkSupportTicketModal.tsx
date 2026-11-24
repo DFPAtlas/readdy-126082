@@ -52,10 +52,11 @@ export default function LinkSupportTicketModal({
           .select('id,ticket_number,subject,created_at,internal_support_sites(site_name)')
           .is('project_id', null)
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(50)
+          .returns<(Omit<UnlinkedTicket, 'site_name'> & { internal_support_sites: { site_name: string } | null })[]>();
         if (dbError) throw dbError;
         setTickets(
-          ((data ?? []) as Array<UnlinkedTicket & { internal_support_sites: { site_name: string } | null }>).map(
+          (data ?? []).map(
             (t) => ({
               id: t.id,
               ticket_number: t.ticket_number,

@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AgentsContext } from './AgentsContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AgentRegistryRecord, AgentStatus } from '@/pages/ai-operations/types';
 import { demoAgents } from '@/mocks/ai-operations-agents';
 import { demoSites } from '@/mocks/ai-operations-sites';
@@ -23,7 +24,7 @@ export interface AgentSiteOption {
   name: string;
 }
 
-interface AgentsContextValue {
+export interface AgentsContextValue {
   agents: AgentRegistryRecord[];
   mode: AgentDataSourceMode;
   loading: boolean;
@@ -40,8 +41,6 @@ interface AgentsContextValue {
   /** Metadata-only pause/disable — updates registry status, not a runtime. */
   setAgentStatus: (id: string, status: AgentStatus) => Promise<SaveResult>;
 }
-
-const AgentsContext = createContext<AgentsContextValue | null>(null);
 
 // Demo lookup keyed by stable id (= agent_key) so live rows can merge their
 // nested "Demo Supporting Metadata" (tools, permissions, approval policy,
@@ -200,10 +199,4 @@ export function AgentsProvider({ children }: { children: ReactNode }) {
   );
 
   return <AgentsContext.Provider value={value}>{children}</AgentsContext.Provider>;
-}
-
-export function useAgents() {
-  const ctx = useContext(AgentsContext);
-  if (!ctx) throw new Error('useAgents must be used within an AgentsProvider');
-  return ctx;
 }

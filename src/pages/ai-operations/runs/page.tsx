@@ -15,7 +15,7 @@ import {
   ENVIRONMENT_LABELS,
   RISK_LEVEL,
 } from '@/pages/ai-operations/constants';
-import { useRuns } from '@/pages/ai-operations/runs/RunsContext';
+import { useRuns } from '@/pages/ai-operations/runs/RunsContext.context';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import SummaryKpis from '@/pages/ai-operations/runs/components/SummaryKpis';
 import ActiveRuns from '@/pages/ai-operations/runs/components/ActiveRuns';

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useNotifications } from '@/pages/ai-operations/notifications/NotificationsContext';
+import { useNotifications } from '@/pages/ai-operations/notifications/NotificationsContext.context';
 import RuleHeader from '@/pages/ai-operations/notifications/detail/components/RuleHeader';
 import Trigger from '@/pages/ai-operations/notifications/detail/components/Trigger';
 import NotificationRouting from '@/pages/ai-operations/notifications/detail/components/NotificationRouting';

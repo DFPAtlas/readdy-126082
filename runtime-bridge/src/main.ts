@@ -1,3 +1,5 @@
+import { collectN8nRuns } from "./n8nExecutions.ts";
+import { collectTaskSample } from "./taskTelemetry.ts";
 // ============================================================================
 // dfp-runtime-bridge — private local runtime bridge for DFP AI Operations.
 //
@@ -11,7 +13,9 @@
 // It NEVER:
 //   * executes an n8n workflow or calls a webhook
 //   * performs arbitrary Ollama inference (except the single fixed sandbox ping)
-//   * runs shell commands, arbitrary HTTP, filesystem, or Docker control
+//   * runs shell commands, arbitrary HTTP, arbitrary filesystem, or Docker control
+// Optional task telemetry reads ONE operator-configured snapshot, with a scoped
+// Deno read permission. No file path is accepted from the cloud or a workflow.
 //   * decides to execute queued work while offline (fail-closed — no offline
 //     execution mode)
 //
@@ -34,6 +38,10 @@ const config = {
   nodeKey: (Deno.env.get("DFP_BRIDGE_NODE_KEY") ?? "").trim(),
   nodeName: (Deno.env.get("DFP_BRIDGE_NODE_NAME") ?? "").trim(),
   n8nUrl: (Deno.env.get("N8N_LOCAL_URL") ?? "").trim(),
+  n8nWorkflowMap: Deno.env.get("N8N_LOCAL_WORKFLOW_MAP") ?? "",
+  n8nSecondaryWorkflowMap: Deno.env.get("N8N_SECONDARY_WORKFLOW_MAP") ?? "",
+  n8nApiKey: (Deno.env.get("N8N_LOCAL_API_KEY") ?? "").trim(),
+  n8nSecondaryApiKey: (Deno.env.get("N8N_SECONDARY_API_KEY") ?? "").trim(),
   n8nSecondaryUrl: (Deno.env.get("N8N_SECONDARY_URL") ?? "").trim(),
   n8nSandboxWebhookPath: (Deno.env.get("N8N_SANDBOX_WEBHOOK_PATH") ?? "").trim(),
   ollamaUrl: (Deno.env.get("OLLAMA_LOCAL_URL") ?? "").trim(),
@@ -1769,11 +1777,29 @@ async function handshake(): Promise<boolean> {
 }
 
 async function heartbeat(): Promise<void> {
+  const taskActivity = await collectTaskSample((Deno.env.get("HAL_TASK_TELEMETRY_FILE") ?? "").trim(), async path => {
+    const file = await Deno.open(path, { read: true });
+    try {
+      const buffer = new Uint8Array(65_537);
+      let size = 0;
+      while (size < buffer.length) {
+        const count = await file.read(buffer.subarray(size));
+        if (count === null) break;
+        size += count;
+      }
+      if (size > 65_536) throw new Error("Task snapshot too large");
+      return new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, size));
+    } finally { file.close(); }
+  });
   const n8n = await checkN8nUrl(config.n8nUrl);
   const n8nSecondary = await checkN8nUrl(config.n8nSecondaryUrl);
   const ollama = await checkOllama();
   const rag = await checkRag();
   const host = await sampleHostTelemetry();
+  const n8nExecutions = await Promise.all([
+    collectN8nRuns("hall-n8n", config.n8nUrl, config.n8nApiKey, fetch, config.n8nWorkflowMap),
+    collectN8nRuns("leadgen_n8n", config.n8nSecondaryUrl, config.n8nSecondaryApiKey, fetch, config.n8nSecondaryWorkflowMap),
+  ]);
   const started = Date.now();
   const result = await sendRequest("heartbeat", {
     node_key: config.nodeKey,
@@ -1796,6 +1822,8 @@ async function heartbeat(): Promise<void> {
         reason: rag.reason,
       },
       host,
+      n8n_executions: n8nExecutions,
+      task_activity: taskActivity,
     },
     safe_summary: `Bridge heartbeat: n8n=${n8n.status}, n8n_secondary=${n8nSecondary.status}, ollama=${ollama.status}, rag=${rag.status} (no inference, no workflow, no retrieval).`,
     capabilities: ["n8n_health", "n8n_metadata", "ollama_health", "ollama_models", "rag_health", "signed_callbacks", "outbound_https"],

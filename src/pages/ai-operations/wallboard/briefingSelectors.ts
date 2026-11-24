@@ -171,7 +171,7 @@ function normTone(t: string | undefined): BriefingTone {
 }
 
 function toStatus(s: string | undefined): BriefingStatus {
-  if (s === 'live') return 'live';
+  if (s === 'live' || s === 'zero') return 'live';
   if (s === 'partial') return 'partial';
   return 'unavailable';
 }
@@ -247,12 +247,12 @@ export function getDailyBriefing(): DailyBriefing {
 
   // --- OPERATIONS ------------------------------------------------------------
   const operations: OperationFigure[] = [
-    { label: 'Open Tickets', value: workload.ticketsStatus === 'unavailable' ? null : workload.openTickets, status: workload.ticketsStatus, tone: 'secondary' },
-    { label: 'Urgent', value: workload.ticketsStatus === 'unavailable' ? null : workload.urgentTickets, status: workload.ticketsStatus, tone: workload.urgentTickets > 0 ? 'amber' : 'secondary' },
-    { label: 'UAT Awaiting', value: workload.uatStatus === 'unavailable' ? null : workload.uatAwaitingApproval, status: workload.uatStatus, tone: workload.uatAwaitingApproval > 0 ? 'amber' : 'secondary' },
-    { label: 'Pending Approvals', value: workload.approvalsStatus === 'unavailable' ? null : workload.pendingApprovals, status: workload.approvalsStatus, tone: workload.pendingApprovals > 0 ? 'amber' : 'secondary' },
-    { label: 'AI Tasks Running', value: workload.aiStatus === 'unavailable' ? null : workload.runningTasks, status: workload.aiStatus, tone: 'emerald' },
-    { label: 'Failed AI Tasks', value: workload.aiStatus === 'unavailable' ? null : workload.failedTasks, status: workload.aiStatus, tone: workload.failedTasks > 0 ? 'red' : 'secondary' },
+    { label: 'Open Tickets', value: workload.ticketsStatus === 'unavailable' ? null : workload.openTickets, status: toStatus(workload.ticketsStatus), tone: 'secondary' },
+    { label: 'Urgent', value: workload.ticketsStatus === 'unavailable' ? null : workload.urgentTickets, status: toStatus(workload.ticketsStatus), tone: workload.urgentTickets > 0 ? 'amber' : 'secondary' },
+    { label: 'UAT Awaiting', value: workload.uatStatus === 'unavailable' ? null : workload.uatAwaitingApproval, status: toStatus(workload.uatStatus), tone: workload.uatAwaitingApproval > 0 ? 'amber' : 'secondary' },
+    { label: 'Pending Approvals', value: workload.approvalsStatus === 'unavailable' ? null : workload.pendingApprovals, status: toStatus(workload.approvalsStatus), tone: workload.pendingApprovals > 0 ? 'amber' : 'secondary' },
+    { label: 'AI Tasks Running', value: workload.aiStatus === 'unavailable' ? null : workload.runningTasks, status: toStatus(workload.aiStatus), tone: 'emerald' },
+    { label: 'Failed AI Tasks', value: workload.aiStatus === 'unavailable' ? null : workload.failedTasks, status: toStatus(workload.aiStatus), tone: workload.failedTasks > 0 ? 'red' : 'secondary' },
   ];
 
   // --- ATTENTION REQUIRED (prioritised, non-critical actionable) -------------

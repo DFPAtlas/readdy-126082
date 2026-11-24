@@ -11,7 +11,7 @@ import {
   EXPIRY_STATE,
   RISK_LEVEL,
 } from '@/pages/ai-operations/constants';
-import { useApprovals } from '@/pages/ai-operations/approvals/ApprovalsContext';
+import { useApprovals } from '@/pages/ai-operations/approvals/ApprovalsContext.context';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import SummaryKpis from '@/pages/ai-operations/approvals/components/SummaryKpis';
 import PriorityReviews from '@/pages/ai-operations/approvals/components/PriorityReviews';

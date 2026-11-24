@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useKnowledge } from '@/pages/ai-operations/knowledge/KnowledgeContext';
+import { useKnowledge } from '@/pages/ai-operations/knowledge/KnowledgeContext.context';
 import type { KnowledgeSource } from '@/pages/ai-operations/types';
 import KnowledgeHeader from '@/pages/ai-operations/knowledge/detail/components/KnowledgeHeader';
 import Overview from '@/pages/ai-operations/knowledge/detail/components/Overview';

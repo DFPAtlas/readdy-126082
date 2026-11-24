@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { BuildRun, BuildRunItem, Project } from '../types';
 import { PHASE_LABELS, PHASE_COLORS, STATUS_COLORS, STATUS_DOT_COLORS } from '../types';
@@ -21,11 +21,7 @@ export default function BuildProcessOverviewTab({ runs, projects, onRefresh, get
   const [nextActions, setNextActions] = useState<RunItemWithNotes[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadSubData();
-  }, [runs]);
-
-  const loadSubData = async () => {
+  const loadSubData = useCallback(async () => {
     const activeRuns = runs.filter((r) => r.run_status === 'active');
     if (activeRuns.length === 0) { setLoading(false); return; }
 
@@ -49,7 +45,11 @@ export default function BuildProcessOverviewTab({ runs, projects, onRefresh, get
       setNextActions(enrich(next ?? []));
     } catch { /* ignore */ }
     finally { setLoading(false); }
-  };
+  }, [runs, getProjectName]);
+
+  useEffect(() => {
+    void loadSubData();
+  }, [loadSubData]);
 
   const formatDate = (d: string | null) => {
     if (!d) return '';

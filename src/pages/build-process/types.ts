@@ -31,6 +31,11 @@ export interface BuildRun {
   run_status: string;
   started_at: string | null;
   completed_at: string | null;
+  progress_percent: number | null;
+  app_type: string | null;
+  launch_readiness_score: number | null;
+  /** Optional legacy UI metadata; current run records may omit it. */
+  due_date?: string | null;
   total_items: number;
   completed_items: number;
   launch_blockers_remaining: number;
@@ -53,6 +58,7 @@ export interface BuildRunItem {
   status: 'not_started' | 'in_progress' | 'blocked' | 'done' | 'skipped';
   checked: boolean;
   checked_at: string | null;
+  completed_at: string | null;
   checked_by: string | null;
   owner: string | null;
   due_date: string | null;

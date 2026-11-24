@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useTester } from '@/components/feature/TesterAuthGuard';
+import { useTester } from '@/components/feature/TesterAuthGuard.context';
 import type { UatAssignment, UatJob, UatProject } from '@/pages/admin/website-uat/types';
 import { formatMinorCurrency, DEVICE_LABELS, BROWSER_LABELS } from '@/pages/admin/website-uat/marketplace';
 import { formatDate } from '../types';

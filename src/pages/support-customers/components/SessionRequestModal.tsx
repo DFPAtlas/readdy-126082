@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import Modal from '@/components/base/Modal';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { createSupportSession } from '@/pages/support-customers/hooks';
 import {
   displayValue,

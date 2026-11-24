@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useSecurity } from '@/pages/ai-operations/security/SecurityContext';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useSecurity } from '@/pages/ai-operations/security/SecurityContext.context';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { ROLE_LABELS } from '@/lib/permissions';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import PolicyHeader from '@/pages/ai-operations/security/detail/components/PolicyHeader';

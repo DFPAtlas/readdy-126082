@@ -11,7 +11,7 @@ import {
   NOTIFICATION_CHANNEL_LABELS,
 } from '@/pages/ai-operations/constants';
 import { demoSites } from '@/mocks/ai-operations-sites';
-import { useNotifications } from '@/pages/ai-operations/notifications/NotificationsContext';
+import { useNotifications } from '@/pages/ai-operations/notifications/NotificationsContext.context';
 
 interface RuleFormModalProps {
   open: boolean;
@@ -161,7 +161,7 @@ export default function RuleFormModal({ open, onClose, rule }: RuleFormModalProp
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className={labelCls}>Environment</label>
-            <select value={environment} onChange={(e) => setEnvironment(e.target.value)} className={inputCls}>
+            <select value={environment} onChange={(e) => setEnvironment(ENVIRONMENT_OPTIONS.find((value) => value === e.target.value) ?? environment)} className={inputCls}>
               {ENVIRONMENT_OPTIONS.map((env) => (
                 <option key={env} value={env}>{ENVIRONMENT_LABELS[env]}</option>
               ))}
@@ -177,7 +177,7 @@ export default function RuleFormModal({ open, onClose, rule }: RuleFormModalProp
           </div>
           <div>
             <label className={labelCls}>Priority</label>
-            <select value={priority} onChange={(e) => setPriority(e.target.value)} className={inputCls}>
+            <select value={priority} onChange={(e) => setPriority(NOTIFICATION_PRIORITY_OPTIONS.find((value) => value === e.target.value) ?? priority)} className={inputCls}>
               {NOTIFICATION_PRIORITY_OPTIONS.map((p) => (
                 <option key={p} value={p}>{NOTIFICATION_PRIORITY[p].label}</option>
               ))}

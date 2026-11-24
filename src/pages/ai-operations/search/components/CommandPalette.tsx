@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { AiGlobalSearchResult } from '@/pages/ai-operations/search/searchIndex';
 import { buildLiveSearchIndex, demoSearchIndex } from '@/pages/ai-operations/search/searchIndex';
 import { searchRecords, QUICK_NAV, CATEGORY_ORDER, type QuickNavItem } from '@/pages/ai-operations/search/searchUtils';
-import { useSearch } from '@/pages/ai-operations/search/SearchContext';
+import { useSearch } from '@/pages/ai-operations/search/SearchContext.context';
 import { useGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
 import ResultRow from '@/pages/ai-operations/search/components/ResultRow';
 

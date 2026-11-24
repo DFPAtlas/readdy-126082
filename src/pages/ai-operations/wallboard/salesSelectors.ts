@@ -303,7 +303,7 @@ export function getSalesPipeline(): SalesPipeline {
 
   // --- Pipeline value (open, GBP only — clearly NOT revenue) ----------------
   let openPipelineValue = 0;
-  for (const l of openLeads) {
+  for (const l of data.leads.filter((lead) => classifyLead(lead).open)) {
     if (isGbp(l.currency)) openPipelineValue += pounds(l.estimated_value);
   }
 

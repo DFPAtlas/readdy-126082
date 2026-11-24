@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom';
-import { useSchedules } from '@/pages/ai-operations/schedules/SchedulesContext';
+import { useSchedules } from '@/pages/ai-operations/schedules/SchedulesContext.context';
 import ScheduleHeader from '@/pages/ai-operations/schedules/detail/components/ScheduleHeader';
 import ScheduleOverview from '@/pages/ai-operations/schedules/detail/components/ScheduleOverview';
 import TriggerConfig from '@/pages/ai-operations/schedules/detail/components/TriggerConfig';

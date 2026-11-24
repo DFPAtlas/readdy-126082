@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { OrchestratorContext } from './OrchestratorContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AiOrchestration } from '@/pages/ai-operations/types';
 import { demoOrchestrations } from '@/mocks/ai-operations-orchestrator';
 import {
@@ -61,7 +62,7 @@ export interface OrchestrationRequestInput {
   checks?: { toolReady: boolean; modelReady: boolean; knowledgeReady: boolean };
 }
 
-interface OrchestratorContextValue {
+export interface OrchestratorContextValue {
   orchestrations: AiOrchestration[];
   mode: OrchestratorDataSourceMode;
   loading: boolean;
@@ -77,8 +78,6 @@ interface OrchestratorContextValue {
       routing decisions, candidate records, planned steps and an audit event. */
   saveRequest: (input: OrchestrationRequestInput) => Promise<SaveResult>;
 }
-
-const OrchestratorContext = createContext<OrchestratorContextValue | null>(null);
 
 const demoByKey = new Map<string, AiOrchestration>(
   (demoOrchestrations as AiOrchestration[]).map((o) => [o.id, o]),
@@ -379,10 +378,4 @@ export function OrchestratorProvider({ children }: { children: ReactNode }) {
   );
 
   return <OrchestratorContext.Provider value={value}>{children}</OrchestratorContext.Provider>;
-}
-
-export function useOrchestrator(): OrchestratorContextValue {
-  const ctx = useContext(OrchestratorContext);
-  if (!ctx) throw new Error('useOrchestrator must be used within OrchestratorProvider');
-  return ctx;
 }

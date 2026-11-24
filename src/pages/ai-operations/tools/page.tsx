@@ -11,8 +11,8 @@ import {
   ENVIRONMENT_LABELS,
 } from '@/pages/ai-operations/constants';
 import { demoSites } from '@/mocks/ai-operations-sites';
-import { useTools } from '@/pages/ai-operations/tools/ToolsContext';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useTools } from '@/pages/ai-operations/tools/ToolsContext.context';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { ROLE_LABELS } from '@/lib/permissions';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import ToolKpis from '@/pages/ai-operations/tools/components/ToolKpis';

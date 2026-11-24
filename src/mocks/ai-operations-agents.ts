@@ -1,3 +1,4 @@
+import type { AgentRegistryRecord } from '@/pages/ai-operations/types';
 // ============================================================================
 // AI OPERATIONS — CENTRAL AGENT REGISTRY — DEMO / PLACEHOLDER DATA (NOT PRODUCTION).
 //
@@ -13,7 +14,7 @@
 
 // --- Shared demo blocks (referenced by many agents to avoid repetition) ---------
 
-const STANDARD_MODEL = {
+const STANDARD_MODEL: AgentRegistryRecord['model'] = {
   primaryProvider: 'Anthropic',
   primaryModel: 'Claude Sonnet',
   fallbackProvider: 'OpenAI',
@@ -24,7 +25,7 @@ const STANDARD_MODEL = {
   lastConfigUpdate: '2026-08-20',
 };
 
-const CODING_MODEL = {
+const CODING_MODEL: AgentRegistryRecord['model'] = {
   primaryProvider: 'OpenAI',
   primaryModel: 'GPT-4o',
   fallbackProvider: 'Anthropic',
@@ -35,7 +36,7 @@ const CODING_MODEL = {
   lastConfigUpdate: '2026-08-21',
 };
 
-const STANDARD_TOOLS = [
+const STANDARD_TOOLS: AgentRegistryRecord['tools'] = [
   { name: 'Supabase', type: 'Database', accessMode: 'read', status: 'connected', environment: 'production', scope: 'Group', lastChecked: '1m ago' },
   { name: 'n8n', type: 'Automation', accessMode: 'execute', status: 'connected', environment: 'production', scope: 'Group', lastChecked: '1m ago' },
   { name: 'Site API', type: 'API', accessMode: 'read_write', status: 'connected', environment: 'production', scope: 'Group', lastChecked: '2m ago' },
@@ -46,7 +47,7 @@ const STANDARD_TOOLS = [
   { name: 'Readdy', type: 'Platform', accessMode: 'read', status: 'connected', environment: 'production', scope: 'Group', lastChecked: '4m ago' },
 ];
 
-const STANDARD_APPROVAL = {
+const STANDARD_APPROVAL: AgentRegistryRecord['approvalPolicy'] = {
   approvalRequired: true,
   minApprovers: 1,
   approvalTeam: 'Group AI Operations',
@@ -57,7 +58,7 @@ const STANDARD_APPROVAL = {
   auditRequired: true,
 };
 
-const STANDARD_ACTIONS = [
+const STANDARD_ACTIONS: AgentRegistryRecord['actionPermissions'] = [
   { action: 'Read data', riskClass: 'green', allowed: true, humanApprovalRequired: false, notes: 'Read-only within permitted scope.' },
   { action: 'Analyse logs', riskClass: 'green', allowed: true, humanApprovalRequired: false, notes: 'Diagnostic log inspection.' },
   { action: 'Generate reports', riskClass: 'green', allowed: true, humanApprovalRequired: false, notes: 'Read-only reporting.' },
@@ -80,27 +81,27 @@ const STANDARD_ACTIONS = [
   { action: 'Issue refunds', riskClass: 'red', allowed: false, humanApprovalRequired: true, notes: 'Finance approval required.' },
 ];
 
-const STANDARD_DEPENDENCIES = [
+const STANDARD_DEPENDENCIES: AgentRegistryRecord['dependencies'] = [
   { name: 'Site Registry', status: 'operational', critical: true, lastChecked: '1m ago' },
   { name: 'Supabase', status: 'operational', critical: true, lastChecked: '1m ago' },
   { name: 'n8n', status: 'operational', critical: true, lastChecked: '1m ago' },
   { name: 'Model Provider', status: 'operational', critical: true, lastChecked: '1m ago' },
 ];
 
-const STANDARD_DATA_PERMISSIONS = [
+const STANDARD_DATA_PERMISSIONS: AgentRegistryRecord['dataPermissions'] = [
   { resource: 'Core records', scope: 'Assigned scope', accessLevel: 'read', environment: 'production', reason: 'Operational analysis', approvalRequired: false },
   { resource: 'Audit logs', scope: 'Assigned scope', accessLevel: 'read', environment: 'production', reason: 'Traceability and review', approvalRequired: false },
   { resource: 'Reference data', scope: 'Assigned scope', accessLevel: 'read', environment: 'production', reason: 'Context for task execution', approvalRequired: false },
 ];
 
-const STANDARD_EVENTS = [
+const STANDARD_EVENTS: AgentRegistryRecord['events'] = [
   { timestamp: 'Today · 10:44', event: 'Run completed', actor: 'Orchestrator', summary: 'Latest run finished successfully.' },
   { timestamp: 'Today · 10:31', event: 'Run completed', actor: 'Orchestrator', summary: 'Scheduled run finished.' },
   { timestamp: 'Yesterday · 18:02', event: 'Configuration changed', actor: 'Group Admin', summary: 'Prompt reference updated.' },
   { timestamp: 'Yesterday · 09:15', event: 'Started', actor: 'Orchestrator', summary: 'Agent resumed schedule.' },
 ];
 
-const RUNS_OK = [
+const RUNS_OK: AgentRegistryRecord['runs'] = [
   { id: 'RUN-9D4F2', started: 'Today · 10:44', duration: '1m 12s', task: 'Scheduled task execution', status: 'success', risk: 'low', estimatedCost: '£0.04', resultSummary: 'Completed with no errors.' },
   { id: 'RUN-8C1B7', started: 'Today · 10:31', duration: '38s', task: 'Scheduled task execution', status: 'success', risk: 'low', estimatedCost: '£0.02', resultSummary: 'Completed.' },
   { id: 'RUN-7A9E3', started: 'Today · 09:58', duration: '2m 03s', task: 'Batch processing', status: 'success', risk: 'low', estimatedCost: '£0.11', resultSummary: 'Batch processed cleanly.' },
@@ -108,7 +109,7 @@ const RUNS_OK = [
   { id: 'RUN-5C2F4', started: 'Yesterday · 22:10', duration: '1m 44s', task: 'Nightly run', status: 'success', risk: 'low', estimatedCost: '£0.07', resultSummary: 'Nightly run complete.' },
 ];
 
-const RUNS_MIXED = [
+const RUNS_MIXED: AgentRegistryRecord['runs'] = [
   { id: 'RUN-9D4F2', started: 'Today · 10:44', duration: '1m 12s', task: 'Scheduled task execution', status: 'success', risk: 'low', estimatedCost: '£0.04', resultSummary: 'Completed with no errors.' },
   { id: 'RUN-8C1B7', started: 'Today · 10:31', duration: '38s', task: 'Scheduled task execution', status: 'success', risk: 'low', estimatedCost: '£0.02', resultSummary: 'Completed.' },
   { id: 'RUN-7A9E3', started: 'Today · 09:58', duration: '2m 03s', task: 'Batch processing', status: 'failed', risk: 'medium', estimatedCost: '£0.11', resultSummary: 'Failed — transient timeout, queued for retry.' },
@@ -120,7 +121,7 @@ const RUNS_MIXED = [
 // AGENT RECORDS
 // ============================================================================
 
-export const demoAgents = [
+export const demoAgents: AgentRegistryRecord[] = [
   // ============================================================ CORE / SHARED AGENTS
   {
     id: 'core-orchestrator',

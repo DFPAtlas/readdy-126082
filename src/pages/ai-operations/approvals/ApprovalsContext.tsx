@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ApprovalsContext } from './ApprovalsContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AiApproval, ApprovalDecisionType, ApprovalStatus, ApprovalHistoryEvent } from '@/pages/ai-operations/types';
 import { APPROVAL_STATUS } from '@/pages/ai-operations/constants';
 import { demoApprovals } from '@/mocks/ai-operations-approvals';
@@ -60,7 +61,7 @@ export interface ApprovalDecisionPayload {
   actorRole?: string;
 }
 
-interface ApprovalsContextValue {
+export interface ApprovalsContextValue {
   approvals: AiApproval[];
   mode: ApprovalsDataSourceMode;
   loading: boolean;
@@ -78,8 +79,6 @@ interface ApprovalsContextValue {
   /** Record a governance decision — metadata only, never executes a run. */
   recordDecision: (approvalKey: string, payload: ApprovalDecisionPayload) => Promise<SaveResult>;
 }
-
-const ApprovalsContext = createContext<ApprovalsContextValue | null>(null);
 
 // Demo lookup keyed by stable id (= approval_key) so live rows can merge their
 // supporting metadata (evidence, impact, rollback, separation, history, gate).
@@ -502,10 +501,4 @@ export function ApprovalsProvider({ children }: { children: ReactNode }) {
   );
 
   return <ApprovalsContext.Provider value={value}>{children}</ApprovalsContext.Provider>;
-}
-
-export function useApprovals() {
-  const ctx = useContext(ApprovalsContext);
-  if (!ctx) throw new Error('useApprovals must be used within an ApprovalsProvider');
-  return ctx;
 }

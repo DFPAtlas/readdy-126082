@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { BuildRun, BuildRunItem, Project } from '../types';
 import { PHASE_LABELS, APP_TYPE_LABELS } from '../types';
@@ -13,11 +13,7 @@ export default function BuildProcessReportsTab({ runs, projects, getProjectName 
   const [reportData, setReportData] = useState<{ runId: number; items: BuildRunItem[] }[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadReportData();
-  }, [runs]);
-
-  const loadReportData = async () => {
+  const loadReportData = useCallback(async () => {
     setLoading(true);
     try {
       const allItems: { runId: number; items: BuildRunItem[] }[] = [];
@@ -32,7 +28,11 @@ export default function BuildProcessReportsTab({ runs, projects, getProjectName 
       setReportData(allItems);
     } catch { /* ignore */ }
     finally { setLoading(false); }
-  };
+  }, [runs]);
+
+  useEffect(() => {
+    void loadReportData();
+  }, [loadReportData]);
 
   if (loading) {
     return (

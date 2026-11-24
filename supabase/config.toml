@@ -1,0 +1,6 @@
+# HAL and TRON authenticate every request with HMAC service identities.
+# Requiring a Supabase user JWT here rejects their signed requests at the
+# gateway before the runtime-bridge handler can authenticate them.
+# Keep the handler's signature, timestamp, identity, operation and node checks.
+[functions.runtime-bridge]
+verify_jwt = false

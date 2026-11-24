@@ -7,7 +7,7 @@ import {
   ALERT_STATUS,
   SEVERITY,
 } from '@/pages/ai-operations/constants';
-import { useAlerts } from '@/pages/ai-operations/alerts/AlertsContext';
+import { useAlerts } from '@/pages/ai-operations/alerts/AlertsContext.context';
 import { demoSites } from '@/mocks/ai-operations-sites';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import AlertsKpis from '@/pages/ai-operations/alerts/components/AlertsKpis';

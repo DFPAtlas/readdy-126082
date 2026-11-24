@@ -64,11 +64,12 @@ export function useTicketDetail(ticketId: string | undefined, role: string | nul
         .from('internal_support_tickets')
         .select(TICKET_SELECT)
         .eq('id', ticketId)
+        .returns<TicketRaw[]>()
         .maybeSingle();
       if (id !== requestIdRef.current) return;
       if (tErr) throw tErr;
 
-      const raw = t as TicketRaw | null;
+      const raw = t;
       const detail: TicketDetailRecord | null = raw
         ? {
             ...raw,

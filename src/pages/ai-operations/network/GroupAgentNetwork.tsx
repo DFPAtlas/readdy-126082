@@ -56,7 +56,7 @@ export default function GroupAgentNetwork() {
   useN8nData();
   useRuntimeControls();
 
-  const model = useMemo(() => getGroupNetworkModel(), [live, config, runtime]);
+  const model = getGroupNetworkModel();
 
   const [viewMode, setViewMode] = useState<'diagram' | 'list'>('diagram');
   const [search, setSearch] = useState('');

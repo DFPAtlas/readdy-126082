@@ -8,7 +8,7 @@ FROM denoland/deno:2.1.4
 WORKDIR /app
 
 # Copy the bridge source (only the service code — no secrets).
-COPY src/main.ts ./src/main.ts
+COPY src/ ./src/
 
 # Runs with --allow-env (config), --allow-net (outbound HTTPS + local health
 # checks) and --allow-sys=cpus,systemMemoryInfo (CPU/memory telemetry only).

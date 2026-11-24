@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import ConfirmDialog from '@/components/base/ConfirmDialog';
 import {
   type InboxFilters,
@@ -40,7 +40,7 @@ function parseStatuses(raw: string | null): TicketStatus[] {
 }
 
 function parseEnum<T extends string>(raw: string | null, valid: readonly T[]): T | 'all' {
-  if (raw && (valid as string[]).includes(raw)) return raw as T;
+  if (raw && valid.some((value) => value === raw)) return raw as T;
   return 'all';
 }
 
@@ -649,4 +649,3 @@ export default function SupportTickets() {
     </div>
   );
 }
-

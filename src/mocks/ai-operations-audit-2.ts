@@ -1,3 +1,4 @@
+import type { AiAuditEvent, AuditEvidence, ComplianceReadinessCheck, HumanOverrideAudit } from '@/pages/ai-operations/types';
 // ============================================================================
 // AI Operations — Audit & Evidence Trail (demo data, part 2 of 2).
 //
@@ -5,7 +6,7 @@
 // no production logs, no secrets. All IDs reuse the central registries.
 // ============================================================================
 
-export const demoAuditEvents2 = [
+export const demoAuditEvents2: AiAuditEvent[] = [
   {
     id: 'AUD-8019',
     timestamp: '2026-08-25 06:05',
@@ -675,7 +676,7 @@ export const demoAuditEvents2 = [
 ];
 
 // Evidence registry (continued).
-export const demoAuditEvidence2 = [
+export const demoAuditEvidence2: AuditEvidence[] = [
   { id: 'EVI-1021', type: 'configuration_snapshot', title: 'GitHub push block snapshot', source: 'Security Agent', timestamp: '2026-08-25 06:05', integrityState: 'pass', required: true, status: 'available', relatedRecordId: 'AUD-8019' },
   { id: 'EVI-1022', type: 'report', title: 'Maintenance triage summary', source: 'Maintenance Agent', timestamp: '2026-08-25 05:50', integrityState: 'pass', required: false, status: 'available', relatedRecordId: 'AUD-8020' },
   { id: 'EVI-1023', type: 'monitoring', title: 'Photo moderation flag', source: 'Photo Moderation Agent', timestamp: '2026-08-25 05:35', integrityState: 'pass', required: false, status: 'available', relatedRecordId: 'AUD-8021' },
@@ -697,7 +698,7 @@ export const demoAuditEvidence2 = [
 ];
 
 // Human override audit trail — demo only, no real override execution.
-export const demoHumanOverrides = [
+export const demoHumanOverrides: HumanOverrideAudit[] = [
   { overrideId: 'OVR-2001', actor: 'Group AI Operations', originalDecision: 'Deny — knowledge scope restriction', overrideDecision: 'Allow — temporary cross-site scope', reason: 'Emergency welfare escalation required incident SOP access.', risk: 'red', approvalReference: 'APR-4490', timestamp: '2026-08-25 07:10', result: 'Approved with conditions' },
   { overrideId: 'OVR-2002', actor: 'Group AI Operations', originalDecision: 'Restrict — model provider policy', overrideDecision: 'Allow — higher-tier model for this workload', reason: 'Restricted workload justified temporary provider use.', risk: 'red', approvalReference: 'APR-4513', timestamp: '2026-08-24 22:10', result: 'Approved with conditions' },
   { overrideId: 'OVR-2003', actor: 'Group Support', originalDecision: 'Require approval — bulk email', overrideDecision: 'Approve — scoped tenant broadcast', reason: 'Scoped, time-boxed tenant communication.', risk: 'amber', approvalReference: 'APR-4517', timestamp: '2026-08-24 19:00', result: 'Approved' },
@@ -705,7 +706,7 @@ export const demoHumanOverrides = [
 ];
 
 // Compliance readiness checks — operational readiness only, not legal certification.
-export const demoComplianceChecks = [
+export const demoComplianceChecks: ComplianceReadinessCheck[] = [
   { name: 'Approval trail complete', state: 'pass', note: 'All high-risk decisions have approval records.' },
   { name: 'Policy evaluation recorded', state: 'pass', note: 'Policy evaluations captured across sites.' },
   { name: 'Evidence present', state: 'warning', note: '2 events have missing evidence.' },

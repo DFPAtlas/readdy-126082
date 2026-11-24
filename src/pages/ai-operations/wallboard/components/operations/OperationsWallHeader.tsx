@@ -39,14 +39,11 @@ export default function OperationsWallHeader() {
     return () => clearInterval(id);
   }, []);
 
-  const global = useMemo(
-    () => getGlobalSystemState(),
-    [group, runtimeHealth, operationsHealth],
-  );
+  const global = getGlobalSystemState();
   const accent = STATE_COLOR[global.state] ?? '#64748b';
 
   // Platform user totals — re-derived whenever the shared live snapshot changes.
-  const users = useMemo(() => getUserTotals(), [group, runtimeHealth, operationsHealth]);
+  const users = getUserTotals();
   const onlineColor = users.onlineNow == null ? '#64748b' : '#4ade80';
   const accountsColor = users.totalAccounts == null ? '#64748b' : '#22d3ee';
   const platformBreakdown = users.platforms

@@ -1,0 +1,20 @@
+name: Support reply validation
+on:
+  pull_request:
+    paths:
+      - 'supabase/functions/notify-support-ticket-reply/**'
+      - '.github/workflows/support-reply-validation.yml'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: deno check supabase/functions/notify-support-ticket-reply/index.ts
+      - run: node --test supabase/functions/notify-support-ticket-reply/branding.test.ts

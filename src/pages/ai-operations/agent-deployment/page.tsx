@@ -9,10 +9,8 @@
 
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  DeploymentProvider,
-  useDeployment,
-} from '@/pages/ai-operations/agent-deployment/deploymentStore';
+import { DeploymentProvider } from '@/pages/ai-operations/agent-deployment/deploymentStore';
+import { useDeployment } from '@/pages/ai-operations/agent-deployment/deploymentStore.context';
 import { draftFromAgent } from '@/pages/ai-operations/agent-deployment/deploymentLogic';
 import { newDraft, type DeploymentDraft } from '@/pages/ai-operations/agent-deployment/types';
 import SetupList from '@/pages/ai-operations/agent-deployment/components/SetupList';

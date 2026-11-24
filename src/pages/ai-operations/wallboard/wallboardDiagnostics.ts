@@ -266,7 +266,7 @@ export function getDataSourceDiagnostics(now: number, staleMs: number): DataSour
     lastAttemptAt: toDate(power.lastRefreshed),
     lastError: power.sourceStatus === 'unavailable'
       ? 'Telemetry source unreachable'
-      : power.sourceStatus === 'not_configured'
+      : power.sourceStatus === 'not_connected'
         ? 'No telemetry source registered (NUT / Home Assistant / TrueNAS / IPMI)'
         : null,
     demo: false,
@@ -332,7 +332,7 @@ export function getDataSourceDiagnostics(now: number, staleMs: number): DataSour
   const weatherStatus: DiagnosticSourceStatus =
     weather.sourceStatus === 'live'
       ? 'healthy'
-      : 'unavailable';
+      : 'not_configured';
   rows.push({
     key: 'weather',
     label: 'Weather (Open-Meteo)',

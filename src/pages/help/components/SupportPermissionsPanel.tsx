@@ -1,4 +1,4 @@
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { hasPermission, ROLE_LABELS, type Role } from '@/lib/permissions';
 import { SUPPORT_CAPABILITIES, type SupportCapability } from '../helpContent';
 

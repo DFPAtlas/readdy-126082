@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { SectionKey } from '../types';
 
 interface PlaceholderSectionProps {
-  section: Exclude<SectionKey, 'overview' | 'bugs' | 'changes' | 'activity' | 'files' | 'infrastructure'>;
+  section: Exclude<SectionKey, 'overview' | 'bugs' | 'changes' | 'activity' | 'files' | 'infrastructure' | 'operations' | 'deployment' | 'launch'>;
 }
 
 export default function PlaceholderSection({ section }: PlaceholderSectionProps) {
@@ -27,7 +27,7 @@ export default function PlaceholderSection({ section }: PlaceholderSectionProps)
 }
 
 const placeholderConfig: Record<
-  Exclude<SectionKey, 'overview' | 'bugs' | 'changes' | 'activity' | 'files' | 'infrastructure'>,
+  Exclude<SectionKey, 'overview' | 'bugs' | 'changes' | 'activity' | 'files' | 'infrastructure' | 'operations' | 'deployment' | 'launch'>,
   { heading: string; message: string; to: string; buttonLabel: string; icon: string; buttonIcon: string }
 > = {
   build: {

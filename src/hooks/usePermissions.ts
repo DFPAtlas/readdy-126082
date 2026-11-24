@@ -1,4 +1,4 @@
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { hasPermission, type Permission, type Role } from '@/lib/permissions';
 
 export interface Permissions {

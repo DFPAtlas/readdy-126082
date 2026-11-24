@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import usePermissions from '@/hooks/usePermissions';
 import ConfirmDialog from '@/components/base/ConfirmDialog';
 import InviteUserModal from './components/InviteUserModal';

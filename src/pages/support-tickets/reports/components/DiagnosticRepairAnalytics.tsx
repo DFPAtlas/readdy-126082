@@ -1,14 +1,7 @@
 import type { SupportDiagnosticAnalytics, SupportRepairAnalytics } from '@/types/support-tickets';
 import { useAnalyticsJsonb } from '../analytics-hooks';
-import {
-  SectionCard,
-  StatCard,
-  StatGrid,
-  EmptyState,
-  ErrorState,
-  formatDuration,
-  formatPct,
-} from './AnalyticsShared';
+import { SectionCard, StatCard, StatGrid, EmptyState, ErrorState } from './AnalyticsShared';
+import { formatDuration, formatPct } from './analyticsFormat';
 
 interface Props {
   start: string;
@@ -29,7 +22,7 @@ function BreakdownList({
   valueKey,
 }: {
   title: string;
-  rows: { count: number }[];
+  rows: ({ count: number } & Partial<Record<'action_type' | 'risk_level' | 'site_name', string>>)[];
   valueKey: 'action_type' | 'risk_level' | 'site_name';
 }) {
   if (!rows || rows.length === 0) return null;
@@ -39,7 +32,7 @@ function BreakdownList({
       <ul className="space-y-1.5">
         {rows.map((r, i) => (
           <li key={`${title}-${i}`} className="flex items-center justify-between text-sm">
-            <span className="text-foreground-300">{humanize((r as Record<string, string>)[valueKey] ?? 'Unknown')}</span>
+            <span className="text-foreground-300">{humanize(r[valueKey] ?? 'Unknown')}</span>
             <span className="text-foreground-200 font-medium tabular-nums">{r.count}</span>
           </li>
         ))}

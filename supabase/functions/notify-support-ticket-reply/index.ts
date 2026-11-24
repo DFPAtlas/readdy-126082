@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { renderSupportReply } from "./branding.ts";
 
 // ============================================================================
 // notify-support-ticket-reply — customer email for a public staff reply.
@@ -28,8 +29,6 @@ const json = (body: unknown, status: number) =>
     status,
   });
 
-const escapeHtml = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(input));
@@ -156,8 +155,7 @@ serve(async (req: Request) => {
         status: "queued",
       })
       .select("id")
-      .single()
-      .catch(() => null);
+      .single();
     notificationId = notifInsert?.id as string | undefined;
   }
 
@@ -201,26 +199,30 @@ serve(async (req: Request) => {
     .maybeSingle();
   const inReplyTo = lastCustomerMsg?.email_message_id ?? threadRoot;
 
-  const from = `Digital Footprint Support <noreply@${resendDomain}>`;
-  const name = escapeHtml(ticket.customer_name ?? "there");
-  const number = escapeHtml(ticket.ticket_number ?? "");
-  const subject = `[${ticket.ticket_number ?? ""}] New reply from FootprintCC Support`;
-  const bodyHtml = escapeHtml(replyBody).replace(/\n/g, "<br>");
-
-  const html = `
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;background:#ffffff;color:#1a1a1a;">
-      <p style="margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#888;">Ticket ${number}</p>
-      <h1 style="margin:0 0 20px;font-size:22px;line-height:1.3;">Hi ${name},</h1>
-      <div style="background:#f5f5f5;border-radius:8px;padding:16px;font-size:14px;line-height:1.6;white-space:pre-wrap;">${bodyHtml}</div>
-      <p style="margin:24px 0 0;font-size:13px;color:#888;">If you need anything else, just reply to this email.</p>
-    </div>
-  `;
+  // Real, routed mailbox (forwarded to Resend inbound) so a plain "Reply" always comes back,
+  // even when the customer's email app ignores Reply-To.
+  const fromAddress = Deno.env.get("SUPPORT_FROM_ADDRESS") || `support@${resendDomain}`;
+  const { data: supportSite, error: siteError } = await supabaseAdmin
+    .from("internal_support_sites")
+    .select("site_slug, domain")
+    .eq("id", ticket.site_id)
+    .maybeSingle();
+  if (siteError) {
+    if (notificationId) await supabaseAdmin.from("internal_ticket_notifications")
+      .update({ status: "failed", last_error_code: "site_lookup_failed", failed_at: new Date().toISOString() })
+      .eq("id", notificationId);
+    return json({ ok: true, status: "failed", detail: "Could not resolve support site" }, 200);
+  }
+  const { from, subject, html, text } = renderSupportReply(
+    supportSite, fromAddress, ticket.ticket_number ?? "", replyBody,
+  );
 
   const payload: Record<string, unknown> = {
     from,
     to: [customerEmail],
     subject,
     html,
+    text,
     headers: {
       "Message-ID": outgoingMessageId,
       "In-Reply-To": inReplyTo,

@@ -1,4 +1,4 @@
-import { useAudit } from '@/pages/ai-operations/audit/AuditContext';
+import { useAudit } from '@/pages/ai-operations/audit/AuditContext.context';
 
 function KpiCard({ label, value, icon, accent }: { label: string; value: string | number; icon: string; accent: string }) {
   return (

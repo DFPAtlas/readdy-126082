@@ -10,8 +10,8 @@ import {
   ENVIRONMENT_OPTIONS,
   ENVIRONMENT_LABELS,
 } from '@/pages/ai-operations/constants';
-import { useModels } from '@/pages/ai-operations/models/ModelsContext';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useModels } from '@/pages/ai-operations/models/ModelsContext.context';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { ROLE_LABELS } from '@/lib/permissions';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import ModelKpis from '@/pages/ai-operations/models/components/ModelKpis';

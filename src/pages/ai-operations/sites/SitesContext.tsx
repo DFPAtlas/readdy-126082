@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { SitesContext } from './SitesContext.context';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { SiteRegistryRecord } from '@/pages/ai-operations/types';
 import { demoSites } from '@/mocks/ai-operations-sites';
 import { getAiSites, createAiSite, updateAiSite } from '@/lib/ai-operations';
@@ -14,7 +15,7 @@ export type SiteDataSourceMode = 'live' | 'demo' | 'error';
 
 type SaveResult = { error: string | null };
 
-interface SitesContextValue {
+export interface SitesContextValue {
   sites: SiteRegistryRecord[];
   mode: SiteDataSourceMode;
   loading: boolean;
@@ -24,8 +25,6 @@ interface SitesContextValue {
   createSite: (record: SiteRegistryRecord) => Promise<SaveResult>;
   updateSite: (id: string, record: SiteRegistryRecord) => Promise<SaveResult>;
 }
-
-const SitesContext = createContext<SitesContextValue | null>(null);
 
 // Demo lookup keyed by stable id (= site_key) so live rows can merge their
 // nested "Demo Supporting Metadata" (connections, capabilities, ownership,
@@ -109,10 +108,4 @@ export function SitesProvider({ children }: { children: ReactNode }) {
   );
 
   return <SitesContext.Provider value={value}>{children}</SitesContext.Provider>;
-}
-
-export function useSites() {
-  const ctx = useContext(SitesContext);
-  if (!ctx) throw new Error('useSites must be used within a SitesProvider');
-  return ctx;
 }

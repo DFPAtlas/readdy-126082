@@ -157,7 +157,7 @@ function sanitiseError(err: unknown): string {
   return 'Unable to load n8n connector data.';
 }
 
-async function runQuery<T>(builder: Promise<{ data: T | null; error: unknown }>): Promise<AiOpsResult<T>> {
+async function runQuery<T>(builder: PromiseLike<{ data: T | null; error: unknown }>): Promise<AiOpsResult<T>> {
   try {
     const { data, error } = await builder;
     if (error) return { data: null, error: sanitiseError(error) };
@@ -209,7 +209,7 @@ export function validateN8nMapping(workflowKey: string): Promise<AiOpsResult<N8n
 }
 
 export function previewN8nDispatch(payload: N8nDispatchPreviewPayload): Promise<AiOpsResult<N8nDispatchPreviewResult>> {
-  return invokeConnector<N8nDispatchPreviewResult>('dispatch_preview', payload);
+  return invokeConnector<N8nDispatchPreviewResult>('dispatch_preview', { ...payload });
 }
 
 // --- Selectors -----------------------------------------------------------------

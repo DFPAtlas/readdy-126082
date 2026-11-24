@@ -35,6 +35,7 @@ export interface Idea {
 
 export interface Bug {
   id: number;
+  project_id?: number | null;
   title: string;
   severity: string;
   status: string;

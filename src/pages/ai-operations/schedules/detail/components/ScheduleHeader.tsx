@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { AiSchedule } from '@/pages/ai-operations/types';
 import { SCHEDULE_STATUS, RISK_LEVEL, AUTOMATION_TYPE_LABELS } from '@/pages/ai-operations/constants';
-import { useSchedules } from '@/pages/ai-operations/schedules/SchedulesContext';
+import { useSchedules } from '@/pages/ai-operations/schedules/SchedulesContext.context';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 
 export default function ScheduleHeader({ schedule }: { schedule: AiSchedule }) {

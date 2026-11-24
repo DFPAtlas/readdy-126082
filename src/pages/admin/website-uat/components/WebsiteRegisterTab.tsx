@@ -220,13 +220,13 @@ export default function WebsiteRegisterTab() {
   };
 
   // ── Environment inline edit ──────────────────────────────────────────
-  const startEditEnv = (e: UatEnvironment) => {
+  const startEditEnv = useCallback((e: UatEnvironment) => {
     setEditingEnvId(e.id);
     setEditingProjectId(null);
     setEnvForm(envToEditForm(e));
     setEnvEditError('');
     updateDeepLink({ project: e.project_id, env: e.id });
-  };
+  }, [updateDeepLink]);
 
   const cancelEditEnv = () => {
     setEditingEnvId(null);
@@ -304,7 +304,7 @@ export default function WebsiteRegisterTab() {
       if (env) startEditEnv(env);
     }
     setDeepLinkApplied(true);
-  }, [loading, deepLinkApplied, deepProjectId, deepEnvId, projects, filter]);
+  }, [loading, deepLinkApplied, deepProjectId, deepEnvId, projects, filter, startEditEnv]);
 
   if (loading) return <div className="text-sm text-foreground-400 py-8">Loading projects...</div>;
   if (error) return <div className="text-sm text-red-400 py-8">{error}</div>;

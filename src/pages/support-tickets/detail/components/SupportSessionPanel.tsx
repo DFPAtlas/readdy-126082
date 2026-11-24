@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { useTicketSessions, endSupportSession } from '@/pages/support-customers/hooks';
 import {
   sessionStatusLabels,

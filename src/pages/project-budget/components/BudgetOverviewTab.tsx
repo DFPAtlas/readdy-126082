@@ -244,7 +244,7 @@ export default function BudgetOverviewTab({ budgets, costItems, recurringCosts, 
                     {budget.notes && <p className="text-xs text-foreground-500 bg-background-50 rounded p-2">{budget.notes}</p>}
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[10px] font-label px-1.5 py-0.5 rounded bg-accent-500/10 text-accent-400">{BUDGET_TYPE_LABELS[budget.budget_type] || budget.budget_type}</span>
-                      <span className="text-[10px] text-foreground-600">{budget.costItems?.length ?? budgetCosts.length} costs</span>
+                      <span className="text-[10px] text-foreground-600">{budgetCosts.length} costs</span>
                       <span className="text-[10px] text-foreground-600">{budgetRecurring.length} recurring</span>
                     </div>
                   </div>

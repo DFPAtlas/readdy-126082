@@ -92,6 +92,8 @@ export interface UatSession {
   project_name?: string;
   tester_name?: string;
   environment_name?: string;
+  last_activity_at: string;
+  updated_at: string;
 }
 
 export interface UatTestCase {

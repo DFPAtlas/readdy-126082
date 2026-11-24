@@ -1,6 +1,6 @@
 import { Outlet, useNavigate, NavLink } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useTester } from '@/components/feature/TesterAuthGuard';
+import { useTester } from '@/components/feature/TesterAuthGuard.context';
 
 /**
  * Standalone layout for the tester account area. Deliberately does NOT use the

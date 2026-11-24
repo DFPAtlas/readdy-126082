@@ -86,7 +86,7 @@ export default function ProviderStatus({ providers }: { providers: AiProvider[] 
                   <OllamaStateRow label="Cloud Edge" tone="secondary" value="Unavailable / N/A" />
                   <OllamaStateRow
                     label="Local Runtime Bridge"
-                    tone={runtimeMeta?.currentStatus === 'healthy' ? 'emerald' : runtimeMeta?.currentStatus === 'degraded' ? 'amber' : 'secondary'}
+                    tone={runtimeMeta?.tone ?? 'secondary'}
                     value={runtimeMeta ? runtimeMeta.label : 'Not Reported'}
                   />
                   <OllamaStateRow label="Catalogue" tone={catalogueFreshness.tone} value={catalogueFreshness.label} />

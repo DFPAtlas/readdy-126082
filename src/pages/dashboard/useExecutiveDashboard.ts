@@ -462,9 +462,7 @@ export function useExecutiveDashboard(): ExecutiveDashboardData {
     };
   }, [
     configured,
-    portfolio.projects,
-    portfolio.loading,
-    portfolio.sourceErrors,
+    portfolio,
     ai,
     aiCriticalAlertInputs,
     runtimeOffline,

@@ -37,3 +37,7 @@ dist-ssr/
 
 *.log
 npm-debug.log*
+
+# Generated Vite output and auto-import declarations
+out/
+auto-imports.d.ts

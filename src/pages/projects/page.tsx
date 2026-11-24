@@ -12,11 +12,8 @@ import {
 } from './portfolioDerive';
 import PortfolioSummaryCards from './components/PortfolioSummaryCards';
 import NeedsAttentionPanel from './components/NeedsAttentionPanel';
-import PortfolioFiltersBar, {
-  type FilterKey,
-  type SortKey,
-  type ViewMode,
-} from './components/PortfolioFiltersBar';
+import PortfolioFiltersBar from './components/PortfolioFiltersBar';
+import { type FilterKey, type SortKey, type ViewMode } from './components/portfolioFilters';
 import PortfolioProjectCard from './components/PortfolioProjectCard';
 import PortfolioSidePanels from './components/PortfolioSidePanels';
 import { formatRelative, formatDate } from './detail/utils';

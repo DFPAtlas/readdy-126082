@@ -37,7 +37,7 @@ export default function OperationsMaintenancePanel({
     description: string;
     priority: string;
     origin: string;
-    maintenanceId: number | null;
+    maintenanceId: string | null;
   } | null>(null);
 
   const summary = computeMaintenanceSummary(operations.maintenance);

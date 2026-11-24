@@ -15,7 +15,7 @@ import {
   ENVIRONMENT_OPTIONS,
   ENVIRONMENT_LABELS,
 } from '@/pages/ai-operations/constants';
-import { useOrchestrator } from '@/pages/ai-operations/orchestrator/OrchestratorContext';
+import { useOrchestrator } from '@/pages/ai-operations/orchestrator/OrchestratorContext.context';
 import { useGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import OrchestratorKpis from '@/pages/ai-operations/orchestrator/components/OrchestratorKpis';

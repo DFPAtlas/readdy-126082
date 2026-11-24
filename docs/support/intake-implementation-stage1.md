@@ -1,0 +1,3 @@
+# Stage 1: Automatic unverified email inbox
+
+This branch stages a separate receiving route for securely signed QuickGuard inbound email. Keep email unverified and staff-only. Require authenticated service-to-service requests and idempotency keyed by site and Resend email ID. Do not treat a sender address as proof of customer identity, automatically reply, or route raw email through existing customer-visible ticket messages. Deploy only after staging migration and replay tests.

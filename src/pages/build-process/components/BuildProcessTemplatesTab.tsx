@@ -30,7 +30,7 @@ export default function BuildProcessTemplatesTab({ templates, projects, onRefres
     if (templates.length > 0 && !selectedTemplateId) {
       setSelectedTemplateId(templates[0].id);
     }
-  }, [templates]);
+  }, [templates, selectedTemplateId]);
 
   const loadTemplateItems = async (id: number) => {
     setLoading(true);

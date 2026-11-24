@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
-import { useAuth } from '@/components/feature/AuthGuard';
-import { useCosts } from '@/pages/ai-operations/costs/CostsContext';
+import { useAuth } from '@/components/feature/AuthGuard.context';
+import { useCosts } from '@/pages/ai-operations/costs/CostsContext.context';
 import { SEVERITY } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 import { ROLE_LABELS } from '@/lib/permissions';

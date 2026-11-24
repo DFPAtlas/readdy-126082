@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom';
-import { useAudit } from '@/pages/ai-operations/audit/AuditContext';
+import { useAudit } from '@/pages/ai-operations/audit/AuditContext.context';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import AuditHeader from '@/pages/ai-operations/audit/detail/components/AuditHeader';
 import EventSummary from '@/pages/ai-operations/audit/detail/components/EventSummary';

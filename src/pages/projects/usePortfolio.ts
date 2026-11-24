@@ -251,10 +251,10 @@ export function usePortfolio(): PortfolioData {
     if (id !== requestIdRef.current) return;
 
     // ── Group sources by project ────────────────────────────────────────────
-    const byProject = <T>(rows: T[]): Map<number, T[]> => {
+    const byProject = <T extends { project_id?: number | null }>(rows: T[]): Map<number, T[]> => {
       const m = new Map<number, T[]>();
       for (const r of rows) {
-        const projectId = (r as { project_id?: number | null }).project_id;
+        const projectId = r.project_id;
         if (projectId == null) continue;
         const arr = m.get(projectId) ?? [];
         arr.push(r);

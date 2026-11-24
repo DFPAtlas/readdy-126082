@@ -209,7 +209,7 @@ export function getOrchestrationTopology(): TopologyLayer[] {
       name: 'SITE WORKFLOWS',
       role: 'Primary n8n workflow per site',
       state: workflowState,
-      linkState: workflowState === 'healthy' || workflowState === 'active' ? 'active' : workflowState,
+      linkState: workflowState === 'healthy' ? 'active' : workflowState,
       detail: `${masters.sitesTotal} site${masters.sitesTotal === 1 ? '' : 's'} · registry ${getN8nWorkflows().length} workflow${getN8nWorkflows().length === 1 ? '' : 's'}`,
     },
     {

@@ -12,7 +12,7 @@ import {
   REVIEW_STATE_OPTIONS,
   REVIEW_STATE,
 } from '@/pages/ai-operations/constants';
-import { useKnowledge } from '@/pages/ai-operations/knowledge/KnowledgeContext';
+import { useKnowledge } from '@/pages/ai-operations/knowledge/KnowledgeContext.context';
 import { demoSites } from '@/mocks/ai-operations-sites';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import KnowledgeKpis from '@/pages/ai-operations/knowledge/components/KnowledgeKpis';

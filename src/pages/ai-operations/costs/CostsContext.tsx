@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { CostsContext } from './CostsContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AiBudget } from '@/pages/ai-operations/types';
 import { demoBudgets, demoBudgetAlerts } from '@/mocks/ai-operations-costs';
 import {
@@ -43,7 +44,7 @@ export interface ScopeOptions {
   providers: { id: string; label: string }[];
 }
 
-interface CostsContextValue {
+export interface CostsContextValue {
   budgets: AiBudget[];
   budgetEvents: BudgetEventDisplay[];
   usageCosts: AiUsageCostRow[];
@@ -58,8 +59,6 @@ interface CostsContextValue {
   setBudgetActive: (id: string, isActive: boolean, actor: string) => Promise<SaveResult>;
   acknowledgeEvent: (eventKey: string, actor: string) => Promise<SaveResult>;
 }
-
-const CostsContext = createContext<CostsContextValue | null>(null);
 
 const EMPTY_SCOPE_OPTIONS: ScopeOptions = { sites: [], agents: [], models: [], providers: [] };
 
@@ -338,10 +337,4 @@ export function CostsProvider({ children }: { children: ReactNode }) {
   );
 
   return <CostsContext.Provider value={value}>{children}</CostsContext.Provider>;
-}
-
-export function useCosts(): CostsContextValue {
-  const ctx = useContext(CostsContext);
-  if (!ctx) throw new Error('useCosts must be used within a CostsProvider');
-  return ctx;
 }

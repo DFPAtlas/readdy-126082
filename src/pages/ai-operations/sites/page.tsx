@@ -12,7 +12,7 @@ import {
   BUSINESS_TYPE_LABELS,
   RISK_LEVEL,
 } from '@/pages/ai-operations/constants';
-import { useSites } from '@/pages/ai-operations/sites/SitesContext';
+import { useSites } from '@/pages/ai-operations/sites/SitesContext.context';
 import RegistryTable from '@/pages/ai-operations/sites/components/RegistryTable';
 import SiteFormModal from '@/pages/ai-operations/sites/components/SiteFormModal';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';

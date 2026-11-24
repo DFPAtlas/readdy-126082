@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate, useSearchParams, useLocation, useNavigationType, Outlet } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { useUnreadTicketCount } from '@/pages/support-tickets/hooks';
 import { hasPermission, ROLE_BADGE_COLORS, ROLE_LABELS, type Role } from '@/lib/permissions';
 import { SearchProvider } from '@/pages/ai-operations/search/SearchContext';
-import { GroupLiveDataProvider } from '@/pages/ai-operations/live/groupLiveDataStore';
+import { GroupLiveDataProvider } from '@/pages/ai-operations/live/GroupLiveDataProvider';
 import CommandPalette from '@/pages/ai-operations/search/components/CommandPalette';
 import SearchTrigger from '@/pages/ai-operations/search/components/SearchTrigger';
 
@@ -125,8 +125,10 @@ export default function AppLayout() {
   // Save the current scroll position before leaving a page, keyed by its location.
   useEffect(() => {
     const key = location.key;
+    const positions = scrollPositions.current;
+    const main = mainRef.current;
     return () => {
-      scrollPositions.current.set(key, mainRef.current?.scrollTop ?? 0);
+      positions.set(key, main?.scrollTop ?? 0);
     };
   }, [location.key]);
 

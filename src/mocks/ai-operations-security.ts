@@ -1,3 +1,4 @@
+import type { AiSecurityPolicy } from '@/pages/ai-operations/types';
 // ============================================================================
 // AI OPERATIONS — SECURITY & POLICY ENGINE — DEMO / PLACEHOLDER DATA (NOT PRODUCTION).
 //
@@ -36,7 +37,7 @@ const HISTORY_SUPERSEDED = [
 // POLICY RECORDS
 // ============================================================================
 
-export const demoPolicies = [
+export const demoPolicies: AiSecurityPolicy[] = [
   // ============================================================ CORE SECURITY
   {
     id: 'POL-CREDENTIALS',
@@ -646,7 +647,7 @@ export const demoPolicies = [
       { when: 'record = agent log', then: 'Retain per schedule' },
       { when: 'modification attempted', then: 'Deny and log' },
     ],
-    decision: { result: 'audit_only', explanation: 'Retention is audit-only; logs are immutable.' },
+    decision: { result: 'allow', explanation: 'Retention is audit-only; logs are immutable.' },
     exceptions: [],
     history: HISTORY_ACTIVE,
   },
@@ -696,7 +697,7 @@ export const demoPolicies = [
       { when: 'risk = RED', then: 'Audit = required (immutable)' },
       { when: 'audit unavailable', then: 'Block execution' },
     ],
-    decision: { result: 'audit_only', explanation: 'RED actions are always audit-logged.' },
+    decision: { result: 'allow', explanation: 'RED actions are always audit-logged.' },
     exceptions: [],
     history: HISTORY_ACTIVE,
   },
@@ -722,7 +723,7 @@ export const demoPolicies = [
     conditions: [
       { when: 'policy = draft', then: 'Audit only' },
     ],
-    decision: { result: 'audit_only', explanation: 'Draft policy is not yet enforced.' },
+    decision: { result: 'allow', explanation: 'Draft policy is not yet enforced.' },
     exceptions: [],
     history: [
       { timestamp: '2026-08-20', version: 'v0.3', actor: 'Security Working Group', change: 'Draft created', previousStatus: '—', newStatus: 'Draft' },

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { ToolConnection } from '@/pages/ai-operations/types';
-import { useTools } from '@/pages/ai-operations/tools/ToolsContext';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useTools } from '@/pages/ai-operations/tools/ToolsContext.context';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { ROLE_LABELS } from '@/lib/permissions';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import ConfirmDialog from '@/components/base/ConfirmDialog';

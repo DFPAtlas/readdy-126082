@@ -1,3 +1,4 @@
+import type { AiAuditEvent, AuditEvidence } from '@/pages/ai-operations/types';
 // ============================================================================
 // AI Operations — Audit & Evidence Trail (demo data, part 1 of 2).
 //
@@ -5,7 +6,7 @@
 // no production logs, no secrets. All IDs reuse the central registries.
 // ============================================================================
 
-export const demoAuditEvents = [
+export const demoAuditEvents: AiAuditEvent[] = [
   {
     id: 'AUD-8001',
     timestamp: '2026-08-25 10:31',
@@ -675,7 +676,7 @@ export const demoAuditEvents = [
 ];
 
 // Evidence registry — demo metadata only, no file upload.
-export const demoAuditEvidence = [
+export const demoAuditEvidence: AuditEvidence[] = [
   { id: 'EVI-1001', type: 'monitoring', title: 'Check-call delivery confirmation', source: 'GuardianHub Monitoring', timestamp: '2026-08-25 10:31', integrityState: 'pass', required: true, status: 'available', relatedRecordId: 'AUD-8001' },
   { id: 'EVI-1002', type: 'verification', title: 'Welfare flag cleared confirmation', source: 'core-verification', timestamp: '2026-08-25 10:32', integrityState: 'pass', required: true, status: 'available', relatedRecordId: 'AUD-8001' },
   { id: 'EVI-1003', type: 'configuration_snapshot', title: 'Production write gate snapshot', source: 'Security Agent', timestamp: '2026-08-25 10:20', integrityState: 'pass', required: true, status: 'available', relatedRecordId: 'AUD-8002' },

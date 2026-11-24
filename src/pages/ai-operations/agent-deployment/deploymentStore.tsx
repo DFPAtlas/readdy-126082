@@ -1,3 +1,5 @@
+import { draftToInput } from './draftMapping';
+import { DeploymentContext } from './deploymentStore.context';
 // ============================================================================
 // DFP AI Operations — Agent Deployment store (Prompt 03).
 //
@@ -14,8 +16,8 @@
 //   * Validation results are invalidated by persisting on every step change.
 // ============================================================================
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import type { AiAgentRow, AiSiteRow, AiAgentUpsertInput } from '@/lib/ai-operations';
 import { getAiSites, getAiAgents, createAiAgent, updateAiAgent } from '@/lib/ai-operations';
 import { refreshN8nData, getN8nData, type N8nWorkflowRegistryRow } from '@/pages/ai-operations/wallboard/n8nStore';
@@ -23,7 +25,7 @@ import { refreshHistory, getRuntimeHealthState } from '@/pages/ai-operations/run
 import type { AiRuntimeBridgeNode } from '@/lib/ai-operations/runtimeBridge';
 import type { DeploymentDraft } from '@/pages/ai-operations/agent-deployment/types';
 
-interface DeploymentContextValue {
+export interface DeploymentContextValue {
   sites: AiSiteRow[];
   agents: AiAgentRow[];
   workflows: N8nWorkflowRegistryRow[];
@@ -38,34 +40,8 @@ interface DeploymentContextValue {
   canWrite: boolean;
 }
 
-const DeploymentContext = createContext<DeploymentContextValue | null>(null);
-
 /** Map a draft to the persisted agent input (metadata only — never execution). */
-export function draftToInput(draft: DeploymentDraft): AiAgentUpsertInput {
-  return {
-    agent_key: draft.agentKey.trim(),
-    name: draft.name.trim(),
-    description: draft.description.trim() || null,
-    agent_type: draft.role === 'shared_agent' ? 'core' : 'site_specific',
-    category: draft.category || 'other',
-    site_id: draft.role === 'shared_agent' ? null : draft.siteId,
-    environment: 'production',
-    status: 'not_configured',
-    health: 'unknown',
-    risk_level: draft.riskLevel,
-    autonomy_level: draft.autonomy,
-    approval_required: draft.approvalRequired,
-    data_scope: draft.dataScope || null,
-    parent_agent_id: draft.parentAgentId,
-    workflow_id: draft.workflowId,
-    runtime_reference: draft.runtimeReference,
-    responsibility: draft.responsibility.trim() || null,
-    setup_stage: draft.setupStage,
-    deployment_status: draft.deploymentStatus,
-    last_validated_at: draft.lastValidatedAt,
-    last_validation_result: draft.lastValidationResult,
-  };
-}
+
 
 export function DeploymentProvider({ children }: { children: ReactNode }) {
   const { role } = useAuth();
@@ -135,10 +111,4 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
   );
 
   return <DeploymentContext.Provider value={value}>{children}</DeploymentContext.Provider>;
-}
-
-export function useDeployment(): DeploymentContextValue {
-  const ctx = useContext(DeploymentContext);
-  if (!ctx) throw new Error('useDeployment must be used within a DeploymentProvider');
-  return ctx;
 }

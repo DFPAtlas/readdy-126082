@@ -8,7 +8,7 @@ import {
   RECORD_TYPE_OPTIONS,
   CATEGORY_ORDER,
 } from '@/pages/ai-operations/search/searchUtils';
-import { useSearch } from '@/pages/ai-operations/search/SearchContext';
+import { useSearch } from '@/pages/ai-operations/search/SearchContext.context';
 import { useGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
 import ResultRow from '@/pages/ai-operations/search/components/ResultRow';
 

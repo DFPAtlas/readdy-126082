@@ -8,7 +8,7 @@
 // ============================================================================
 
 import { useMemo, useState } from 'react';
-import { useDeployment } from '@/pages/ai-operations/agent-deployment/deploymentStore';
+import { useDeployment } from '@/pages/ai-operations/agent-deployment/deploymentStore.context';
 import { validateDeployment, resultSummary } from '@/pages/ai-operations/agent-deployment/deploymentLogic';
 import {
   SETUP_STAGES,

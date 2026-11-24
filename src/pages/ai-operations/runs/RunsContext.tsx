@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { RunsContext } from './RunsContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AiTaskRun, AiAuditEvent } from '@/pages/ai-operations/types';
 import { demoRuns } from '@/mocks/ai-operations-runs';
 import {
@@ -39,7 +40,7 @@ export interface RunAgentOption {
   assignedSite: string | null;
 }
 
-interface RunsContextValue {
+export interface RunsContextValue {
   runs: AiTaskRun[];
   mode: RunsDataSourceMode;
   loading: boolean;
@@ -54,8 +55,6 @@ interface RunsContextValue {
   /** Live audit events linked to a run (compact audit trail). */
   getAuditForRun: (runKey: string) => AiAuditEvent[];
 }
-
-const RunsContext = createContext<RunsContextValue | null>(null);
 
 // Demo lookup keyed by stable id (= run_key) so live rows can merge their
 // supporting metadata (timing strings, nested objects, chain, tags).
@@ -280,7 +279,7 @@ export function RunsProvider({ children }: { children: ReactNode }) {
       await refresh();
       return { error: null };
     },
-    [mode, refresh, sites, agents],
+    [mode, refresh, sites],
   );
 
   const getRun = useCallback(
@@ -305,10 +304,4 @@ export function RunsProvider({ children }: { children: ReactNode }) {
   );
 
   return <RunsContext.Provider value={value}>{children}</RunsContext.Provider>;
-}
-
-export function useRuns() {
-  const ctx = useContext(RunsContext);
-  if (!ctx) throw new Error('useRuns must be used within a RunsProvider');
-  return ctx;
 }
