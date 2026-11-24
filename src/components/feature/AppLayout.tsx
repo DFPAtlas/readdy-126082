@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { NavLink, useNavigate, useSearchParams, useLocation, useNavigationType, Outlet } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams, useLocation, useNavigationType, Outlet } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/feature/AuthGuard.context';
 import { useUnreadTicketCount } from '@/pages/support-tickets/hooks';
@@ -214,14 +214,12 @@ export default function AppLayout() {
                 {expanded && (
                   <div id={`nav-group-${group.id}`} className={`mt-1 space-y-0.5 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
                     {visibleItems.map((item) => (
-                      <NavLink key={item.tab ?? item.to}
+                      <Link key={item.tab ?? item.to}
                         to={item.tab ? `/admin/website-uat?tab=${item.tab}` : item.to}
                         onClick={() => setSidebarOpen(false)}
                         title={item.label}
-                        className={() => {
-                          const selected = navItemActive(item, location.pathname, activeTab, visibleItems);
-                          return `flex items-center gap-3 rounded-lg text-sm pl-7 pr-3 py-2 transition-colors ${selected ? 'bg-accent-500/10 text-accent-400 font-medium' : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'}`;
-                        }}
+                        aria-current={navItemActive(item, location.pathname, activeTab, visibleItems) ? 'page' : undefined}
+                        className={`flex items-center gap-3 rounded-lg text-sm pl-7 pr-3 py-2 transition-colors ${navItemActive(item, location.pathname, activeTab, visibleItems) ? 'bg-accent-500/10 text-accent-400 font-medium' : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'}`}
                       >
                         <i className={`${item.icon} text-base w-4 h-4 shrink-0`} aria-hidden="true" />
                         <span className="flex-1 truncate">{item.label}</span>
@@ -230,7 +228,7 @@ export default function AppLayout() {
                             {unreadTickets > 99 ? '99+' : unreadTickets}
                           </span>
                         )}
-                      </NavLink>
+                      </Link>
                     ))}
                   </div>
                 )}
