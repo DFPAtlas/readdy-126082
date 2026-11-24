@@ -12,7 +12,7 @@ export interface CreateBugDefaults {
   buildRunId?: number | null;
   buildItemId?: number | null;
   supportTicketId?: string | null;
-  maintenanceId?: number | null;
+  maintenanceId?: string | null;
 }
 
 interface CreateBugModalProps {

@@ -5,7 +5,7 @@ import { resolveEffectiveHealth } from '@/lib/ai-operations/runtimeHealthSource'
 import { HEALTH_STATUS_META } from '@/lib/ai-operations/runtimeHealth';
 import type { RuntimeHealthStatus } from '@/lib/ai-operations/runtimeHealth';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
-import { SYSTEM_LABELS } from '@/pages/ai-operations/runtime-health/components/HealthHistory';
+import { SYSTEM_LABELS } from '@/pages/ai-operations/runtime-health/components/systemLabels';
 
 interface SystemHealthDetailProps {
   system: string;

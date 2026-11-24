@@ -130,15 +130,9 @@ export default function LiveEventsStrip() {
   const operationsHealth = useOperationsHealthData();
   const resilience = useRuntimeResilience();
 
-  const events = useMemo(
-    () => [...resilienceEvents(resilience), ...getLiveEvents()],
-    [resilience, group],
-  );
+  const events = [...resilienceEvents(resilience), ...getLiveEvents()];
 
-  const global = useMemo(
-    () => getGlobalSystemState(),
-    [group, runtimeHealth, operationsHealth],
-  );
+  const global = getGlobalSystemState();
   const gTone = toneHex(global.tone);
   const operational = global.state === 'nominal';
 

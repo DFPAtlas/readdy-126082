@@ -1,3 +1,4 @@
+import type { AiTaskRun } from '@/pages/ai-operations/types';
 // ============================================================================
 // AI OPERATIONS — TASKS & RUNS — DEMO / PLACEHOLDER DATA (NOT PRODUCTION).
 //
@@ -13,7 +14,7 @@
 
 // --- Shared nested blocks (literal; reused across many runs) --------------------
 
-const COST_STD = {
+const COST_STD: AiTaskRun['cost'] = {
   model: 'Claude Sonnet',
   provider: 'Anthropic',
   estimatedTokens: '1.2k',
@@ -23,7 +24,7 @@ const COST_STD = {
   totalEstimatedCost: '£0.05',
 };
 
-const COST_CODE = {
+const COST_CODE: AiTaskRun['cost'] = {
   model: 'GPT-4o',
   provider: 'OpenAI',
   estimatedTokens: '4.8k',
@@ -33,7 +34,7 @@ const COST_CODE = {
   totalEstimatedCost: '£0.19',
 };
 
-const COST_CHEAP = {
+const COST_CHEAP: AiTaskRun['cost'] = {
   model: 'Claude Sonnet',
   provider: 'Anthropic',
   estimatedTokens: '320',
@@ -43,7 +44,7 @@ const COST_CHEAP = {
   totalEstimatedCost: '£0.01',
 };
 
-const RETRY_NONE = {
+const RETRY_NONE: AiTaskRun['retry'] = {
   retryAllowed: true,
   retryCount: 0,
   maxAttempts: 3,
@@ -53,7 +54,7 @@ const RETRY_NONE = {
   requiresApproval: false,
 };
 
-const RETRY_SCHEDULED = {
+const RETRY_SCHEDULED: AiTaskRun['retry'] = {
   retryAllowed: true,
   retryCount: 1,
   maxAttempts: 3,
@@ -63,7 +64,7 @@ const RETRY_SCHEDULED = {
   requiresApproval: false,
 };
 
-const RETRY_BLOCKED = {
+const RETRY_BLOCKED: AiTaskRun['retry'] = {
   retryAllowed: false,
   retryCount: 3,
   maxAttempts: 3,
@@ -73,7 +74,7 @@ const RETRY_BLOCKED = {
   requiresApproval: true,
 };
 
-const APPR_NONE = {
+const APPR_NONE: AiTaskRun['approval'] = {
   approvalRequired: false,
   approvalId: null,
   approvalState: 'Not required',
@@ -82,7 +83,7 @@ const APPR_NONE = {
   approverTeam: '—',
 };
 
-const APPR_PENDING = {
+const APPR_PENDING: AiTaskRun['approval'] = {
   approvalRequired: true,
   approvalId: 'APR-4471',
   approvalState: 'Pending',
@@ -91,7 +92,7 @@ const APPR_PENDING = {
   approverTeam: 'Group AI Operations',
 };
 
-const APPR_APPROVED = {
+const APPR_APPROVED: AiTaskRun['approval'] = {
   approvalRequired: true,
   approvalId: 'APR-4409',
   approvalState: 'Approved',
@@ -100,7 +101,7 @@ const APPR_APPROVED = {
   approverTeam: 'Group AI Operations',
 };
 
-const UAT_NONE = {
+const UAT_NONE: AiTaskRun['uat'] = {
   uatRequired: false,
   uatStatus: 'Not required',
   testPlanRef: '—',
@@ -108,7 +109,7 @@ const UAT_NONE = {
   testsFailed: 0,
 };
 
-const UAT_PASS = {
+const UAT_PASS: AiTaskRun['uat'] = {
   uatRequired: true,
   uatStatus: 'Passing',
   testPlanRef: 'TP-2210',
@@ -116,7 +117,7 @@ const UAT_PASS = {
   testsFailed: 0,
 };
 
-const UAT_INPROGRESS = {
+const UAT_INPROGRESS: AiTaskRun['uat'] = {
   uatRequired: true,
   uatStatus: 'In Progress',
   testPlanRef: 'TP-2211',
@@ -124,7 +125,7 @@ const UAT_INPROGRESS = {
   testsFailed: 3,
 };
 
-const AUDIT_DEFAULT = {
+const AUDIT_DEFAULT: AiTaskRun['audit'] = {
   auditRequired: true,
   auditStatus: 'Pending',
   createdBy: 'Orchestrator',
@@ -137,7 +138,7 @@ const AUDIT_DEFAULT = {
 
 // --- Step timelines (literal) ----------------------------------------------------
 
-const STEPS_GENERIC = [
+const STEPS_GENERIC: AiTaskRun['steps'] = [
   { stepNumber: 1, name: 'Task Received', agent: 'Orchestrator', status: 'completed', started: '10:30:02', finished: '10:30:03', duration: '1s', inputSummary: 'Inbound task', outputSummary: 'Task accepted', risk: 'low', approvalRequired: false },
   { stepNumber: 2, name: 'Context Loaded', agent: 'Orchestrator', status: 'completed', started: '10:30:03', finished: '10:30:04', duration: '1s', inputSummary: 'Task metadata', outputSummary: 'Context ready', risk: 'low', approvalRequired: false },
   { stepNumber: 3, name: 'Agent Dispatched', agent: 'Orchestrator', status: 'completed', started: '10:30:04', finished: '10:30:05', duration: '1s', inputSummary: 'Routing rules', outputSummary: 'Agent assigned', risk: 'low', approvalRequired: false },
@@ -146,7 +147,7 @@ const STEPS_GENERIC = [
   { stepNumber: 6, name: 'Completed', agent: 'Orchestrator', status: 'completed', started: '10:30:42', finished: '10:30:42', duration: '0s', inputSummary: 'Verified result', outputSummary: 'Run closed', risk: 'low', approvalRequired: false },
 ];
 
-const STEPS_SUPPORT = [
+const STEPS_SUPPORT: AiTaskRun['steps'] = [
   { stepNumber: 1, name: 'Ticket Received', agent: 'Support Agent', status: 'completed', started: '10:40:11', finished: '10:40:12', duration: '1s', inputSummary: 'Inbound support ticket', outputSummary: 'Ticket acknowledged', risk: 'low', approvalRequired: false },
   { stepNumber: 2, name: 'Support Classification', agent: 'Support Agent', status: 'completed', started: '10:40:12', finished: '10:40:18', duration: '6s', inputSummary: 'Ticket content', outputSummary: 'Category: account access', risk: 'low', approvalRequired: false },
   { stepNumber: 3, name: 'Diagnostics', agent: 'Diagnostics Agent', status: 'completed', started: '10:40:18', finished: '10:41:02', duration: '44s', inputSummary: 'Classified ticket', outputSummary: 'Root cause candidate', risk: 'medium', approvalRequired: false },
@@ -159,7 +160,7 @@ const STEPS_SUPPORT = [
   { stepNumber: 10, name: 'Completed', agent: 'Orchestrator', status: 'completed', started: '10:45:11', finished: '10:45:11', duration: '0s', inputSummary: 'Audited run', outputSummary: 'Run closed', risk: 'low', approvalRequired: false },
 ];
 
-const STEPS_MATCHING = [
+const STEPS_MATCHING: AiTaskRun['steps'] = [
   { stepNumber: 1, name: 'Shift Received', agent: 'Guard Matching Agent', status: 'completed', started: '10:35:02', finished: '10:35:03', duration: '1s', inputSummary: 'New shift requirement', outputSummary: 'Shift parsed', risk: 'low', approvalRequired: false },
   { stepNumber: 2, name: 'Eligibility Filter', agent: 'Guard Matching Agent', status: 'completed', started: '10:35:03', finished: '10:35:22', duration: '19s', inputSummary: 'Shift + guard pool', outputSummary: 'Eligible guards', risk: 'low', approvalRequired: false },
   { stepNumber: 3, name: 'Score Candidates', agent: 'Guard Matching Agent', status: 'completed', started: '10:35:22', finished: '10:35:48', duration: '26s', inputSummary: 'Eligible guards', outputSummary: 'Ranked matches', risk: 'medium', approvalRequired: false },
@@ -169,7 +170,7 @@ const STEPS_MATCHING = [
   { stepNumber: 7, name: 'Completed', agent: 'Orchestrator', status: 'completed', started: '10:38:12', finished: '10:38:12', duration: '0s', inputSummary: 'Assignment', outputSummary: 'Run closed', risk: 'low', approvalRequired: false },
 ];
 
-const STEPS_DEPLOY = [
+const STEPS_DEPLOY: AiTaskRun['steps'] = [
   { stepNumber: 1, name: 'Build Generated', agent: 'Code Agent', status: 'completed', started: '09:10:00', finished: '09:12:30', duration: '2m 30s', inputSummary: 'Build request', outputSummary: 'Artifact ready', risk: 'high', approvalRequired: false },
   { stepNumber: 2, name: 'Security Scan', agent: 'Security Agent', status: 'completed', started: '09:12:30', finished: '09:13:48', duration: '1m 18s', inputSummary: 'Build artifact', outputSummary: 'No critical findings', risk: 'high', approvalRequired: false },
   { stepNumber: 3, name: 'Release Validation', agent: 'Testing Agent', status: 'completed', started: '09:13:48', finished: '09:16:58', duration: '3m 10s', inputSummary: 'Build artifact', outputSummary: 'Validated', risk: 'medium', approvalRequired: false },
@@ -180,7 +181,7 @@ const STEPS_DEPLOY = [
   { stepNumber: 8, name: 'Completed', agent: 'Orchestrator', status: 'pending', started: '—', finished: '—', duration: '—', inputSummary: 'Audited run', outputSummary: 'Run closed', risk: 'low', approvalRequired: false },
 ];
 
-const STEPS_MATCHING_WORKING = [
+const STEPS_MATCHING_WORKING: AiTaskRun['steps'] = [
   { stepNumber: 1, name: 'Shift Received', agent: 'Guard Matching Agent', status: 'completed', started: '10:35:02', finished: '10:35:03', duration: '1s', inputSummary: 'New shift requirement', outputSummary: 'Shift parsed', risk: 'low', approvalRequired: false },
   { stepNumber: 2, name: 'Eligibility Filter', agent: 'Guard Matching Agent', status: 'completed', started: '10:35:03', finished: '10:35:22', duration: '19s', inputSummary: 'Shift + guard pool', outputSummary: 'Eligible guards', risk: 'low', approvalRequired: false },
   { stepNumber: 3, name: 'Score Candidates', agent: 'Guard Matching Agent', status: 'working', started: '10:35:22', finished: '—', duration: '—', inputSummary: 'Eligible guards', outputSummary: 'Ranking in progress', risk: 'medium', approvalRequired: false },
@@ -190,7 +191,7 @@ const STEPS_MATCHING_WORKING = [
   { stepNumber: 7, name: 'Completed', agent: 'Orchestrator', status: 'pending', started: '—', finished: '—', duration: '—', inputSummary: 'Assignment', outputSummary: 'Run closed', risk: 'low', approvalRequired: false },
 ];
 
-const STEPS_WORKING_GENERIC = [
+const STEPS_WORKING_GENERIC: AiTaskRun['steps'] = [
   { stepNumber: 1, name: 'Task Received', agent: 'Orchestrator', status: 'completed', started: '10:38:10', finished: '10:38:11', duration: '1s', inputSummary: 'Inbound task', outputSummary: 'Task accepted', risk: 'low', approvalRequired: false },
   { stepNumber: 2, name: 'Context Loaded', agent: 'Orchestrator', status: 'completed', started: '10:38:11', finished: '10:38:12', duration: '1s', inputSummary: 'Task metadata', outputSummary: 'Context ready', risk: 'low', approvalRequired: false },
   { stepNumber: 3, name: 'Execution', agent: 'Specialist Agent', status: 'working', started: '10:38:12', finished: '—', duration: '—', inputSummary: 'Task payload', outputSummary: 'Executing', risk: 'medium', approvalRequired: false },
@@ -198,7 +199,7 @@ const STEPS_WORKING_GENERIC = [
   { stepNumber: 5, name: 'Completed', agent: 'Orchestrator', status: 'pending', started: '—', finished: '—', duration: '—', inputSummary: 'Verified result', outputSummary: 'Run closed', risk: 'low', approvalRequired: false },
 ];
 
-const CHAIN_REPAIR = [
+const CHAIN_REPAIR: AiTaskRun['chain'] = [
   { agent: 'Support Agent', status: 'success', runId: 'RUN-A1001', duration: '41s', outcome: 'Ticket triaged' },
   { agent: 'Diagnostics Agent', status: 'success', runId: 'RUN-A1002', duration: '1m 22s', outcome: 'Root cause found' },
   { agent: 'Data Health Agent', status: 'success', runId: 'RUN-A1003', duration: '48s', outcome: 'Integrity confirmed' },
@@ -210,7 +211,7 @@ const CHAIN_REPAIR = [
 
 // --- Shared base run (spread into every record) ----------------------------------
 
-const BASE = {
+const BASE: Omit<AiTaskRun, 'id' | 'taskName' | 'taskType' | 'siteId' | 'siteName' | 'agentId' | 'agentName' | 'triggerSource' | 'status' | 'risk' | 'requestedTime'> = {
   parentTaskId: null,
   parentRunId: null,
   rootRunId: null,
@@ -261,7 +262,7 @@ const BASE = {
 // RUN RECORDS
 // ============================================================================
 
-export const demoRuns = [
+export const demoRuns: AiTaskRun[] = [
   // ============================================================ SHARED-ID RUNS (referenced by Agent Registry)
   {
     ...BASE,

@@ -10,9 +10,10 @@
 // ============================================================================
 
 import { useEffect, useCallback, useLayoutEffect, useState } from 'react';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { loadWallboardRegistries } from './registrySnapshot';
-import { GroupLiveDataProvider, refreshGroupLiveData, getGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
+import { refreshGroupLiveData, getGroupLiveData } from '@/pages/ai-operations/live/groupLiveDataStore';
+import { GroupLiveDataProvider } from '@/pages/ai-operations/live/GroupLiveDataProvider';
 import { refreshHistory } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import WallboardErrorBoundary from '@/pages/ai-operations/wallboard/components/WallboardErrorBoundary';
 import OperationsWallHeader from '@/pages/ai-operations/wallboard/components/operations/OperationsWallHeader';

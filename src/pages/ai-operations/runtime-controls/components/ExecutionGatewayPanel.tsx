@@ -1,8 +1,8 @@
+import type { AiRuntimeServiceIdentity } from '@/lib/ai-operations/runtimeGateway';
 import { useEffect } from 'react';
 import {
   useRuntimeGateway,
   refreshGateway,
-  type AiRuntimeServiceIdentity,
 } from '@/pages/ai-operations/runtime-controls/runtimeGatewayStore';
 
 const IDENTITY_TYPE_LABELS: Record<string, string> = {

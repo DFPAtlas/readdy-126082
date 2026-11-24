@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { useRuntimeBridge } from '@/pages/ai-operations/runtime-controls/runtimeBridgeStore';
 import {
   createApprovalGatedRun,

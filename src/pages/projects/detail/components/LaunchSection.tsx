@@ -393,7 +393,7 @@ export default function LaunchSection({
             <Row label="Current Approved SHA" value={evaluation.latestSha ? evaluation.latestSha.slice(0, 8) : 'Not tracked'} />
             <div className="flex items-center gap-2 pt-1">
               <span className="text-[10px] font-label text-foreground-400 uppercase tracking-wide">Status</span>
-              <span className={`text-[11px] font-label px-2 py-0.5 rounded-full ${rollbackState === 'READY' ? 'bg-emerald-500/10 text-emerald-400' : rollbackState === 'PARTIAL' ? 'bg-amber-500/10 text-amber-400' : 'bg-foreground-500/10 text-foreground-500'}`}>
+              <span className={`text-[11px] font-label px-2 py-0.5 rounded-full ${rollbackState === 'PARTIAL' ? 'bg-amber-500/10 text-amber-400' : 'bg-foreground-500/10 text-foreground-500'}`}>
                 {rollbackState}
               </span>
             </div>

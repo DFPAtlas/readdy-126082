@@ -20,6 +20,8 @@ export function useAnalyticsJsonb<T>(fnName: string, params: Record<string, unkn
     import.meta.env.VITE_PUBLIC_SUPABASE_URL && import.meta.env.VITE_PUBLIC_SUPABASE_ANON_KEY,
   );
 
+  const paramsKey = JSON.stringify(params);
+
   const load = useCallback(async () => {
     const id = ++requestIdRef.current;
     setLoading(true);
@@ -38,7 +40,7 @@ export function useAnalyticsJsonb<T>(fnName: string, params: Record<string, unkn
     }
 
     try {
-      const { data: result, error: rpcError } = await supabase.rpc(fnName, params);
+      const { data: result, error: rpcError } = await supabase.rpc(fnName, JSON.parse(paramsKey));
       if (id !== requestIdRef.current) return;
       if (rpcError) throw rpcError;
       setData(result as T);
@@ -49,7 +51,7 @@ export function useAnalyticsJsonb<T>(fnName: string, params: Record<string, unkn
     } finally {
       if (id === requestIdRef.current) setLoading(false);
     }
-  }, [fnName, JSON.stringify(params), configured, enabled]);
+  }, [fnName, paramsKey, configured, enabled]);
 
   useEffect(() => {
     load();

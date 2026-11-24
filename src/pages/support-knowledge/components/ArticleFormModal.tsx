@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/base/Modal';
-import type { KnowledgeArticle, KnowledgeVisibility, SupportSite } from '@/types/support-tickets';
+import type { KnowledgeArticle, KnowledgeVisibility } from '@/types/support-tickets';
 import { categoryLabels, CATEGORY_OPTIONS } from '@/pages/support-tickets/constants';
 import { friendlyRpcError } from '../hooks';
 
@@ -9,7 +9,7 @@ interface ArticleFormModalProps {
   open: boolean;
   onClose: () => void;
   article: KnowledgeArticle | null;
-  sites: SupportSite[];
+  sites: { id: string; site_name: string }[];
   onSaved: () => void;
 }
 

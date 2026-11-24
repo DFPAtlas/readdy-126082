@@ -278,7 +278,7 @@ export function getSupport(): SupportResult {
     expiredSessions,
     revokedSessions,
     sessionsAvailable: a.sessions,
-    repairs: a.repairs ? repairs : null,
+    repairs: a.repairs && repairs ? { awaitingApproval: repairs.awaiting_approval, executing: repairs.executing, failed: repairs.failed, completedToday: repairs.completed_today } : null,
     repairsAvailable: a.repairs,
   };
 }

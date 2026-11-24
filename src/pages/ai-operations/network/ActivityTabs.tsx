@@ -66,36 +66,21 @@ export default function ActivityTabs() {
     (!siteFilter || siteKey === siteFilter) &&
     (!q || (agentName ?? '').toLowerCase().includes(q));
 
-  const activity = useMemo(
-    () => getLiveActivityEvents().filter((e) => matches(e.siteKey, e.agentName)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [siteFilter, agentSearch, data],
-  );
-
-  const attention = useMemo(
-    () => getAttentionItems().filter((i) => matches(i.siteKey, i.agentName)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [siteFilter, agentSearch, data],
-  );
-
-  const history = useMemo(
-    () =>
-      getRunHistory().filter(
-        (r) => matches(r.siteKey, r.agentName) && (!runStatus || r.status === runStatus),
-      ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [siteFilter, agentSearch, runStatus, data],
+  const activity = getLiveActivityEvents().filter((e) => matches(e.siteKey, e.agentName));
+  const attention = getAttentionItems().filter((i) => matches(i.siteKey, i.agentName));
+  const history = getRunHistory().filter(
+    (r) => matches(r.siteKey, r.agentName) && (!runStatus || r.status === runStatus),
   );
 
   const pageCount = Math.max(1, Math.ceil(history.length / RUN_PAGE_SIZE));
   const safePage = Math.min(runPage, pageCount - 1);
   const pageRows: RunHistoryItem[] = history.slice(safePage * RUN_PAGE_SIZE, safePage * RUN_PAGE_SIZE + RUN_PAGE_SIZE);
 
-  const statusOptions = useMemo(() => {
+  const statusOptions = (() => {
     const set = new Set<string>();
     for (const r of getRunHistory()) set.add(r.status);
     return Array.from(set).sort();
-  }, [data]);
+  })();
 
   const tabBtn = (t: Tab, label: string, count: number) => (
     <button

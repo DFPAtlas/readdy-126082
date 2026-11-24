@@ -1,3 +1,4 @@
+import type { KnowledgeSource } from '@/pages/ai-operations/types';
 // ============================================================================
 // AI OPERATIONS — KNOWLEDGE & MEMORY REGISTRY — DEMO / PLACEHOLDER DATA (A).
 //
@@ -14,7 +15,7 @@
 
 // --- Shared demo blocks ---------------------------------------------------------
 
-const PERMISSIONS_STANDARD = [
+const PERMISSIONS_STANDARD: KnowledgeSource['permissions'] = [
   { permission: 'Read', state: 'allowed', note: 'Read permitted for assigned agents.' },
   { permission: 'Retrieve', state: 'allowed', note: 'Retrieval within permitted scope.' },
   { permission: 'Summarise', state: 'allowed', note: 'Summarisation allowed where enabled.' },
@@ -25,7 +26,7 @@ const PERMISSIONS_STANDARD = [
   { permission: 'Delete', state: 'denied', note: 'Destructive — denied by default.' },
 ];
 
-const PERMISSIONS_RESTRICTED = [
+const PERMISSIONS_RESTRICTED: KnowledgeSource['permissions'] = [
   { permission: 'Read', state: 'allowed', note: 'Read restricted to authorised agents.' },
   { permission: 'Retrieve', state: 'approval_required', note: 'Retrieval requires approval.' },
   { permission: 'Summarise', state: 'restricted', note: 'Summarisation restricted.' },
@@ -36,7 +37,7 @@ const PERMISSIONS_RESTRICTED = [
   { permission: 'Delete', state: 'denied', note: 'Destructive — denied.' },
 ];
 
-const QUALITY_OK = [
+const QUALITY_OK: KnowledgeSource['quality'] = [
   { name: 'Trusted source', state: 'pass', note: 'Marked as trusted.' },
   { name: 'Current version', state: 'pass', note: 'Version is current.' },
   { name: 'Review current', state: 'pass', note: 'Review within window.' },
@@ -47,7 +48,7 @@ const QUALITY_OK = [
   { name: 'Conflicting source detected', state: 'unknown', note: 'No conflict scan run.' },
 ];
 
-const QUALITY_STALE = [
+const QUALITY_STALE: KnowledgeSource['quality'] = [
   { name: 'Trusted source', state: 'pass', note: 'Marked as trusted.' },
   { name: 'Current version', state: 'warning', note: 'Older version in use.' },
   { name: 'Review current', state: 'fail', note: 'Review overdue.' },
@@ -58,7 +59,7 @@ const QUALITY_STALE = [
   { name: 'Conflicting source detected', state: 'unknown', note: 'No conflict scan run.' },
 ];
 
-const INDEX_READY = {
+const INDEX_READY: KnowledgeSource['index'] = {
   vectorReady: true,
   indexed: true,
   indexProvider: 'Knowledge Index',
@@ -68,7 +69,7 @@ const INDEX_READY = {
   chunkCount: 48,
 };
 
-const INDEX_PENDING = {
+const INDEX_PENDING: KnowledgeSource['index'] = {
   vectorReady: false,
   indexed: false,
   indexProvider: '—',
@@ -78,7 +79,7 @@ const INDEX_PENDING = {
   chunkCount: 0,
 };
 
-const GOV_BASE = {
+const GOV_BASE: Pick<KnowledgeSource['governance'], 'trustedSource' | 'reviewRequired' | 'reviewFrequency' | 'versionControl' | 'auditRequired'> = {
   trustedSource: true,
   reviewRequired: true,
   reviewFrequency: 'Quarterly',
@@ -86,66 +87,66 @@ const GOV_BASE = {
   auditRequired: true,
 };
 
-const REVIEW_HISTORY = [
+const REVIEW_HISTORY: KnowledgeSource['reviewHistory'] = [
   { date: '2026-08-20', actor: 'DFP Core Team', action: 'Reviewed', version: 'v3', summary: 'Periodic review completed.', statusChange: 'Active → Active' },
   { date: '2026-05-15', actor: 'DFP Core Team', action: 'Updated', version: 'v2', summary: 'Content refreshed.', statusChange: 'Draft → Active' },
   { date: '2026-02-01', actor: 'DFP Core Team', action: 'Created', version: 'v1', summary: 'Initial publication.', statusChange: 'Draft → Active' },
 ];
 
-const AI_RULES_GROUP = [
+const AI_RULES_GROUP: KnowledgeSource['aiUsageRules'] = [
   'May be used for customer-facing answers',
   'Human verification required for high-risk answers',
   'Citations / reference required',
   'Must not override policy',
 ];
 
-const AI_RULES_INTERNAL = [
+const AI_RULES_INTERNAL: KnowledgeSource['aiUsageRules'] = [
   'Internal only',
   'Human verification required',
   'Citations / reference required',
   'Must not override policy',
 ];
 
-const AI_RULES_RESTRICTED = [
+const AI_RULES_RESTRICTED: KnowledgeSource['aiUsageRules'] = [
   'Internal only',
   'May not be used for automated decisions',
   'Human verification required',
   'Must not be used outside assigned site',
 ];
 
-const ACCESS_GROUP = [
+const ACCESS_GROUP: KnowledgeSource['agentAccess'] = [
   { agentId: 'core-orchestrator', agentName: 'DFP Group Master Orchestrator', site: 'Group-wide', accessState: 'allowed', purpose: 'Routing and governance reference', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'core-support', agentName: 'Support Agent', site: 'Group-wide', accessState: 'allowed', purpose: 'Support answers', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'core-knowledge', agentName: 'Knowledge Agent', site: 'Group-wide', accessState: 'allowed', purpose: 'Curation and indexing', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: true, approvalRequired: true },
   { agentId: 'core-diagnostics', agentName: 'Diagnostics Agent', site: 'Group-wide', accessState: 'allowed', purpose: 'Diagnostics reference', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
 ];
 
-const ACCESS_DFP = [
+const ACCESS_DFP: KnowledgeSource['agentAccess'] = [
   { agentId: 'dfp-diag', agentName: 'Digital Footprint Diagnostics Agent', site: 'Digital Footprint', accessState: 'allowed', purpose: 'Diagnostics guidance', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'dfp-onboard', agentName: 'Client Onboarding Agent', site: 'Digital Footprint', accessState: 'allowed', purpose: 'Onboarding reference', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'core-support', agentName: 'Support Agent', site: 'Group-wide', accessState: 'allowed', purpose: 'Support reference', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
 ];
 
-const ACCESS_QG = [
+const ACCESS_QG: KnowledgeSource['agentAccess'] = [
   { agentId: 'qg-match', agentName: 'Guard Matching Agent', site: 'QuickGuard', accessState: 'allowed', purpose: 'Matching rules', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'qg-shift', agentName: 'Shift Management Agent', site: 'QuickGuard', accessState: 'allowed', purpose: 'Shift procedure', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'qg-comp', agentName: 'Guard Compliance Agent', site: 'QuickGuard', accessState: 'allowed', purpose: 'Compliance checks', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'qg-employer-support', agentName: 'Employer Support Agent', site: 'QuickGuard', accessState: 'allowed', purpose: 'Employer FAQ', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
 ];
 
-const USAGE_GROUP = [
+const USAGE_GROUP: KnowledgeSource['usageEvents'] = [
   { time: 'Today · 10:44', agentId: 'core-support', agentName: 'Support Agent', site: 'Group-wide', runId: 'RUN-5E11B', purpose: 'Answer support query', result: 'success', reference: 'v3 §2' },
   { time: 'Today · 09:31', agentId: 'core-knowledge', agentName: 'Knowledge Agent', site: 'Group-wide', runId: 'RUN-0B88A', purpose: 'Retrieve for indexing', result: 'success', reference: 'v3 §1' },
   { time: 'Yesterday · 18:02', agentId: 'core-orchestrator', agentName: 'DFP Group Master Orchestrator', site: 'Group-wide', runId: 'RUN-8F21A', purpose: 'Routing reference', result: 'success', reference: 'v3 §4' },
 ];
 
-const USAGE_DFP = [
+const USAGE_DFP: KnowledgeSource['usageEvents'] = [
   { time: 'Today · 10:20', agentId: 'dfp-diag', agentName: 'Digital Footprint Diagnostics Agent', site: 'Digital Footprint', runId: 'RUN-3F88C', purpose: 'Diagnostics guidance', result: 'success', reference: 'v2 §3' },
   { time: 'Today · 09:05', agentId: 'dfp-onboard', agentName: 'Client Onboarding Agent', site: 'Digital Footprint', runId: 'RUN-2E77B', purpose: 'Onboarding checklist', result: 'success', reference: 'v2 §1' },
   { time: 'Yesterday · 16:20', agentId: 'core-support', agentName: 'Support Agent', site: 'Group-wide', runId: 'RUN-5E11B', purpose: 'Support reference', result: 'success', reference: 'v2 §5' },
 ];
 
-const USAGE_QG = [
+const USAGE_QG: KnowledgeSource['usageEvents'] = [
   { time: 'Today · 10:40', agentId: 'qg-match', agentName: 'Guard Matching Agent', site: 'QuickGuard', runId: 'RUN-8F21A', purpose: 'Matching rule check', result: 'success', reference: 'v3 §2' },
   { time: 'Today · 09:15', agentId: 'qg-shift', agentName: 'Shift Management Agent', site: 'QuickGuard', runId: 'RUN-1D55F', purpose: 'Shift procedure', result: 'success', reference: 'v3 §1' },
   { time: 'Yesterday · 14:05', agentId: 'qg-comp', agentName: 'Guard Compliance Agent', site: 'QuickGuard', runId: 'RUN-2E66A', purpose: 'Compliance verification', result: 'success', reference: 'v3 §4' },
@@ -155,7 +156,7 @@ const USAGE_QG = [
 // KNOWLEDGE SOURCE RECORDS — GROUP + DIGITAL FOOTPRINT + QUICKGUARD
 // ============================================================================
 
-export const demoKnowledgeSourcesA = [
+export const demoKnowledgeSourcesA: KnowledgeSource[] = [
   // ============================================================ GROUP-WIDE
   {
     id: 'KNOW-GOV',

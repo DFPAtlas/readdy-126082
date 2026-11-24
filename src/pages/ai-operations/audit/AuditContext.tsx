@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AuditContext } from './AuditContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   AiAuditEvent,
   AuditEvidence,
@@ -39,7 +40,7 @@ import type { DataSourceMode } from '@/pages/ai-operations/sites/components/Data
 //             auto-switches to demo).
 export type AuditDataSourceMode = DataSourceMode;
 
-interface AuditContextValue {
+export interface AuditContextValue {
   events: AiAuditEvent[];
   evidence: AuditEvidence[];
   mode: AuditDataSourceMode;
@@ -53,8 +54,6 @@ interface AuditContextValue {
   complianceChecks: ComplianceReadinessCheck[];
   humanOverrides: HumanOverrideAudit[];
 }
-
-const AuditContext = createContext<AuditContextValue | null>(null);
 
 // Demo lookup keyed by stable id (= audit_key) so live rows can merge their
 // supporting metadata (nested verification/uat/governance + secondary refs).
@@ -227,10 +226,4 @@ export function AuditProvider({ children }: { children: ReactNode }) {
   );
 
   return <AuditContext.Provider value={value}>{children}</AuditContext.Provider>;
-}
-
-export function useAudit(): AuditContextValue {
-  const ctx = useContext(AuditContext);
-  if (!ctx) throw new Error('useAudit must be used within an AuditProvider');
-  return ctx;
 }

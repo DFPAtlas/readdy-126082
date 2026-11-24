@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { ReportRangeKey } from '@/types/support-tickets';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import {
   useSupportSummary,
   useSupportVolume,

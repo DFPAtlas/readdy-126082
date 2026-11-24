@@ -1,4 +1,4 @@
-import { useSearch } from '@/pages/ai-operations/search/SearchContext';
+import { useSearch } from '@/pages/ai-operations/search/SearchContext.context';
 
 // Compact header affordance to open the global command palette.
 export default function SearchTrigger() {

@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ToolsContext } from './ToolsContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ToolConnection, ToolAccessMode, RiskLevel } from '@/pages/ai-operations/types';
 import { demoConnections } from '@/mocks/ai-operations-tools';
 import { demoSites } from '@/mocks/ai-operations-sites';
@@ -49,7 +50,7 @@ export interface AgentAccessInput {
   approvalRequired: boolean;
 }
 
-interface ToolsContextValue {
+export interface ToolsContextValue {
   connections: ToolConnection[];
   mode: ToolsDataSourceMode;
   loading: boolean;
@@ -67,8 +68,6 @@ interface ToolsContextValue {
   /** Revoke access by setting is_active=false (never a physical delete). */
   revokeAccess: (connectionKey: string, agentKey: string, reason: string, actor: string) => Promise<SaveResult>;
 }
-
-const ToolsContext = createContext<ToolsContextValue | null>(null);
 
 // Demo lookup keyed by stable id (= connection_key) so live rows can merge
 // their "Demo Supporting Metadata" (access mode, rich operation groups,
@@ -444,10 +443,4 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
   );
 
   return <ToolsContext.Provider value={value}>{children}</ToolsContext.Provider>;
-}
-
-export function useTools() {
-  const ctx = useContext(ToolsContext);
-  if (!ctx) throw new Error('useTools must be used within a ToolsProvider');
-  return ctx;
 }

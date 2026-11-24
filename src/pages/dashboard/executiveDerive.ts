@@ -310,7 +310,7 @@ export function buildDeploymentsExec(
     verifying: mapped.filter((r) => r.statusKey === 'VERIFYING').length,
     failed: mapped.filter((r) => r.statusKey === 'FAILED').length,
     rollbackRequired: mapped.filter((r) => ROLLBACK_DEPLOY.has(r.statusKey)).length,
-    recentlyCompleted: mapped.filter((r) => r.production_accepted || r.statusKey === 'ROLLED_BACK').length,
+    recentlyCompleted: rows.filter((r) => r.production_accepted || r.status === 'ROLLED_BACK').length,
     rows: mapped,
   };
 }

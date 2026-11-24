@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { SiteRegistryRecord } from '@/pages/ai-operations/types';
-import { useSites } from '@/pages/ai-operations/sites/SitesContext';
+import { useSites } from '@/pages/ai-operations/sites/SitesContext.context';
 import SiteHeader from '@/pages/ai-operations/sites/detail/components/SiteHeader';
 import OverviewSection from '@/pages/ai-operations/sites/detail/components/OverviewSection';
 import ConnectionsSection from '@/pages/ai-operations/sites/detail/components/ConnectionsSection';

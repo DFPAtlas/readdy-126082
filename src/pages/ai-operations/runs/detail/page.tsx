@@ -1,6 +1,6 @@
 import { useParams, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { useRuns } from '@/pages/ai-operations/runs/RunsContext';
+import { useRuns } from '@/pages/ai-operations/runs/RunsContext.context';
 import { getAlertByRun } from '@/pages/ai-operations/alerts/selectors';
 import { DIAGNOSTIC_RUN_TASK_KEY_PREFIX, DIAGNOSTIC_RUN_KEY_PREFIX } from '@/lib/ai-operations/runtimeDiagnosticRun';
 import {

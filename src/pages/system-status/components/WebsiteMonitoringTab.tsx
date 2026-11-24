@@ -16,7 +16,7 @@ export default function WebsiteMonitoringTab({ websites, projects, onRefresh }: 
   const [checkingIds, setCheckingIds] = useState<Set<number>>(new Set());
   const [runAllLoading, setRunAllLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });

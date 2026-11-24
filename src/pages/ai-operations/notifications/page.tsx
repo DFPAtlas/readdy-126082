@@ -9,7 +9,7 @@ import {
   NOTIFICATION_CHANNEL_LABELS,
   SEVERITY,
 } from '@/pages/ai-operations/constants';
-import { useNotifications } from '@/pages/ai-operations/notifications/NotificationsContext';
+import { useNotifications } from '@/pages/ai-operations/notifications/NotificationsContext.context';
 import { demoSites } from '@/mocks/ai-operations-sites';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import NotificationKpis from '@/pages/ai-operations/notifications/components/NotificationKpis';

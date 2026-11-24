@@ -1,3 +1,4 @@
+import { SYSTEM_LABELS } from './systemLabels';
 import { useMemo, useState } from 'react';
 import { useRuntimeHealth } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
 import { HEALTH_STATUS_META } from '@/lib/ai-operations/runtimeHealth';
@@ -9,21 +10,6 @@ import {
 } from '@/lib/ai-operations/runtimeHealthSource';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 import SystemHealthDetail from '@/pages/ai-operations/runtime-health/components/SystemHealthDetail';
-
-export const SYSTEM_LABELS: Record<string, string> = {
-  supabase: 'Supabase',
-  n8n: 'n8n',
-  ollama: 'Ollama',
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  resend: 'Email (Resend)',
-  stripe: 'Stripe',
-  github: 'GitHub',
-  readdy: 'Readdy',
-  monitoring: 'Monitoring',
-  notifications: 'Notifications',
-  site_api: 'Site API',
-};
 
 const TIME_RANGES = [
   { key: 'all', label: 'All time' },

@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { SchedulesContext } from './SchedulesContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   AiSchedule,
   EventAutomationRule,
@@ -59,7 +60,7 @@ export interface ScheduleFormInput {
   notes?: string | null;
 }
 
-interface SchedulesContextValue {
+export interface SchedulesContextValue {
   schedules: AiSchedule[];
   eventRules: EventAutomationRule[];
   maintenanceWindows: MaintenanceWindow[];
@@ -93,8 +94,6 @@ export interface EventRuleFormInput {
   audit_required?: boolean;
   owner_team?: string | null;
 }
-
-const SchedulesContext = createContext<SchedulesContextValue | null>(null);
 
 const demoScheduleByKey = new Map<string, AiSchedule>(
   [...demoSchedulesPart1, ...demoSchedulesPart2].map((s) => [s.id, s]),
@@ -407,10 +406,4 @@ export function SchedulesProvider({ children }: { children: ReactNode }) {
   );
 
   return <SchedulesContext.Provider value={value}>{children}</SchedulesContext.Provider>;
-}
-
-export function useSchedules(): SchedulesContextValue {
-  const ctx = useContext(SchedulesContext);
-  if (!ctx) throw new Error('useSchedules must be used within a SchedulesProvider');
-  return ctx;
 }

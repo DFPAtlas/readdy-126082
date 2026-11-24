@@ -1,12 +1,7 @@
 import type { SupportCategoryStat, SupportRecurringIssue } from '@/types/support-tickets';
 import { useAnalyticsJsonb } from '../analytics-hooks';
-import {
-  SectionCard,
-  EmptyState,
-  ErrorState,
-  TrendBadge,
-  formatDuration,
-} from './AnalyticsShared';
+import { SectionCard, EmptyState, ErrorState, TrendBadge } from './AnalyticsShared';
+import { formatDuration } from './analyticsFormat';
 
 interface Props {
   start: string;

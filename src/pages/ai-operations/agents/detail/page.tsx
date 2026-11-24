@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useAgents } from '@/pages/ai-operations/agents/AgentsContext';
+import { useAgents } from '@/pages/ai-operations/agents/AgentsContext.context';
 import { useAgentIntegrations } from '@/pages/ai-operations/agents/detail/agentIntegrations';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import AgentHeader from '@/pages/ai-operations/agents/detail/components/AgentHeader';

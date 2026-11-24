@@ -16,7 +16,7 @@
 // the resolution maps needed to resolve display names.
 // ============================================================================
 
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useSyncExternalStore } from 'react';
 import type {
   AiSiteRow,
   AiAgentRow,
@@ -434,16 +434,3 @@ export async function refreshGroupLiveData(): Promise<void> {
 
 // Mounts the shared live-data store. Loads once on mount; pages trigger manual
 // refresh via `refreshGroupLiveData()` (e.g. auto-refresh cycles).
-export function GroupLiveDataProvider({ children }: { children: ReactNode }) {
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    void refreshGroupLiveData();
-    // Re-render this provider when the snapshot changes so children can react to
-    // loading/error state transitions (the store subscription handles data).
-    const unsubscribe = subscribe(() => setTick((t) => t + 1));
-    return unsubscribe;
-  }, []);
-
-  return <>{children}</>;
-}

@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AlertsContext } from './AlertsContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AiAlert, AlertStatus } from '@/pages/ai-operations/types';
 import { demoAlerts } from '@/mocks/ai-operations-alerts';
 import { demoAlerts2 } from '@/mocks/ai-operations-alerts-2';
@@ -31,7 +32,7 @@ export type AlertsDataSourceMode = DataSourceMode;
 
 type SaveResult = { error: string | null };
 
-interface AlertsContextValue {
+export interface AlertsContextValue {
   alerts: AiAlert[];
   incidents: AiIncident[];
   mode: AlertsDataSourceMode;
@@ -46,8 +47,6 @@ interface AlertsContextValue {
   /** Create an incident from a live alert (incident + link + timeline + audit). */
   createIncidentFromAlert: (alertKey: string) => Promise<SaveResult>;
 }
-
-const AlertsContext = createContext<AlertsContextValue | null>(null);
 
 // Demo lookup keyed by stable id (= alert_key) so live rows can merge their
 // nested "Demo Supporting Metadata" (timeline, diagnostics, known-issue,
@@ -406,10 +405,4 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
   );
 
   return <AlertsContext.Provider value={value}>{children}</AlertsContext.Provider>;
-}
-
-export function useAlerts(): AlertsContextValue {
-  const ctx = useContext(AlertsContext);
-  if (!ctx) throw new Error('useAlerts must be used within an AlertsProvider');
-  return ctx;
 }

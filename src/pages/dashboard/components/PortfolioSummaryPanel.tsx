@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
-import type { PortfolioSummary, LaunchPipelineExec } from '../executiveTypes';
+import type { PortfolioSummary } from '../executiveTypes';
+import type { LaunchPipelineExec } from '../executiveDerive';
 import { SectionHeading, Unavailable } from './shared';
 
 const LIFE_CARDS: { key: string; label: string; icon: string; value: (s: PortfolioSummary) => number }[] = [

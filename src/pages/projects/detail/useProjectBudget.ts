@@ -57,26 +57,27 @@ export function useProjectBudget(
     setError('');
     setSourceErrors(EMPTY_ERRORS);
 
-    const query = async (table: string) => {
+    const query = async <T,>(table: string) => {
       const { data, error: e } = await supabase
         .from(table)
         .select('*')
         .eq('project_id', projectId)
-        .order('created_at', { ascending: false });
-      return { data: (data ?? []) as Record<string, unknown>[], err: e ? e.message : '' };
+        .order('created_at', { ascending: false })
+        .returns<T[]>();
+      return { data: data ?? [], err: e ? e.message : '' };
     };
 
     const [b, c, r, ev] = await Promise.all([
-      query('internal_project_budgets'),
-      query('internal_project_cost_items'),
-      query('internal_project_recurring_costs'),
-      query('internal_project_budget_events'),
+      query<ProjectBudget>('internal_project_budgets'),
+      query<CostItem>('internal_project_cost_items'),
+      query<RecurringCost>('internal_project_recurring_costs'),
+      query<BudgetEvent>('internal_project_budget_events'),
     ]);
 
-    setBudgets(b.data as ProjectBudget[]);
-    setCostItems(c.data as CostItem[]);
-    setRecurringCosts(r.data as RecurringCost[]);
-    setEvents(ev.data as BudgetEvent[]);
+    setBudgets(b.data);
+    setCostItems(c.data);
+    setRecurringCosts(r.data);
+    setEvents(ev.data);
 
     const errs: SourceErrors = { budgets: b.err, costs: c.err, recurring: r.err, events: ev.err };
     setSourceErrors(errs);

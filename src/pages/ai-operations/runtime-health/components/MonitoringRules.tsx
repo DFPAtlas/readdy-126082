@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useRuntimeHealth, saveMonitoringRule, toggleMonitoringRule } from '@/pages/ai-operations/runtime-health/runtimeHealthStore';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import type { AiRuntimeMonitoringRuleRow } from '@/lib/ai-operations/runtimeMonitoring';
-import { SYSTEM_LABELS } from '@/pages/ai-operations/runtime-health/components/HealthHistory';
+import { SYSTEM_LABELS } from '@/pages/ai-operations/runtime-health/components/systemLabels';
 
 function formatTime(iso: string | null): string {
   if (!iso) return '—';

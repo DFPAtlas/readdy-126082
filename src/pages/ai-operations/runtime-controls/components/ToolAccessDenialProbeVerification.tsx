@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import {
   runToolAccessDenialProbe,
   getToolAccessDenialProbeStatus,

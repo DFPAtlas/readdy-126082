@@ -1,5 +1,5 @@
 import type { AiAuditEvent } from '@/pages/ai-operations/types';
-import { useAudit } from '@/pages/ai-operations/audit/AuditContext';
+import { useAudit } from '@/pages/ai-operations/audit/AuditContext.context';
 import { EVIDENCE_TYPE_LABELS, EVIDENCE_STATUS } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 

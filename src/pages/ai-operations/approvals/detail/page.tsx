@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { AiApproval, ApprovalDecisionType } from '@/pages/ai-operations/types';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { ROLE_LABELS } from '@/lib/permissions';
-import { useApprovals } from '@/pages/ai-operations/approvals/ApprovalsContext';
+import { useApprovals } from '@/pages/ai-operations/approvals/ApprovalsContext.context';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import ApprovalHeader from '@/pages/ai-operations/approvals/detail/components/ApprovalHeader';
 import RequestedAction from '@/pages/ai-operations/approvals/detail/components/RequestedAction';

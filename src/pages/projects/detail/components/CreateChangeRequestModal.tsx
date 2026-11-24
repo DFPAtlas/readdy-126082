@@ -11,7 +11,7 @@ export interface CreateChangeRequestDefaults {
   type?: string | null;
   sourceBugId?: number | null;
   supportTicketId?: string | null;
-  maintenanceId?: number | null;
+  maintenanceId?: string | null;
 }
 
 interface CreateChangeRequestModalProps {

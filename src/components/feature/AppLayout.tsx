@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate, useSearchParams, useLocation, useNavigationType, Outlet } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { useUnreadTicketCount } from '@/pages/support-tickets/hooks';
 import { hasPermission, ROLE_BADGE_COLORS, ROLE_LABELS, type Role } from '@/lib/permissions';
 import { SearchProvider } from '@/pages/ai-operations/search/SearchContext';
-import { GroupLiveDataProvider } from '@/pages/ai-operations/live/groupLiveDataStore';
+import { GroupLiveDataProvider } from '@/pages/ai-operations/live/GroupLiveDataProvider';
 import CommandPalette from '@/pages/ai-operations/search/components/CommandPalette';
 import SearchTrigger from '@/pages/ai-operations/search/components/SearchTrigger';
 
@@ -82,6 +82,16 @@ const navigationGroups: NavigationGroup[] = [
   ] },
 ];
 
+function navItemActive(item: GroupItem, pathname: string, tab: string, items: GroupItem[]): boolean {
+  if (item.tab) return pathname === '/admin/website-uat' && tab === item.tab;
+  if (pathname === item.to) return true;
+  if (!pathname.startsWith(item.to + '/')) return false;
+  // Prefer the most specific route over its parent (e.g. reports over tickets).
+  return !items.some((other) => other !== item && !other.tab &&
+    other.to.length > item.to.length &&
+    (pathname === other.to || pathname.startsWith(other.to + '/')));
+}
+
 export default function AppLayout() {
   const auth = useAuth();
   const navigate = useNavigate();
@@ -115,8 +125,10 @@ export default function AppLayout() {
   // Save the current scroll position before leaving a page, keyed by its location.
   useEffect(() => {
     const key = location.key;
+    const positions = scrollPositions.current;
+    const main = mainRef.current;
     return () => {
-      scrollPositions.current.set(key, mainRef.current?.scrollTop ?? 0);
+      positions.set(key, main?.scrollTop ?? 0);
     };
   }, [location.key]);
 
@@ -177,9 +189,7 @@ export default function AppLayout() {
             if (visibleItems.length === 0) return null;
             const expanded = openGroups[group.id] ?? false;
             const active = visibleItems.some((item) =>
-              item.tab
-                ? location.pathname === '/admin/website-uat' && activeTab === item.tab
-                : location.pathname === item.to || (item.to !== '/dashboard' && location.pathname.startsWith(item.to + '/'))
+              navItemActive(item, location.pathname, activeTab, visibleItems)
             );
             return (
               <div key={group.id}>
@@ -188,8 +198,12 @@ export default function AppLayout() {
                   aria-controls={`nav-group-${group.id}`}
                   title={sidebarCollapsed ? group.label : undefined}
                   onClick={() => {
-                    if (sidebarCollapsed) setSidebarCollapsed(false);
-                    setOpenGroups((prev) => ({ ...prev, [group.id]: !expanded }));
+                    if (sidebarCollapsed) {
+                      setSidebarCollapsed(false);
+                      setOpenGroups((prev) => ({ ...prev, [group.id]: true }));
+                    } else {
+                      setOpenGroups((prev) => ({ ...prev, [group.id]: !expanded }));
+                    }
                   }}
                   className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-left transition-colors ${active ? 'text-accent-400' : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}
                 >
@@ -205,9 +219,7 @@ export default function AppLayout() {
                         onClick={() => setSidebarOpen(false)}
                         title={item.label}
                         className={() => {
-                          const selected = item.tab
-                            ? location.pathname === '/admin/website-uat' && activeTab === item.tab
-                            : location.pathname === item.to || (item.to !== '/dashboard' && location.pathname.startsWith(item.to + '/'));
+                          const selected = navItemActive(item, location.pathname, activeTab, visibleItems);
                           return `flex items-center gap-3 rounded-lg text-sm pl-7 pr-3 py-2 transition-colors ${selected ? 'bg-accent-500/10 text-accent-400 font-medium' : 'text-foreground-400 hover:text-foreground-200 hover:bg-background-200/50'}`;
                         }}
                       >

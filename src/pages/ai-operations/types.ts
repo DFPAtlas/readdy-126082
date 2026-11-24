@@ -763,7 +763,7 @@ export interface OperationsAlert {
   detectedAt: string;
   state: string;
   recommendedAction: string;
-  referenceType: 'agent' | 'run' | 'approval' | 'site' | null;
+  referenceType: 'agent' | 'run' | 'approval' | 'site' | 'alert' | null;
   referenceId: string | null;
 }
 

@@ -1,3 +1,4 @@
+import type { AiModel, AiProvider } from '@/pages/ai-operations/types';
 // ============================================================================
 // AI OPERATIONS — MODELS & AI PROVIDERS REGISTRY — DEMO / PLACEHOLDER DATA.
 //
@@ -16,7 +17,7 @@
 
 // --- Shared demo blocks ---------------------------------------------------------
 
-const CLOUD_SECURITY = {
+const CLOUD_SECURITY: AiModel['security'] = {
   localProcessingAvailable: false,
   externalProviderInvolved: true,
   credentialsHidden: true,
@@ -26,7 +27,7 @@ const CLOUD_SECURITY = {
   loggingPolicyRef: 'security/logging-cloud-models',
 };
 
-const LOCAL_SECURITY = {
+const LOCAL_SECURITY: AiModel['security'] = {
   localProcessingAvailable: true,
   externalProviderInvolved: false,
   credentialsHidden: true,
@@ -36,7 +37,7 @@ const LOCAL_SECURITY = {
   loggingPolicyRef: 'security/logging-local-models',
 };
 
-const CLOUD_CAPS = {
+const CLOUD_CAPS: AiModel['capabilities'] = {
   text: 'supported',
   reasoning: 'supported',
   coding: 'supported',
@@ -47,14 +48,14 @@ const CLOUD_CAPS = {
   longContext: 'supported',
 };
 
-const USAGE_EVENTS_OK = [
+const USAGE_EVENTS_OK: AiModel['usageEvents'] = [
   { time: 'Today · 10:44', agentId: 'core-diagnostics', agentName: 'Diagnostics Agent', site: 'GuardianHub', runId: 'RUN-A1003', task: 'Investigate support incident', result: 'success', duration: '1m 37s', estimatedCost: '£0.06' },
   { time: 'Today · 09:58', agentId: 'core-support', agentName: 'Support Agent', site: 'Group-wide', runId: 'RUN-5E11B', task: 'Assist support enquiry', result: 'success', duration: '41s', estimatedCost: '£0.02' },
   { time: 'Today · 09:20', agentId: 'core-site-registry', agentName: 'Site Registry Agent', site: 'Group-wide', runId: 'RUN-2C91D', task: 'Sync site metadata', result: 'success', duration: '22s', estimatedCost: '£0.01' },
   { time: 'Yesterday · 18:02', agentId: 'core-reporting', agentName: 'Reporting Agent', site: 'Group-wide', runId: 'RUN-3F66C', task: 'Compile daily report', result: 'success', duration: '44s', estimatedCost: '£0.02' },
 ];
 
-const USAGE_EVENTS_CODING = [
+const USAGE_EVENTS_CODING: AiModel['usageEvents'] = [
   { time: 'Today · 10:31', agentId: 'tf-code', agentName: 'Code Agent', site: 'The Forge', runId: 'RUN-4F77B', task: 'Generate code for build', result: 'failed', duration: '2m 30s', estimatedCost: '£0.15' },
   { time: 'Today · 09:40', agentId: 'tf-page', agentName: 'Page Designer Agent', site: 'The Forge', runId: 'RUN-6B99D', task: 'Design page layout', result: 'success', duration: '1m 40s', estimatedCost: '£0.09' },
   { time: 'Today · 09:22', agentId: 'tf-component', agentName: 'Component Agent', site: 'The Forge', runId: 'RUN-7C11E', task: 'Generate component', result: 'success', duration: '1m 05s', estimatedCost: '£0.05' },
@@ -65,7 +66,7 @@ const USAGE_EVENTS_CODING = [
 // PROVIDER RECORDS
 // ============================================================================
 
-export const demoProviders = [
+export const demoProviders: AiProvider[] = [
   {
     id: 'PROV-OLLAMA',
     name: 'Local Ollama',
@@ -128,7 +129,7 @@ export const demoProviders = [
 // MODEL RECORDS
 // ============================================================================
 
-export const demoModels = [
+export const demoModels: AiModel[] = [
   // ============================================================ Claude Sonnet
   {
     id: 'MOD-CLAUDE-SONNET',

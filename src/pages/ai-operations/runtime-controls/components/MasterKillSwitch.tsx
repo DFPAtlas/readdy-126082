@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { useRuntimeControls, changeRuntimeControl, findMasterSwitch } from '@/pages/ai-operations/runtime-controls/runtimeControlsStore';
 import { evaluateRuntimeExecution, buildDefaultGateContext, type RuntimeExecutionState } from '@/lib/ai-operations/runtimeControls';
 

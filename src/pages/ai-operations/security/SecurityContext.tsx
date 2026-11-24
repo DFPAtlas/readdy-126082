@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { SecurityContext } from './SecurityContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AiSecurityPolicy, PolicyEvaluation } from '@/pages/ai-operations/types';
 import { demoPolicies } from '@/mocks/ai-operations-security';
 import { demoSites } from '@/mocks/ai-operations-sites';
@@ -36,7 +37,7 @@ export interface SecurityAgentOption {
   name: string;
 }
 
-interface SecurityContextValue {
+export interface SecurityContextValue {
   policies: AiSecurityPolicy[];
   mode: SecurityDataSourceMode;
   loading: boolean;
@@ -57,8 +58,6 @@ interface SecurityContextValue {
   /** Persist a simulated evaluation as governance evidence (never executes). */
   saveEvaluation: (input: PolicyEvaluateInput, result: PolicyEvaluation, actor: string) => Promise<SaveResult>;
 }
-
-const SecurityContext = createContext<SecurityContextValue | null>(null);
 
 // Demo lookup keyed by stable id (= policy_key) so live rows can merge their
 // "Demo Supporting Metadata" (target arrays, structured conditions, decision
@@ -333,10 +332,4 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
   );
 
   return <SecurityContext.Provider value={value}>{children}</SecurityContext.Provider>;
-}
-
-export function useSecurity() {
-  const ctx = useContext(SecurityContext);
-  if (!ctx) throw new Error('useSecurity must be used within a SecurityProvider');
-  return ctx;
 }

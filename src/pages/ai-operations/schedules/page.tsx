@@ -8,7 +8,7 @@ import {
   RISK_LEVEL,
   ENVIRONMENT_LABELS,
 } from '@/pages/ai-operations/constants';
-import { useSchedules } from '@/pages/ai-operations/schedules/SchedulesContext';
+import { useSchedules } from '@/pages/ai-operations/schedules/SchedulesContext.context';
 import { allQuietHours } from '@/pages/ai-operations/schedules/selectors';
 import { demoSites } from '@/mocks/ai-operations-sites';
 import { demoAgents } from '@/mocks/ai-operations-agents';

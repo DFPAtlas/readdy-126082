@@ -1,3 +1,4 @@
+import type { AiAlert } from '@/pages/ai-operations/types';
 // ============================================================================
 // ⚠️ NOT PRODUCTION
 // Alerts & Incident Operations — demo/placeholder records only.
@@ -6,7 +7,7 @@
 // Knowledge / Orchestration registries where practical.
 // ============================================================================
 
-export const demoAlerts = [
+export const demoAlerts: AiAlert[] = [
   {
     id: 'ALR-5001',
     incidentId: 'INC-8101',

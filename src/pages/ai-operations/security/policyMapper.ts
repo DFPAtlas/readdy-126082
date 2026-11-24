@@ -130,7 +130,7 @@ export function mapPolicyRowToRecord(
     modelIds: d.modelIds ?? [],
     knowledgeIds: d.knowledgeIds ?? [],
     environment: (row.environment as Environment) ?? d.environment,
-    riskClass: (row.risk_class as RiskClass) ?? d.riskClass,
+    riskClass: (row.risk_level as RiskClass) ?? d.riskClass,
     actionType: row.action_pattern ?? row.subject_reference ?? d.actionType,
     approvalRequired: row.approval_required,
     minApprovers: readMinApprovers(row.requirements) || d.minApprovers,

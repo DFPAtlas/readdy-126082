@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { SearchContext } from './SearchContext.context';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 // ============================================================================
 // AI Operations — Global Search — in-memory session state.
@@ -8,7 +9,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 // local session state only and resets on reload.
 // ============================================================================
 
-interface SearchContextValue {
+export interface SearchContextValue {
   isOpen: boolean;
   openSearch: () => void;
   closeSearch: () => void;
@@ -19,8 +20,6 @@ interface SearchContextValue {
   toggleFavourite: (referenceId: string) => void;
   isFavourite: (referenceId: string) => boolean;
 }
-
-const SearchContext = createContext<SearchContextValue | null>(null);
 
 export function SearchProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -69,10 +68,4 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
   );
 
   return <SearchContext.Provider value={value}>{children}</SearchContext.Provider>;
-}
-
-export function useSearch(): SearchContextValue {
-  const ctx = useContext(SearchContext);
-  if (!ctx) throw new Error('useSearch must be used within a SearchProvider');
-  return ctx;
 }

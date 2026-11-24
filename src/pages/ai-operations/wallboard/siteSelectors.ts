@@ -263,7 +263,7 @@ export function getSitesServicesSummary(): SitesServicesSummary {
     tone = 'amber';
   } else {
     label = 'ALL SITES ONLINE';
-    detail = `${counts.online} of ${counts.total} sites healthy`;
+    detail = `${counts.online} of ${tiles.length} sites healthy`;
     tone = 'emerald';
   }
 

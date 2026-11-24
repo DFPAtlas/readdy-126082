@@ -81,7 +81,7 @@ function sanitiseError(err: unknown): string {
 // --- Generic query runner -----------------------------------------------------
 
 async function runQuery<T>(
-  builder: Promise<{ data: T | null; error: unknown }>,
+  builder: PromiseLike<{ data: T | null; error: unknown }>,
 ): Promise<AiOpsResult<T>> {
   try {
     const { data, error } = await builder;

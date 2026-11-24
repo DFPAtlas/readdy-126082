@@ -1,4 +1,5 @@
-import { useEffect, useState, createContext, useContext, type ReactNode } from 'react';
+import { AuthContext } from './AuthGuard.context';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import type { Role } from '@/lib/permissions';
@@ -12,7 +13,7 @@ interface AuthState {
   mfaStatus: MfaStatus | null;
 }
 
-interface AuthContextValue extends AuthState {
+export interface AuthContextValue extends AuthState {
   refreshMfa: () => Promise<void>;
 }
 
@@ -42,15 +43,6 @@ async function checkMfaStatus(): Promise<MfaStatus> {
     return 'error';
   }
 }
-
-const AuthContext = createContext<AuthContextValue>({
-  loading: true,
-  user: null,
-  role: null,
-  mfaStatus: null,
-  refreshMfa: async () => {},
-});
-export const useAuth = () => useContext(AuthContext);
 
 export default function AuthGuard({ children }: { children: ReactNode }) {
   const navigate = useNavigate();

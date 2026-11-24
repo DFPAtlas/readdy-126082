@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useCosts } from '@/pages/ai-operations/costs/CostsContext';
+import { useCosts } from '@/pages/ai-operations/costs/CostsContext.context';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import { parseCurrency, formatCurrency } from '@/pages/ai-operations/costs/costMapper';
 import CostKpis from '@/pages/ai-operations/costs/components/CostKpis';

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import type { SupportSite, SupportSiteStats } from '@/types/support-tickets';
 import { useIntegrationLookups, useSiteDetail, useSupportSites, useSupportTeams, teamsForSite } from './hooks';
 import { INTEGRATION_MODES, formatRelative } from './constants';

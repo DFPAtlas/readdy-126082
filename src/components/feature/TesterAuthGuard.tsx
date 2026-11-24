@@ -1,27 +1,18 @@
-import { useEffect, useState, createContext, useContext, type ReactNode } from 'react';
+import { TesterContext } from './TesterAuthGuard.context';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import type { UatTester } from '@/pages/admin/website-uat/types';
 import { classifyTesterStatus, type TesterAccessState } from '@/pages/account-uat/types';
 
-interface TesterContextValue {
+export interface TesterContextValue {
   tester: UatTester | null;
   accessState: TesterAccessState;
   loading: boolean;
   error: string;
   reload: () => void;
 }
-
-const TesterContext = createContext<TesterContextValue>({
-  tester: null,
-  accessState: 'loading',
-  loading: true,
-  error: '',
-  reload: () => {},
-});
-
-export const useTester = () => useContext(TesterContext);
 
 function StatusScreen({
   icon,

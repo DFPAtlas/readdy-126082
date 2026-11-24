@@ -15,7 +15,7 @@ import {
   ENVIRONMENT_LABELS,
   RISK_LEVEL,
 } from '@/pages/ai-operations/constants';
-import { useAgents } from '@/pages/ai-operations/agents/AgentsContext';
+import { useAgents } from '@/pages/ai-operations/agents/AgentsContext.context';
 import AgentsTable from '@/pages/ai-operations/agents/components/AgentsTable';
 import AgentFormModal from '@/pages/ai-operations/agents/components/AgentFormModal';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';

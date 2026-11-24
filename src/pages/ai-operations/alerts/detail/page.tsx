@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { AlertStatus } from '@/pages/ai-operations/types';
-import { useAlerts } from '@/pages/ai-operations/alerts/AlertsContext';
+import { useAlerts } from '@/pages/ai-operations/alerts/AlertsContext.context';
 import AlertHeader from '@/pages/ai-operations/alerts/detail/components/AlertHeader';
 import IncidentSummary from '@/pages/ai-operations/alerts/detail/components/IncidentSummary';
 import RelatedRecords from '@/pages/ai-operations/alerts/detail/components/RelatedRecords';

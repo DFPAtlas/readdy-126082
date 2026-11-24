@@ -8,7 +8,7 @@ import {
   ENVIRONMENT_OPTIONS,
   ENVIRONMENT_LABELS,
 } from '@/pages/ai-operations/constants';
-import { useAudit } from '@/pages/ai-operations/audit/AuditContext';
+import { useAudit } from '@/pages/ai-operations/audit/AuditContext.context';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import AuditKpis from '@/pages/ai-operations/audit/components/AuditKpis';
 import AuditLog from '@/pages/ai-operations/audit/components/AuditLog';

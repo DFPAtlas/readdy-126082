@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useTester } from '@/components/feature/TesterAuthGuard';
+import { useTester } from '@/components/feature/TesterAuthGuard.context';
 import type { UatJob, UatProject, UatAssignment, UatJobApplication } from '@/pages/admin/website-uat/types';
 import {
   formatMinorCurrency,

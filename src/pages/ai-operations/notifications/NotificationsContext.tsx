@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { NotificationsContext } from './NotificationsContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   NotificationRule,
   NotificationRuleStatus,
@@ -52,7 +53,7 @@ export interface NotificationRuleFormInput {
   notes?: string | null;
 }
 
-interface NotificationsContextValue {
+export interface NotificationsContextValue {
   rules: NotificationRule[];
   events: NotificationEvent[];
   mode: NotificationsDataSourceMode;
@@ -72,8 +73,6 @@ interface NotificationsContextValue {
   /** Acknowledge a live event (acknowledgement metadata only + audit). */
   acknowledgeEvent: (eventKey: string) => Promise<SaveResult>;
 }
-
-const NotificationsContext = createContext<NotificationsContextValue | null>(null);
 
 const demoRuleByKey = new Map<string, NotificationRule>(
   (demoNotificationRules as NotificationRule[]).map((r) => [r.id, r]),
@@ -430,10 +429,4 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   );
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
-}
-
-export function useNotifications(): NotificationsContextValue {
-  const ctx = useContext(NotificationsContext);
-  if (!ctx) throw new Error('useNotifications must be used within a NotificationsProvider');
-  return ctx;
 }

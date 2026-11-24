@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import ConfirmDialog from '@/components/base/ConfirmDialog';
 
 interface TotpFactor {
   id: string;
   factor_type: string;
-  friendly_name: string | null;
+  friendly_name?: string | null;
   status: string;
   created_at: string;
 }

@@ -57,7 +57,7 @@ export default function RoutingPanel({ ticket, canAssign, currentUserId, onChang
   const activeTeams = teams.filter((t) => t.status === 'active');
   const isAssignedToMe = ticket.assigned_to != null && ticket.assigned_to === currentUserId;
 
-  const run = async (fn: () => Promise<{ error: unknown }>, successMsg: string) => {
+  const run = async (fn: () => PromiseLike<{ error: unknown }>, successMsg: string) => {
     setBusy(true);
     setError('');
     const { error: e } = await fn();

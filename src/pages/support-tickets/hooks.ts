@@ -85,7 +85,7 @@ interface TicketRow extends SupportTicket {
 }
 
 const TICKET_SELECT =
-  'id,ticket_number,site_id,project_id,external_reference,customer_name,customer_email,subject,category,priority,status,source,assigned_to,assigned_agent,is_unread,due_at,last_activity_at,created_at,resolved_at,closed_at,team_id,routing_status,routing_confidence,internal_support_sites(site_name,site_slug,domain)';
+  'id,ticket_number,site_id,project_id,external_reference,customer_user_id,customer_name,customer_email,customer_phone,subject,description,category,priority,status,source,assigned_to,assigned_agent,is_unread,first_response_at,resolved_at,closed_at,last_customer_reply_at,last_staff_reply_at,last_activity_at,due_at,metadata,created_at,updated_at,team_id,routing_status,routing_reason,routing_confidence,routed_at,matched_rule_id,escalation_level,internal_support_sites(site_name,site_slug,domain)';
 
 function isValidDate(iso: string): boolean {
   return iso !== '' && !Number.isNaN(new Date(iso).getTime());
@@ -183,10 +183,10 @@ function buildTicketQuery(
       break;
   }
 
-  return query.range((page - 1) * pageSize, page * pageSize - 1);
+  return query.range((page - 1) * pageSize, page * pageSize - 1).returns<TicketRow[]>();
 }
 
-function mapTicketRows(rows: TicketRow[]): TicketWithMeta[] {
+function mapTicketRows(rows: TicketRow[]): Omit<TicketWithMeta, 'triage_status' | 'triage_confidence'>[] {
   return rows.map((row) => ({
     ...row,
     site_name: row.internal_support_sites?.site_name ?? 'Unknown site',
@@ -194,7 +194,7 @@ function mapTicketRows(rows: TicketRow[]): TicketWithMeta[] {
     domain: row.internal_support_sites?.domain ?? null,
     message_count: 0,
     internal_support_sites: undefined,
-  })) as TicketWithMeta[];
+  }));
 }
 
 export function assigneeName(ticket: Pick<SupportTicket, 'assigned_to' | 'assigned_agent'>, staff: StaffOption[]): string {
@@ -239,7 +239,7 @@ export function useSupportInbox(
       if (id !== requestIdRef.current) return;
       if (dbError) throw dbError;
 
-      const rows = (data ?? []) as TicketRow[];
+      const rows = data ?? [];
       let messageCounts: Record<string, number> = {};
       if (rows.length > 0) {
         const ids = rows.map((r) => r.id);

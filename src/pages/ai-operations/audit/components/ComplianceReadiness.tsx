@@ -1,4 +1,4 @@
-import { useAudit } from '@/pages/ai-operations/audit/AuditContext';
+import { useAudit } from '@/pages/ai-operations/audit/AuditContext.context';
 import type { AuditIntegrityState } from '@/pages/ai-operations/types';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 

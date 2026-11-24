@@ -1,4 +1,4 @@
-import { useAudit } from '@/pages/ai-operations/audit/AuditContext';
+import { useAudit } from '@/pages/ai-operations/audit/AuditContext.context';
 import { RISK_CLASS } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 import { Link } from 'react-router-dom';

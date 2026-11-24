@@ -197,7 +197,7 @@ export function getUpcomingRuns(now: Date = new Date()): UpcomingRun[] {
 // --- Cross-system schedule relationships -----------------------------------------
 
 export interface ScheduleBackupRelationship {
-  sourceState: 'live' | 'unavailable';
+  sourceState: 'live' | 'partial' | 'unavailable';
   total: number;
   current: number;
   failed: number;

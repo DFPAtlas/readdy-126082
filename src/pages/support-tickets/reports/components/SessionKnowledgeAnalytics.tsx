@@ -1,13 +1,7 @@
 import type { SupportSessionAnalytics, SupportKnowledgeAnalytics } from '@/types/support-tickets';
 import { useAnalyticsJsonb } from '../analytics-hooks';
-import {
-  SectionCard,
-  StatCard,
-  StatGrid,
-  EmptyState,
-  ErrorState,
-  formatDuration,
-} from './AnalyticsShared';
+import { SectionCard, StatCard, StatGrid, EmptyState, ErrorState } from './AnalyticsShared';
+import { formatDuration } from './analyticsFormat';
 
 interface Props {
   start: string;

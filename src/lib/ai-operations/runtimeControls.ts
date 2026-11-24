@@ -88,7 +88,7 @@ function sanitiseError(err: unknown): string {
 }
 
 async function runQuery<T>(
-  builder: Promise<{ data: T | null; error: unknown }>,
+  builder: PromiseLike<{ data: T | null; error: unknown }>,
 ): Promise<AiOpsResult<T>> {
   try {
     const { data, error } = await builder;
@@ -125,13 +125,13 @@ export function applyRuntimeControlChange(
   next: { enabled: boolean; execution_allowed: boolean },
   reason: string,
 ): Promise<AiOpsResult<{ ok: boolean; control_key: string; correlation_id: string }>> {
-  return runQuery(
+  return runQuery<{ ok: boolean; control_key: string; correlation_id: string }>(
     supabase.rpc('apply_runtime_control_change', {
       p_control_key: controlKey,
       p_new_enabled: next.enabled,
       p_new_execution_allowed: next.execution_allowed,
       p_reason: reason,
-    }) as Promise<{ data: { ok: boolean; control_key: string; correlation_id: string } | null; error: unknown }>,
+    }),
   );
 }
 

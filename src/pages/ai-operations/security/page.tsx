@@ -11,8 +11,8 @@ import {
   ENVIRONMENT_LABELS,
   RISK_CLASS,
 } from '@/pages/ai-operations/constants';
-import { useSecurity } from '@/pages/ai-operations/security/SecurityContext';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useSecurity } from '@/pages/ai-operations/security/SecurityContext.context';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { ROLE_LABELS } from '@/lib/permissions';
 import DataSourceBadge from '@/pages/ai-operations/sites/components/DataSourceBadge';
 import SecurityKpis from '@/pages/ai-operations/security/components/SecurityKpis';

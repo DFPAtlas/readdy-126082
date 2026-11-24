@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import usePermissions from '@/hooks/usePermissions';
 import Modal from '@/components/base/Modal';
 import ConfirmDialog from '@/components/base/ConfirmDialog';

@@ -1,3 +1,4 @@
+import type { KnowledgeSource } from '@/pages/ai-operations/types';
 // ============================================================================
 // AI OPERATIONS — KNOWLEDGE & MEMORY REGISTRY — DEMO / PLACEHOLDER DATA (B).
 //
@@ -15,7 +16,7 @@
 
 // --- Shared demo blocks (mirrored from part A to keep files self-contained) -----
 
-const PERMISSIONS_STANDARD = [
+const PERMISSIONS_STANDARD: KnowledgeSource['permissions'] = [
   { permission: 'Read', state: 'allowed', note: 'Read permitted for assigned agents.' },
   { permission: 'Retrieve', state: 'allowed', note: 'Retrieval within permitted scope.' },
   { permission: 'Summarise', state: 'allowed', note: 'Summarisation allowed where enabled.' },
@@ -26,7 +27,7 @@ const PERMISSIONS_STANDARD = [
   { permission: 'Delete', state: 'denied', note: 'Destructive — denied by default.' },
 ];
 
-const QUALITY_OK = [
+const QUALITY_OK: KnowledgeSource['quality'] = [
   { name: 'Trusted source', state: 'pass', note: 'Marked as trusted.' },
   { name: 'Current version', state: 'pass', note: 'Version is current.' },
   { name: 'Review current', state: 'pass', note: 'Review within window.' },
@@ -37,7 +38,7 @@ const QUALITY_OK = [
   { name: 'Conflicting source detected', state: 'unknown', note: 'No conflict scan run.' },
 ];
 
-const QUALITY_STALE = [
+const QUALITY_STALE: KnowledgeSource['quality'] = [
   { name: 'Trusted source', state: 'pass', note: 'Marked as trusted.' },
   { name: 'Current version', state: 'warning', note: 'Older version in use.' },
   { name: 'Review current', state: 'fail', note: 'Review overdue.' },
@@ -48,7 +49,7 @@ const QUALITY_STALE = [
   { name: 'Conflicting source detected', state: 'unknown', note: 'No conflict scan run.' },
 ];
 
-const INDEX_READY = {
+const INDEX_READY: KnowledgeSource['index'] = {
   vectorReady: true,
   indexed: true,
   indexProvider: 'Knowledge Index',
@@ -58,7 +59,7 @@ const INDEX_READY = {
   chunkCount: 48,
 };
 
-const INDEX_PENDING = {
+const INDEX_PENDING: KnowledgeSource['index'] = {
   vectorReady: false,
   indexed: false,
   indexProvider: '—',
@@ -68,7 +69,7 @@ const INDEX_PENDING = {
   chunkCount: 0,
 };
 
-const GOV_BASE = {
+const GOV_BASE: Pick<KnowledgeSource['governance'], 'trustedSource' | 'reviewRequired' | 'reviewFrequency' | 'versionControl' | 'auditRequired'> = {
   trustedSource: true,
   reviewRequired: true,
   reviewFrequency: 'Quarterly',
@@ -76,65 +77,65 @@ const GOV_BASE = {
   auditRequired: true,
 };
 
-const REVIEW_HISTORY = [
+const REVIEW_HISTORY: KnowledgeSource['reviewHistory'] = [
   { date: '2026-08-20', actor: 'DFP Core Team', action: 'Reviewed', version: 'v3', summary: 'Periodic review completed.', statusChange: 'Active → Active' },
   { date: '2026-05-15', actor: 'DFP Core Team', action: 'Updated', version: 'v2', summary: 'Content refreshed.', statusChange: 'Draft → Active' },
   { date: '2026-02-01', actor: 'DFP Core Team', action: 'Created', version: 'v1', summary: 'Initial publication.', statusChange: 'Draft → Active' },
 ];
 
-const AI_RULES_INTERNAL = [
+const AI_RULES_INTERNAL: KnowledgeSource['aiUsageRules'] = [
   'Internal only',
   'Human verification required',
   'Citations / reference required',
   'Must not override policy',
 ];
 
-const ACCESS_GH = [
+const ACCESS_GH: KnowledgeSource['agentAccess'] = [
   { agentId: 'gh-checkcall', agentName: 'Check-Call Agent', site: 'GuardianHub', accessState: 'allowed', purpose: 'Check-call procedure', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'gh-welfare', agentName: 'Welfare Agent', site: 'GuardianHub', accessState: 'allowed', purpose: 'Welfare escalation', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'gh-rota', agentName: 'Rota Agent', site: 'GuardianHub', accessState: 'allowed', purpose: 'Rota rules', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'gh-incident', agentName: 'Incident Agent', site: 'GuardianHub', accessState: 'allowed', purpose: 'Incident management', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: true },
 ];
 
-const ACCESS_LH = [
+const ACCESS_LH: KnowledgeSource['agentAccess'] = [
   { agentId: 'lh-tenancy', agentName: 'Tenancy Agent', site: 'LetHub', accessState: 'allowed', purpose: 'Tenancy workflow', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'lh-maint', agentName: 'Maintenance Agent', site: 'LetHub', accessState: 'allowed', purpose: 'Maintenance process', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'lh-comp', agentName: 'Compliance Agent', site: 'LetHub', accessState: 'allowed', purpose: 'Compliance reference', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'lh-tenant', agentName: 'Tenant Agent', site: 'LetHub', accessState: 'allowed', purpose: 'Tenant support', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
 ];
 
-const ACCESS_WD = [
+const ACCESS_WD: KnowledgeSource['agentAccess'] = [
   { agentId: 'wd-planner', agentName: 'Wedding Planner Agent', site: 'Vowora', accessState: 'allowed', purpose: 'Planning workflow', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'wd-rsvp', agentName: 'RSVP Agent', site: 'Vowora', accessState: 'allowed', purpose: 'RSVP rules', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'wd-supplier', agentName: 'Supplier Agent', site: 'Vowora', accessState: 'allowed', purpose: 'Supplier guidance', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
 ];
 
-const ACCESS_TF = [
+const ACCESS_TF: KnowledgeSource['agentAccess'] = [
   { agentId: 'tf-master', agentName: 'Forge Master Agent', site: 'The Forge', accessState: 'allowed', purpose: 'Build orchestration', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'tf-code', agentName: 'Code Agent', site: 'The Forge', accessState: 'allowed', purpose: 'Code generation', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'tf-test', agentName: 'Testing Agent', site: 'The Forge', accessState: 'allowed', purpose: 'UAT reference', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: false },
   { agentId: 'tf-publishing', agentName: 'Publishing Agent', site: 'The Forge', accessState: 'allowed', purpose: 'Publishing procedure', retrievalAllowed: true, summarisationAllowed: true, modificationAllowed: false, approvalRequired: true },
 ];
 
-const USAGE_GH = [
+const USAGE_GH: KnowledgeSource['usageEvents'] = [
   { time: 'Today · 10:31', agentId: 'gh-checkcall', agentName: 'Check-Call Agent', site: 'GuardianHub', runId: 'RUN-5D88F', purpose: 'Check-call procedure', result: 'success', reference: 'v2 §2' },
   { time: 'Today · 09:48', agentId: 'gh-welfare', agentName: 'Welfare Agent', site: 'GuardianHub', runId: 'RUN-7F11B', purpose: 'Welfare escalation', result: 'success', reference: 'v2 §3' },
   { time: 'Yesterday · 20:10', agentId: 'gh-rota', agentName: 'Rota Agent', site: 'GuardianHub', runId: 'RUN-3B66D', purpose: 'Rota rule check', result: 'success', reference: 'v2 §1' },
 ];
 
-const USAGE_LH = [
+const USAGE_LH: KnowledgeSource['usageEvents'] = [
   { time: 'Today · 10:22', agentId: 'lh-tenancy', agentName: 'Tenancy Agent', site: 'LetHub', runId: 'RUN-5A88C', purpose: 'Tenancy workflow', result: 'success', reference: 'v2 §1' },
   { time: 'Today · 09:11', agentId: 'lh-maint', agentName: 'Maintenance Agent', site: 'LetHub', runId: 'RUN-6B99D', purpose: 'Maintenance process', result: 'success', reference: 'v2 §2' },
   { time: 'Yesterday · 15:40', agentId: 'lh-comp', agentName: 'Compliance Agent', site: 'LetHub', runId: 'RUN-7C11E', purpose: 'Compliance reference', result: 'success', reference: 'v2 §4' },
 ];
 
-const USAGE_WD = [
+const USAGE_WD: KnowledgeSource['usageEvents'] = [
   { time: 'Today · 10:18', agentId: 'wd-planner', agentName: 'Wedding Planner Agent', site: 'Vowora', runId: 'RUN-3B66D', purpose: 'Planning workflow', result: 'success', reference: 'v2 §1' },
   { time: 'Today · 09:33', agentId: 'wd-rsvp', agentName: 'RSVP Agent', site: 'Vowora', runId: 'RUN-5D88F', purpose: 'RSVP rule check', result: 'success', reference: 'v2 §2' },
   { time: 'Yesterday · 17:25', agentId: 'wd-supplier', agentName: 'Supplier Agent', site: 'Vowora', runId: 'RUN-7F11B', purpose: 'Supplier guidance', result: 'success', reference: 'v2 §3' },
 ];
 
-const USAGE_TF = [
+const USAGE_TF: KnowledgeSource['usageEvents'] = [
   { time: 'Today · 10:35', agentId: 'tf-code', agentName: 'Code Agent', site: 'The Forge', runId: 'RUN-4F77B', purpose: 'Code generation rules', result: 'success', reference: 'v3 §2' },
   { time: 'Today · 09:22', agentId: 'tf-test', agentName: 'Testing Agent', site: 'The Forge', runId: 'RUN-4F77B', purpose: 'UAT reference', result: 'success', reference: 'v3 §1' },
   { time: 'Yesterday · 15:30', agentId: 'tf-publishing', agentName: 'Publishing Agent', site: 'The Forge', runId: 'RUN-9B33D', purpose: 'Publishing procedure', result: 'success', reference: 'v3 §3' },
@@ -144,7 +145,7 @@ const USAGE_TF = [
 // KNOWLEDGE SOURCE RECORDS — GUARDIANHUB + LETHUB + WEDORA + THE FORGE + MEMORY
 // ============================================================================
 
-export const demoKnowledgeSourcesB = [
+export const demoKnowledgeSourcesB: KnowledgeSource[] = [
   // ============================================================ GUARDIANHUB
   {
     id: 'KNOW-GH-CHECKCALL',

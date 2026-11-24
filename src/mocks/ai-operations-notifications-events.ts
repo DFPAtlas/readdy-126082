@@ -300,7 +300,7 @@ export const demoNotificationEvents: NotificationEvent[] = [
     priority: 'high',
     channel: 'email',
     recipientTeam: 'Technical Team',
-    status: 'resolved',
+    status: 'acknowledged',
     relatedRecordType: 'run',
     relatedRecordId: 'RUN-5C2F4',
     acknowledgement: 'acknowledged',

@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom';
-import { useOrchestrator } from '@/pages/ai-operations/orchestrator/OrchestratorContext';
+import { useOrchestrator } from '@/pages/ai-operations/orchestrator/OrchestratorContext.context';
 import { getAlertByOrchestration } from '@/pages/ai-operations/alerts/selectors';
 import OpenIncident from '@/pages/ai-operations/alerts/components/OpenIncident';
 import OrchestratorHeader from '@/pages/ai-operations/orchestrator/detail/components/OrchestratorHeader';

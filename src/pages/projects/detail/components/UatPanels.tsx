@@ -1,3 +1,4 @@
+import { testerName } from './uatPanelUtils';
 import { Link } from 'react-router-dom';
 import type { UatTestCaseResult, UatTester, UatEvidence, UatFeedback, UatSession } from '@/pages/admin/website-uat/types';
 import {
@@ -9,11 +10,6 @@ import {
 import type { UatData, UatSummary } from '../uatTypes';
 import { dedupeLatestResults } from '../uatTypes';
 import { formatDate } from '../utils';
-
-export function testerName(testers: UatTester[], id: string | null | undefined): string {
-  if (!id) return 'Unknown tester';
-  return testers.find((t) => t.id === id)?.full_name ?? 'Unknown tester';
-}
 
 function testCaseTitle(data: UatData, id: string | null | undefined): string {
   if (!id) return 'Untitled test case';

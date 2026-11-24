@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import Modal from '@/components/base/Modal';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { runDiagnostic } from '@/pages/support-customers/hooks';
 import { SCOPE_KEYS, scopeLabels, displayValue } from '@/pages/support-customers/constants';
 import type { ScopeKey } from '@/types/support-customers';

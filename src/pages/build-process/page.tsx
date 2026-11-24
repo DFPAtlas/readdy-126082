@@ -64,10 +64,10 @@ export default function BuildProcess() {
     loadData();
   }, [loadData]);
 
-  const getProjectName = (projectId: number | null) => {
+  const getProjectName = useCallback((projectId: number | null) => {
     if (!projectId) return '—';
     return projects.find((p) => p.id === projectId)?.project_name ?? '—';
-  };
+  }, [projects]);
 
   const computeStats = (): SummaryStats => {
     const active = runs.filter((r) => r.run_status === 'active');

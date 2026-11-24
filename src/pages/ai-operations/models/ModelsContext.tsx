@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ModelsContext } from './ModelsContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AiModel, AiProvider } from '@/pages/ai-operations/types';
 import { demoModels, demoProviders } from '@/mocks/ai-operations-models';
 import {
@@ -36,7 +37,7 @@ type SaveResult = { error: string | null };
 // Assignment type input for persisting an agent → model assignment.
 export type ModelAssignmentType = 'primary' | 'fallback' | 'specialist' | 'embedding' | 'vision' | 'coding';
 
-interface ModelsContextValue {
+export interface ModelsContextValue {
   models: AiModel[];
   providers: AiProvider[];
   mode: ModelsDataSourceMode;
@@ -57,8 +58,6 @@ interface ModelsContextValue {
   /** Revoke an assignment by setting is_active=false (never a physical delete). */
   revokeAssignment: (agentKey: string, modelKey: string, type: ModelAssignmentType, actor: string) => Promise<SaveResult>;
 }
-
-const ModelsContext = createContext<ModelsContextValue | null>(null);
 
 // Demo lookups keyed by stable id (= model_key / provider_key) so live rows can
 // merge their nested "Demo Supporting Metadata" (usage, health, security, local
@@ -497,10 +496,4 @@ export function ModelsProvider({ children }: { children: ReactNode }) {
   );
 
   return <ModelsContext.Provider value={value}>{children}</ModelsContext.Provider>;
-}
-
-export function useModels(): ModelsContextValue {
-  const ctx = useContext(ModelsContext);
-  if (!ctx) throw new Error('useModels must be used within a ModelsProvider');
-  return ctx;
 }

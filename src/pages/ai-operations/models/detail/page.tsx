@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { AiModel } from '@/pages/ai-operations/types';
-import { useModels } from '@/pages/ai-operations/models/ModelsContext';
-import { useAuth } from '@/components/feature/AuthGuard';
+import { useModels } from '@/pages/ai-operations/models/ModelsContext.context';
+import { useAuth } from '@/components/feature/AuthGuard.context';
 import { ROLE_LABELS } from '@/lib/permissions';
 import ModelHeader from '@/pages/ai-operations/models/detail/components/ModelHeader';
 import Overview from '@/pages/ai-operations/models/detail/components/Overview';

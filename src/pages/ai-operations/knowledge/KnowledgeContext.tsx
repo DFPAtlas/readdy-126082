@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { KnowledgeContext } from './KnowledgeContext.context';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { KnowledgeSource } from '@/pages/ai-operations/types';
 import { demoKnowledgeSourcesA } from '@/mocks/ai-operations-knowledge';
 import { demoKnowledgeSourcesB } from '@/mocks/ai-operations-knowledge-2';
@@ -38,7 +39,7 @@ type SaveResult = { error: string | null };
 // Access-level type for persisting an agent → knowledge permission.
 export type KnowledgeAccessLevel = 'read' | 'create' | 'update' | 'delete' | 'read_write' | 'restricted';
 
-interface KnowledgeContextValue {
+export interface KnowledgeContextValue {
   sources: KnowledgeSource[];
   /** Live ai_knowledge_permissions rows (agent → source access grants). */
   permissions: AiKnowledgePermissionRow[];
@@ -64,8 +65,6 @@ interface KnowledgeContextValue {
   /** Revoke agent → source access via is_active=false (never a physical delete). */
   revokePermission: (sourceKey: string, agentKey: string) => Promise<SaveResult>;
 }
-
-const KnowledgeContext = createContext<KnowledgeContextValue | null>(null);
 
 const DEMO_SOURCES: KnowledgeSource[] = [...demoKnowledgeSourcesA, ...demoKnowledgeSourcesB];
 
@@ -416,10 +415,4 @@ export function KnowledgeProvider({ children }: { children: ReactNode }) {
   );
 
   return <KnowledgeContext.Provider value={value}>{children}</KnowledgeContext.Provider>;
-}
-
-export function useKnowledge(): KnowledgeContextValue {
-  const ctx = useContext(KnowledgeContext);
-  if (!ctx) throw new Error('useKnowledge must be used within a KnowledgeProvider');
-  return ctx;
 }

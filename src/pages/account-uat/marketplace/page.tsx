@@ -1,4 +1,4 @@
-import { useTester } from '@/components/feature/TesterAuthGuard';
+import { useTester } from '@/components/feature/TesterAuthGuard.context';
 import { useTesterUat } from '../hooks';
 import Marketplace from '../components/Marketplace';
 

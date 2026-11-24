@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useTester } from '@/components/feature/TesterAuthGuard';
+import { useTester } from '@/components/feature/TesterAuthGuard.context';
 import { useTesterUat } from './hooks';
 import SummaryCards from './components/SummaryCards';
 import ProfileSummary from './components/ProfileSummary';

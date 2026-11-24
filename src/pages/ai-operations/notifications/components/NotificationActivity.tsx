@@ -9,7 +9,7 @@ import {
 } from '@/pages/ai-operations/constants';
 import StatusPill from '@/pages/ai-operations/components/StatusPill';
 import Modal from '@/components/base/Modal';
-import { useNotifications } from '@/pages/ai-operations/notifications/NotificationsContext';
+import { useNotifications } from '@/pages/ai-operations/notifications/NotificationsContext.context';
 
 function relatedLink(event: NotificationEvent): { to: string; label: string } | null {
   if (!event.relatedRecordId) return null;
